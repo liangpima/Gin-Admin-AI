@@ -259,7 +259,17 @@ func OperationLog() gin.HandlerFunc {
 		operatorID := common.GetCurrentUserID(c)
 		operatorName := common.GetCurrentUsername(c)
 
-		title := resolveTitle(path)
+		// 标题用**路由模板**（c.FullPath()，形如 /api/v1/member/:id）推导，
+		// 而不是真实路径：真实路径里带的是实际 ID（/member/12），
+		// 拼进标题会得到 member-12 这类值，同一接口的每次操作都不同，
+		// 既看不懂也让「模块标题」筛选失效。
+		// RequestURL 仍记录真实路径 —— 审计需要精确到具体操作了哪个资源。
+		titlePath := c.FullPath()
+		if titlePath == "" {
+			// 未匹配到路由（如 404）时回退，至少留下点线索
+			titlePath = path
+		}
+		title := resolveTitle(titlePath)
 
 		entry := &OperationLogEntry{
 			TenantID:      common.GetTenantID(c),
@@ -294,18 +304,92 @@ func OperationLog() gin.HandlerFunc {
 	}
 }
 
-func resolveTitle(path string) string {
-	parts := strings.Split(path, "/")
-	if len(parts) >= 4 {
-		module := parts[3]
-		resource := ""
-		if len(parts) >= 5 {
-			resource = parts[4]
-		}
-		if resource != "" && resource != "list" {
-			return module + "-" + resource
-		}
-		return module
+// resourceTitles 接口模块标识 → 中文名。
+//
+// 为什么需要这张表：resolveTitle 是从 URL 机械推导的，结果是 system-user、
+// member-tag 这类**代码标识**，而日志页面「模块标题」列直接展示它 ——
+// 非技术用户看不懂，也没法和侧边栏菜单名对上。
+//
+// 为什么在**写入时**翻译而不是查询时映射：title 同时是日志页筛选框的
+// LIKE 查询目标。若库里存英文、界面显示中文，用户按中文搜不到任何记录。
+//
+// 命名取侧边栏菜单名（sys_menu.title），不额外加「系统管理-」这类前缀：
+// 该列宽仅 100px，且资源名本身已足够区分。
+// 未登记的模块返回原标识 —— 宁可显示得生硬，也不要变成空白。
+var resourceTitles = map[string]string{
+	// 权限管理
+	"system-user": "用户管理",
+	"system-role": "角色管理",
+	"system-menu": "菜单管理",
+	"system-dept": "部门管理",
+	"system-post": "岗位管理",
+	"system-file": "附件管理",
+	// 系统设置
+	"system-config":    "参数管理",
+	"system-dict":      "数据字典",
+	"system-log":       "操作日志",
+	"system-agreement": "协议管理",
+	// 支付管理
+	"system-pay": "支付订单",
+	// 会员管理
+	"member":        "会员列表",
+	"member-level":  "会员等级",
+	"member-tag":    "会员标签",
+	"member-tags":   "会员标签",
+	"member-points": "积分明细",
+	"member-status": "会员状态",
+	"member-visit":  "会员访问",
+	// 认证与首页
+	"auth-logout":     "退出登录",
+	"auth-userInfo":   "用户信息",
+	"dashboard-stats": "工作台统计",
+}
+
+// resolveTitle 从**路由模板**推导操作日志的模块标题。
+//
+// 模板形如 /api/v1/system/user/list：第 4 段是模块、第 5 段是资源。
+// 资源段的两种情况要忽略：
+//   - `list` 只是动作，模块名已能表达（system-user → 用户管理）
+//   - 路径参数（模板里写作 ":id"），早期实现会把它拼进标题，
+//     于是 /api/v1/member/:id 记成了「member-:id」
+func resolveTitle(routePath string) string {
+	parts := strings.Split(routePath, "/")
+	if len(parts) < 4 {
+		return "未知模块"
 	}
-	return "unknown"
+
+	module := parts[3]
+	key := module
+	if len(parts) >= 5 {
+		resource := parts[4]
+		if resource != "" && resource != "list" && !isPathParam(resource) {
+			key = module + "-" + resource
+		}
+	}
+
+	if name, ok := resourceTitles[key]; ok {
+		return name
+	}
+	return key
+}
+
+// isPathParam 判断路径段是参数而非资源名。
+//
+// 模板里的参数写作 ":id"；但未匹配到路由时标题会回退用真实路径，
+// 参数位置上就是实际取值（如 "12"）—— 那会生成 member-12、member-13
+// 这样无限增殖的标题，既看不懂，也让「模块标题」筛选失去意义，
+// 故一并按「纯数字」识别。
+func isPathParam(segment string) bool {
+	if strings.HasPrefix(segment, ":") {
+		return true
+	}
+	if segment == "" {
+		return false
+	}
+	for _, r := range segment {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }

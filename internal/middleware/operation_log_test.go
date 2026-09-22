@@ -194,3 +194,66 @@ func TestSanitizeRequestBodyNestedJSONString(t *testing.T) {
 		t.Errorf("嵌套 JSON 字符串中的敏感值未被脱敏: %s", got)
 	}
 }
+
+// TestResolveTitleMapsToChinese 模块标题必须是可读中文，不能把 URL 段直接拼出来。
+//
+// 这是日志页「模块标题」列展示的内容，也是该列筛选框 LIKE 查询的目标：
+// 存英文标识时非技术用户既看不懂、也没法和侧边栏菜单名对上。
+func TestResolveTitleMapsToChinese(t *testing.T) {
+	cases := []struct {
+		path string
+		want string
+	}{
+		{"/api/v1/system/user/list", "用户管理"},
+		{"/api/v1/system/user", "用户管理"},
+		{"/api/v1/system/role/list", "角色管理"},
+		{"/api/v1/system/dict/data/list", "数据字典"},
+		{"/api/v1/system/config/batch", "参数管理"},
+		{"/api/v1/system/agreement", "协议管理"},
+		{"/api/v1/system/pay/order/refund", "支付订单"},
+		{"/api/v1/member/list", "会员列表"},
+		{"/api/v1/member/tag/list", "会员标签"},
+		{"/api/v1/member/tags", "会员标签"},
+		{"/api/v1/member/level/all", "会员等级"},
+		{"/api/v1/member/points/list", "积分明细"},
+		{"/api/v1/auth/logout", "退出登录"},
+		{"/api/v1/auth/userInfo", "用户信息"},
+		{"/api/v1/dashboard/stats", "工作台统计"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.path, func(t *testing.T) {
+			if got := resolveTitle(c.path); got != c.want {
+				t.Errorf("resolveTitle(%q) = %q，期望 %q", c.path, got, c.want)
+			}
+		})
+	}
+}
+
+// TestResolveTitleIgnoresPathParam 路径参数不能漏进标题。
+//
+// /api/v1/member/:id 的第 5 段是 ":id"，早期实现把它拼成了「member-:id」，
+// 库里确实出现过这种脏数据 —— 同一个 handler 的 GET/PUT/DELETE 都记成它。
+func TestResolveTitleIgnoresPathParam(t *testing.T) {
+	for _, path := range []string{"/api/v1/member/:id", "/api/v1/member/12"} {
+		if got := resolveTitle(path); got != "会员列表" {
+			t.Errorf("resolveTitle(%q) = %q，期望「会员列表」", path, got)
+		}
+	}
+}
+
+// TestResolveTitleFallsBackToRawKey 未登记的模块返回原标识而不是空白。
+//
+// 新增模块时若忘了往 resourceTitles 里补名字，日志里至少还能看到
+// 标识本身可供排查；返回空字符串则会让这一列彻底失去信息。
+func TestResolveTitleFallsBackToRawKey(t *testing.T) {
+	if got := resolveTitle("/api/v1/report/daily/list"); got != "report-daily" {
+		t.Errorf("未登记模块应返回原标识，实际 %q", got)
+	}
+	// 路径段不足时也不能 panic
+	for _, path := range []string{"", "/api", "/api/v1"} {
+		if got := resolveTitle(path); got == "" {
+			t.Errorf("resolveTitle(%q) 不应返回空字符串", path)
+		}
+	}
+}
