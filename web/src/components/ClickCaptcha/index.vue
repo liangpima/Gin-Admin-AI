@@ -18,14 +18,16 @@
     <el-button v-if="verified" link type="primary" size="small" @click.stop="reset">重新验证</el-button>
   </div>
 
+  <!-- 刻意不设 close-on-click-modal="false"：点遮罩关闭符合弹窗的通用预期，
+       关闭后由 onClosed 清掉未完成的点击，重新打开即从零开始 -->
   <el-dialog
     v-model="visible"
     :show-close="false"
-    :close-on-click-modal="false"
     align-center
     append-to-body
     width="min(480px, 88vw)"
     class="click-captcha-dialog"
+    @closed="onClosed"
   >
     <div class="click-captcha">
       <div class="click-captcha__canvas">
@@ -160,6 +162,21 @@ function open() {
 
 function refresh() {
   loadCaptcha()
+}
+
+/**
+ * 弹窗关闭后的收尾。
+ *
+ * 点遮罩关闭等于「取消」：必须清掉未完成的点击，否则重新打开时图上
+ * 还留着上次的半截标记，用户不知道还要点几下、也分不清哪些是新的。
+ * 图片本身保留（token 5 分钟内有效），重开无需重新请求；
+ * 若已过期，Verify 会返回「验证码已过期」并自动换图。
+ */
+function onClosed() {
+  if (verified.value) return
+  clickedPoints.value = []
+  result.value = ''
+  message.value = ''
 }
 
 /** 清空验证状态并丢弃当前图，供登录失败后由父组件调用 */
@@ -476,19 +493,22 @@ defineExpose({ open, refresh, reset })
     display: none;
   }
 
-  // 弹窗自身已有 padding: var(--el-dialog-padding-primary)，
-  // body 再补一层就会变成双重内边距（上下各多 16px）。
+  // 弹窗自身已有 padding: var(--el-dialog-padding-primary)，body 再补左右下
+  // 就会变成双重内边距（上下各多 16px），所以只保留顶部 10px ——
+  // 图片紧贴弹窗上沿会显得局促。左右与底部的间距由弹窗 padding 提供。
+  //
+  // 必须带 !important：项目全局在移动端有
+  // `.el-dialog__body { padding: 12px 16px !important }`。
+  // 本选择器多一个类、优先级更高，同为 !important 时由本规则胜出。
   .el-dialog__body {
-    padding: 0;
+    padding: 10px 0 0 !important;
   }
 }
 
-// 移动端：项目全局已给 .el-dialog__body 加了 `padding: 12px 16px !important`，
-// 所以这里把弹窗自身的内边距归零，由 body 单独提供间距，避免叠加。
-// （改 CSS 变量即可，不必逐个覆盖 padding 属性）
+// 移动端：弹窗内边距 12px（全局约定是 92% 宽度，这里把内边距调紧一点）
 @include mobile {
   .click-captcha-dialog {
-    --el-dialog-padding-primary: 0;
+    --el-dialog-padding-primary: 12px;
     border-radius: 8px;
   }
 }
