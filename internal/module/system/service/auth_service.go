@@ -12,6 +12,7 @@ import (
 	"go-admin/internal/logger"
 	"go-admin/internal/module/system/dto"
 	"go-admin/internal/module/system/model"
+	captchaService "go-admin/internal/module/captcha/service"
 	"go-admin/internal/module/system/repository"
 	"go-admin/internal/module/system/vo"
 	"go-admin/pkg/auth"
@@ -21,12 +22,17 @@ import (
 )
 
 type AuthService interface {
-	Login(req *dto.LoginRequest) (*vo.LoginResponse, error)
+	// Login 完成「人机校验 → 限频判定 → 身份认证 → 写登录日志」整条链路。
+	// lc 携带 HTTP 侧的 IP/UA，由 Controller 采集（Service 不依赖 gin）。
+	Login(req *dto.LoginRequest, lc *dto.LoginContext) (*vo.LoginResponse, error)
 	RefreshToken(req *dto.RefreshTokenRequest) (*vo.LoginResponse, error)
 	// Logout 吊销指定 refresh token。
 	// refreshToken 为空时退化为吊销该用户的全部 refresh token
 	// （无法判断来源设备，宁可多吊销，也不留下可继续换发 access token 的凭据）。
 	Logout(userID uint, refreshToken string) error
+	// LogoutByToken 处理一次完整登出：拉黑 access token + 吊销 refresh token。
+	// accessToken 为空时退化为「只吊销 refresh token」（旧客户端不带头）。
+	LogoutByToken(accessToken, refreshToken string) error
 	GetUserInfo(userID uint) (*vo.UserInfoResponse, error)
 }
 
@@ -34,6 +40,7 @@ type authService struct {
 	userRepo    repository.UserRepository
 	roleService RoleService
 	menuService MenuService
+	logService  LogService
 }
 
 func NewAuthService() AuthService {
@@ -41,10 +48,59 @@ func NewAuthService() AuthService {
 		userRepo:    repository.NewUserRepository(),
 		roleService: NewRoleService(),
 		menuService: NewMenuService(),
+		logService:  NewLogService(),
 	}
 }
 
-func (s *authService) Login(req *dto.LoginRequest) (*vo.LoginResponse, error) {
+// Login 是登录的对外入口，串联整条链路。
+//
+// 顺序有意固定为「人机校验 → 限频 → 认证 → 记录」：
+//   - 人机校验放最前：它是挡自动化撞库的第一道闸，成本最低
+//   - 限频在认证之前：否则攻击者可以靠不断尝试把账号锁死（DoS），
+//     而且失败计数必须在真正比对密码前就查
+//   - 无论成功失败都写登录日志：审计价值一半在失败记录里
+func (s *authService) Login(req *dto.LoginRequest, lc *dto.LoginContext) (*vo.LoginResponse, error) {
+	// 人机校验：凭证由 /captcha/verify 校验通过后签发，一次性。
+	// 早前的写法在第一次 ShouldBindJSON 之后又绑定一次请求体取坐标 ——
+	// 请求体已被读尽，二次绑定必然失败且错误被丢弃，于是整个校验分支从未执行过。
+	if !captchaService.ConsumeVerifiedToken(req.CaptchaToken) {
+		return nil, common.NewBizError("验证码无效或已失效，请重新验证")
+	}
+
+	ctx := context.Background()
+	ip := ""
+	if lc != nil {
+		ip = lc.IP
+	}
+	keys := loginRateLimitKeys(ip, req.Username)
+
+	if loginLocked(ctx, keys...) {
+		s.saveLoginLog(0, req.Username, 0, "登录频率过高", lc)
+		return nil, loginLockedError()
+	}
+
+	resp, err := s.authenticate(req)
+	if err != nil {
+		recordLoginFailure(ctx, keys...)
+		s.saveLoginLog(0, req.Username, 0, err.Error(), lc)
+		return nil, err
+	}
+
+	clearLoginFailure(ctx, keys...)
+
+	// 从签发的 token 解析租户，使登录日志归属到正确租户
+	tenantID := uint(0)
+	if claims, parseErr := auth.ParseToken(resp.AccessToken); parseErr == nil {
+		tenantID = claims.TenantID
+	}
+	s.saveLoginLog(tenantID, req.Username, 1, "登录成功", lc)
+
+	return resp, nil
+}
+
+// authenticate 只做「凭据校验 + 签发 token」，不含限频与日志。
+// 对外入口是 Login，它把限频、日志等横切逻辑串起来。
+func (s *authService) authenticate(req *dto.LoginRequest) (*vo.LoginResponse, error) {
 	user, err := s.userRepo.FindByUsernameForAuth(req.Username)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -131,10 +187,22 @@ func (s *authService) RefreshToken(req *dto.RefreshTokenRequest) (*vo.LoginRespo
 		return nil, common.NewUnauthorizedError("refresh token已过期")
 	}
 
-	// 轮换：旧 token 立即作废并从用户集合中移除
-	_ = cache.Del(ctx, cache.RefreshTokenKey(req.RefreshToken))
+	// 轮换：旧 token 立即作废并从用户集合中移除。
+	//
+	// Del 失败必须**中断本次刷新**，不能只记日志继续：旧 token 仍然有效
+	// 就等于轮换保证被打破 —— 被窃取的 refresh token 可以继续使用。
+	// 此处尚未写入任何新 token，中断是干净的，用户重新登录即可。
+	// 与下面 Logout 的处理保持一致（那边也是直接返回错误）。
+	if err := cache.Del(ctx, cache.RefreshTokenKey(req.RefreshToken)); err != nil {
+		logger.Log.Errorf("[auth] 旧 refresh token 作废失败，已中断本次刷新: err=%v", err)
+		return nil, fmt.Errorf("刷新凭证失败，请重新登录: %w", err)
+	}
 	if claims.UserID > 0 {
-		_ = cache.SRem(ctx, cache.RefreshTokenSetKey(claims.UserID), req.RefreshToken)
+		// 集合里残留一个已删除的 token 只影响「一键下线」的清理范围，
+		// 不影响安全性，记录告警即可，不必打断用户的正常刷新。
+		if err := cache.SRem(ctx, cache.RefreshTokenSetKey(claims.UserID), req.RefreshToken); err != nil {
+			logger.Log.Warnf("[auth] 从用户 refresh token 集合中移除失败: userID=%d err=%v", claims.UserID, err)
+		}
 	}
 
 	accessToken, err := auth.GenerateAccessToken(claims.UserID, claims.Username, claims.TenantID, claims.DeptID)
@@ -163,6 +231,36 @@ func (s *authService) RefreshToken(req *dto.RefreshTokenRequest) (*vo.LoginRespo
 	}, nil
 }
 
+// LogoutByToken 处理一次完整登出。
+//
+// 原先这段逻辑写在 Controller 的 Logout 里（解析 header、算 TTL、拉黑、吊销），
+// 属于业务规则，已按规则 1 下沉。
+//
+// 两类失败的严重性不同，处理也不同：
+//   - access token 拉黑失败：窗口有限（access token 本就短命），记日志即可
+//   - refresh token 吊销失败：它是长期凭据，失败意味着「用户以为已登出、
+//     实际仍能换发新 access token」，必须让调用方知道
+func (s *authService) LogoutByToken(accessToken, refreshToken string) error {
+	var userID uint
+	if accessToken != "" {
+		if claims, err := auth.ParseToken(accessToken); err == nil {
+			userID = claims.UserID
+			if claims.ExpiresAt != nil {
+				if ttl := time.Until(claims.ExpiresAt.Time); ttl > 0 {
+					if err := cache.RevokeToken(context.Background(), accessToken, ttl); err != nil {
+						logger.Log.Warnf("[auth] access token 加入黑名单失败（影响窗口有限）: %v", err)
+					}
+				}
+			}
+		}
+	}
+
+	if err := s.Logout(userID, refreshToken); err != nil {
+		return fmt.Errorf("吊销登录凭据失败: %w", err)
+	}
+	return nil
+}
+
 func (s *authService) Logout(userID uint, refreshToken string) error {
 	ctx := context.Background()
 
@@ -171,7 +269,11 @@ func (s *authService) Logout(userID uint, refreshToken string) error {
 			return err
 		}
 		if userID > 0 {
-			_ = cache.SRem(ctx, cache.RefreshTokenSetKey(userID), refreshToken)
+			// token 本体已删除，集合里残留条目只影响「一键下线」的清理范围，
+			// 不影响安全性，记录告警即可
+			if err := cache.SRem(ctx, cache.RefreshTokenSetKey(userID), refreshToken); err != nil {
+				logger.Log.Warnf("[auth] 退出登录时从 refresh token 集合移除失败: userID=%d err=%v", userID, err)
+			}
 		}
 		return nil
 	}

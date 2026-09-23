@@ -13,18 +13,28 @@ type CreateMemberRequest struct {
 	Remark   string `json:"remark" binding:"max=500"`
 }
 
+// UpdateMemberRequest 会员更新，支持**部分更新**。
+//
+// 为什么数值字段用指针：前端的「修改等级」「修改标签」只提交 {id, levelId}
+// 或 {id, tagIds}，其余字段是零值。用值类型会出事 —— 实测把某会员的
+// status(1)/gender(2) 在只改等级后变成了 0/0，也就是**顺手把人停用了**；
+// 而单纯放宽校验又会让用户无法把会员改成停用(status=0)。指针能区分
+// 「未提供」与「显式设为 0」。
+//
+// Birthday 也用指针：空串在这里是有意义的（表示清空生日），
+// 不能与「未提供」混为一谈。
 type UpdateMemberRequest struct {
-	ID       uint   `json:"id" binding:"required"`
-	Username string `json:"username" binding:"max=64"`
-	Nickname string `json:"nickname" binding:"max=64"`
-	Phone    string `json:"phone" binding:"omitempty,len=11"`
-	Avatar   string `json:"avatar" binding:"max=512"`
-	Gender   int8   `json:"gender" binding:"oneof=0 1 2"`
-	Birthday string `json:"birthday" binding:"omitempty"`
-	LevelID  uint   `json:"levelId"`
-	Status   int8   `json:"status" binding:"oneof=0 1"`
-	TagIds   []uint `json:"tagIds"`
-	Remark   string `json:"remark" binding:"max=500"`
+	ID       uint    `json:"id" binding:"required"`
+	Username string  `json:"username" binding:"max=64"`
+	Nickname string  `json:"nickname" binding:"max=64"`
+	Phone    string  `json:"phone" binding:"omitempty,len=11"`
+	Avatar   string  `json:"avatar" binding:"max=512"`
+	Gender   *int8   `json:"gender" binding:"omitempty,oneof=0 1 2"`
+	Birthday *string `json:"birthday"`
+	LevelID  *uint   `json:"levelId"`
+	Status   *int8   `json:"status" binding:"omitempty,oneof=0 1"`
+	TagIds   []uint  `json:"tagIds"`
+	Remark   *string `json:"remark" binding:"omitempty,max=500"`
 }
 
 type MemberListRequest struct {

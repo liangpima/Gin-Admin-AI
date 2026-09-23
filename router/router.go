@@ -65,6 +65,7 @@ const (
 	permLogDelete = "system:log:delete"
 
 	permFileList   = "system:file:list"
+	permFileUpload = "system:file:upload"
 	permFileDelete = "system:file:delete"
 
 	permAgreementList   = "system:agreement:list"
@@ -276,7 +277,9 @@ func Setup(mode string) *gin.Engine {
 			protected(system, http.MethodGet, "/agreement/list", permAgreementList, agreementController.FindList)
 			protected(system, http.MethodGet, "/agreement/type/:type", permAgreementList, agreementController.FindByType)
 
-			protected(system, http.MethodPost, "/file/upload", permFileList, fileController.Upload)
+			// 上传用独立的 system:file:upload，不再复用查看权限 ——
+			// 复用会让「只被授予附件查看」的低权角色也能往服务器写文件
+			protected(system, http.MethodPost, "/file/upload", permFileUpload, fileController.Upload)
 			protected(system, http.MethodGet, "/file/list", permFileList, fileController.FindList)
 			protected(system, http.MethodGet, "/file/:id", permFileList, fileController.FindByID)
 			protected(system, http.MethodDelete, "/file/:id", permFileDelete, fileController.Delete)

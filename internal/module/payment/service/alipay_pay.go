@@ -41,7 +41,7 @@ func NewAlipayGateway(cfg AlipayConfig) *AlipayGateway {
 }
 
 func (g *AlipayGateway) Prepay(ctx context.Context, orderNo, subject string, amount int64, returnURL string) (map[string]interface{}, error) {
-	amountStr := fmt.Sprintf("%.2f", float64(amount)/100)
+	amountStr := fenToYuan(amount)
 
 	params := map[string]string{
 		"app_id":     g.config.AppID,
@@ -86,7 +86,7 @@ func (g *AlipayGateway) Prepay(ctx context.Context, orderNo, subject string, amo
 }
 
 func (g *AlipayGateway) PrepayApp(ctx context.Context, orderNo, subject string, amount int64) (map[string]interface{}, error) {
-	amountStr := fmt.Sprintf("%.2f", float64(amount)/100)
+	amountStr := fenToYuan(amount)
 
 	params := map[string]string{
 		"app_id":     g.config.AppID,
@@ -189,7 +189,7 @@ func checkAlipayResponse(method string, resp map[string]interface{}) error {
 }
 
 func (g *AlipayGateway) Refund(ctx context.Context, orderNo, refundNo string, amount int64) (map[string]interface{}, error) {
-	amountStr := fmt.Sprintf("%.2f", float64(amount)/100)
+	amountStr := fenToYuan(amount)
 
 	params := map[string]string{
 		"app_id":     g.config.AppID,
@@ -287,6 +287,24 @@ func (g *AlipayGateway) ParseNotify(body []byte) (*PayNotifyResult, error) {
 	}
 
 	return result, nil
+}
+
+// fenToYuan 把「分」转换为支付宝要求的「元」字符串（保留两位小数）。
+//
+// 不能用 float64(amount)/100：float64 无法精确表示 0.1、0.01 这类小数，
+// 大额金额会出现 12345.67 → 12345.669999... 之类的误差，格式化后
+// 可能与订单金额差 1 分，被支付宝判为「金额不一致」而拒单。
+// 与 yuanToFen 对称，全程整数运算：整数部分用整除，小数部分用取余。
+func fenToYuan(amount int64) string {
+	neg := amount < 0
+	if neg {
+		amount = -amount
+	}
+	out := fmt.Sprintf("%d.%02d", amount/100, amount%100)
+	if neg {
+		return "-" + out
+	}
+	return out
 }
 
 // yuanToFen 把「元」金额字符串转换为「分」。

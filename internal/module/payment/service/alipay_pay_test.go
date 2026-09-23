@@ -167,3 +167,48 @@ func TestCheckAlipayResponse(t *testing.T) {
 		}
 	})
 }
+
+// TestFenToYuan 校验「分 → 元」同样不使用浮点。
+//
+// 与 yuanToFen 是对称问题：float64(amount)/100 无法精确表示 0.1 这类小数，
+// 大额金额会出现 12345.67 → 12345.669999... 的误差，格式化后与订单金额
+// 差 1 分，支付宝会判「金额不一致」拒单。
+func TestFenToYuan(t *testing.T) {
+	cases := []struct {
+		in   int64
+		want string
+	}{
+		{1, "0.01"},
+		{10, "0.10"},
+		{100, "1.00"},
+		{1999, "19.99"},
+		{29, "0.29"},
+		{1205, "12.05"},
+		{800, "8.00"},
+		{10000, "100.00"},
+		{1234567, "12345.67"}, // 大额：浮点法在此量级开始出现误差
+		{99999999, "999999.99"},
+		{0, "0.00"},
+		{-350, "-3.50"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.want, func(t *testing.T) {
+			if got := fenToYuan(c.in); got != c.want {
+				t.Errorf("fenToYuan(%d) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// TestFenYuanRoundTrip 分 → 元 → 分 必须回到原值，一分不差。
+//
+// 这是资金正确性的底线：任何一分钱的漂移都会导致「已付款但订单不入账」。
+func TestFenYuanRoundTrip(t *testing.T) {
+	for i := int64(0); i < 200000; i++ {
+		s := fenToYuan(i)
+		if got := yuanToFen(s); got != i {
+			t.Fatalf("往返不一致: %d 分 → %q → %d 分", i, s, got)
+		}
+	}
+}

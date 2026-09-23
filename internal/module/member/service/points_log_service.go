@@ -25,6 +25,6 @@ func (s *pointsLogService) FindList(tenantID uint, req *dto.PointsLogListRequest
 	if req.Page < 1 {
 		req.Page = 1
 	}
-	req.PageSize = common.NormalizePageSize(req.PageSize)
+	req.Page, req.PageSize = common.NormalizePageParams(req.Page, req.PageSize)
 	return s.pointsLogRepo.FindList(tenantID, req.MemberID, req.Type, req.Page, req.PageSize)
 }

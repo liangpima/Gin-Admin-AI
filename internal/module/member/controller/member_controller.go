@@ -1,13 +1,9 @@
 package controller
 
 import (
-	"strconv"
-
 	"go-admin/internal/common"
 	"go-admin/internal/module/member/dto"
 	"go-admin/internal/module/member/service"
-	systemModel "go-admin/internal/module/system/model"
-	systemService "go-admin/internal/module/system/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,17 +31,7 @@ func (ctl *MemberController) Create(c *gin.Context) {
 	operatorID := common.GetCurrentUserID(c)
 	tenantID := common.GetTenantID(c)
 
-	digits := 6
-	configService := systemService.NewConfigService()
-	if configVal, err := configService.FindByKey("site.memberIdDigits"); err == nil {
-		if cfg, ok := configVal.(*systemModel.SysConfig); ok && cfg.Value != "" {
-			if n, err := strconv.Atoi(cfg.Value); err == nil && n >= 4 {
-				digits = n
-			}
-		}
-	}
-
-	if err := ctl.memberService.Create(&req, operatorID, tenantID, digits); err != nil {
+	if err := ctl.memberService.Create(&req, operatorID, tenantID); err != nil {
 		common.FailWith(c, err)
 		return
 	}

@@ -64,10 +64,11 @@ func GetUintParam(c *gin.Context, key string) (uint, error) {
 	return uint(id), nil
 }
 
+// GetPageInfo 从查询参数读取分页参数并归一化（query 风格入口）。
 func GetPageInfo(c *gin.Context) (int, int) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "10"))
-	return NormalizePage(page), NormalizePageSize(pageSize)
+	return NormalizePageParams(page, pageSize)
 }
 
 // 分页的默认值与上限。
@@ -81,18 +82,18 @@ const (
 	MaxPageSize     = 100
 )
 
-// NormalizePageSize 把非法或越界的 pageSize 归一到默认值。
-func NormalizePageSize(n int) int {
-	if n < 1 || n > MaxPageSize {
-		return DefaultPageSize
+// NormalizePageParams 归一化分页参数，返回合法的 (page, pageSize)。
+//
+// 这是**唯一**的分页参数收口点，DTO 风格（req.Page/req.PageSize）与
+// query 风格（GetPageInfo）都应经过它。此前存在三套写法，其中
+// 「只归一 pageSize、不归一 page」那套会让 page=0 或负数算出负 offset，
+// 轻则 SQL 报错、重则返回异常结果 —— 统一收口顺带修掉了这个问题。
+func NormalizePageParams(page, pageSize int) (int, int) {
+	if page < 1 {
+		page = 1
 	}
-	return n
-}
-
-// NormalizePage 把非法页码归一到第 1 页。
-func NormalizePage(n int) int {
-	if n < 1 {
-		return 1
+	if pageSize < 1 || pageSize > MaxPageSize {
+		pageSize = DefaultPageSize
 	}
-	return n
+	return page, pageSize
 }

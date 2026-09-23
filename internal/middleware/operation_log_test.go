@@ -257,3 +257,91 @@ func TestResolveTitleFallsBackToRawKey(t *testing.T) {
 		}
 	}
 }
+
+// TestIsSensitiveConfigName 配置项名判定：真实名字全覆盖。
+//
+// 用例取自 sys_config 表里实际存在的配置项，不是臆造的名字 ——
+// 之前正是因为词表只覆盖了 secret_key / access_key 这类「好看」的命名，
+// 而真实支付密钥叫 pay.alipay_key、pay.wechat_key，导致私钥明文落库。
+func TestIsSensitiveConfigName(t *testing.T) {
+	sensitive := []string{
+		"pay.alipay_key",        // 支付宝私钥
+		"pay.wechat_key",        // 微信商户密钥
+		"pay.wechat_apiv3_key",  // 微信 APIv3 密钥
+		"pay.wechat_cert_pem",   // 微信证书
+		"pay.wechat_key_pem",
+		"oss.secret_key",
+		"oss.access_key",
+		"sms.secret_key",
+		"sms.access_key",
+		"pay.alipay_public_key", // 公钥虽非密文，打码无副作用
+		"site.password",
+		"foo.token",
+		"bar.credential",
+		"baz-secret",
+	}
+	for _, name := range sensitive {
+		if !isSensitiveConfigName(name) {
+			t.Errorf("配置项 %q 应判定为敏感（否则取值会明文落库）", name)
+		}
+	}
+
+	notSensitive := []string{
+		"site.name", "site.title", "site.icp", "site.logo",
+		"oss.bucket", "oss.endpoint", "oss.domain", "oss.type",
+		"pay.wechat_mch_id", "pay.wechat_app_id", "pay.alipay_app_id",
+		"pay.wechat_serial_no", "pay.notify_url", "pay.return_url",
+		"sms.provider", "sms.sign_name", "sms.status", "sms.tpl_verify_code",
+		"site.memberIdDigits",
+	}
+	for _, name := range notSensitive {
+		if isSensitiveConfigName(name) {
+			t.Errorf("配置项 %q 不应判定为敏感（会抹掉日志里本可见的取值）", name)
+		}
+	}
+}
+
+// TestSanitizeRequestBodyMasksRealConfigSecrets 端到端：真实配置项名必须打码。
+//
+// 这是本次修复的核心回归用例 —— 修复前 pay.alipay_key 的取值会原样落库。
+func TestSanitizeRequestBodyMasksRealConfigSecrets(t *testing.T) {
+	body := []byte(`{"prefix":"pay.","items":[` +
+		`{"key":"alipay_key","value":"ALIPAY_PRIVATE_KEY_PLAINTEXT"},` +
+		`{"key":"wechat_key","value":"WECHAT_MCH_KEY_PLAINTEXT"},` +
+		`{"key":"wechat_apiv3_key","value":"APIV3_KEY_PLAINTEXT"}]}`)
+
+	got := sanitizeRequestBody(body)
+
+	for _, leaked := range []string{
+		"ALIPAY_PRIVATE_KEY_PLAINTEXT",
+		"WECHAT_MCH_KEY_PLAINTEXT",
+		"APIV3_KEY_PLAINTEXT",
+	} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("私钥/密钥明文落库: %s 出现在 %s", leaked, got)
+		}
+	}
+}
+
+// TestSanitizeRequestBodyKeepsRealConfigNonSecrets 非敏感项仍应可读。
+//
+// 脱敏过度同样是缺陷：运维要靠日志回溯「谁把站点标题改了」，
+// 若把 site.name 的取值也抹掉，日志就失去排查价值。
+func TestSanitizeRequestBodyKeepsRealConfigNonSecrets(t *testing.T) {
+	body := []byte(`{"prefix":"site.","items":[` +
+		`{"key":"name","value":"我的网站"},` +
+		`{"key":"bucket","value":"my-bucket"}]}`)
+
+	got := sanitizeRequestBody(body)
+
+	if !strings.Contains(got, "我的网站") {
+		t.Errorf("site.name 的取值不应被脱敏: %s", got)
+	}
+	if !strings.Contains(got, "my-bucket") {
+		t.Errorf("oss.bucket 的取值不应被脱敏: %s", got)
+	}
+	// 配置项名本身必须保留，否则看不出改的是哪一项
+	if !strings.Contains(got, "name") || !strings.Contains(got, "bucket") {
+		t.Errorf("配置项名不应被抹掉: %s", got)
+	}
+}

@@ -64,7 +64,7 @@ func (s *memberTagService) FindList(tenantID uint, req *dto.MemberTagListRequest
 	if req.Page < 1 {
 		req.Page = 1
 	}
-	req.PageSize = common.NormalizePageSize(req.PageSize)
+	req.Page, req.PageSize = common.NormalizePageParams(req.Page, req.PageSize)
 	return s.tagRepo.FindList(tenantID, req.Name, req.Page, req.PageSize)
 }
 

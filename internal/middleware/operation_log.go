@@ -30,6 +30,20 @@ var sensitiveNameFragments = []string{
 	"credential", "privatekey", "accesskey", "apiv3key", "secretkey", "pem",
 }
 
+// sensitiveNameSuffixes 配置项名的**末段**命中即视为敏感。
+//
+// 为什么需要它：片段表靠子串匹配，覆盖不到本项目真实的支付密钥命名 ——
+// pay.alipay_key、pay.wechat_key 归一化后是 alipaykey / wechatkey，
+// 不含 secret/accesskey/privatekey 任何片段，于是私钥原文会被明文写进
+// sys_operation_log.request_param（已实际发生过）。
+//
+// 用「末段」而不是子串：sys_config 里 site.name、oss.bucket、
+// sms.tpl_verify_code、pay.wechat_mch_id 这类非敏感项不能误伤，
+// 而 pay.alipay_key、oss.secret_key、pay.wechat_cert_pem 必须命中。
+var sensitiveNameSuffixes = []string{
+	"key", "secret", "pwd", "pass", "password", "token", "credential", "pem",
+}
+
 // isSensitiveName 判断字段名或配置项名是否敏感。
 //
 // 先归一化（去下划线/连字符）再匹配，使 access_key、access-key、accessKey、
@@ -38,6 +52,30 @@ func isSensitiveName(name string) bool {
 	normalized := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(name))
 	for _, frag := range sensitiveNameFragments {
 		if strings.Contains(normalized, frag) {
+			return true
+		}
+	}
+	return false
+}
+
+// isSensitiveConfigName 判断「配置项名」是否敏感，用于 key/value 分离的结构。
+//
+// 与 isSensitiveName 的区别在于判断对象：这里判断的是配置项**名称**
+// （如 pay.alipay_key），不是 JSON 字段名，因此可以安全地按「末段」判定。
+// 裸 "key" 这种规则不能用在字段名上 —— {"key":"site.name","value":...} 里的
+// key 是结构字段，若据此打码会连配置项名一起抹掉，日志就失去排查价值。
+func isSensitiveConfigName(name string) bool {
+	if isSensitiveName(name) {
+		return true
+	}
+
+	last := name
+	if i := strings.LastIndexAny(name, "._-"); i >= 0 {
+		last = name[i+1:]
+	}
+	last = strings.ToLower(strings.TrimSpace(last))
+	for _, suf := range sensitiveNameSuffixes {
+		if last == suf {
 			return true
 		}
 	}
@@ -73,13 +111,15 @@ func isValueField(key string) bool {
 func maskSensitiveFields(v interface{}) interface{} {
 	switch val := v.(type) {
 	case map[string]interface{}:
-		// 先看同级是否存在敏感的「名称」字段，若有则其对应的「取值」也要脱敏
+		// 先看同级是否存在敏感的「名称」字段，若有则其对应的「取值」也要脱敏。
+		// 用 isSensitiveConfigName 而非 isSensitiveName：这里的 item 是配置项名
+		// （pay.alipay_key），可以按末段判定；字段名本身不能套这条规则。
 		sensitiveValue := false
 		for k, item := range val {
 			if !isNameField(k) {
 				continue
 			}
-			if name, ok := item.(string); ok && isSensitiveName(name) {
+			if name, ok := item.(string); ok && isSensitiveConfigName(name) {
 				sensitiveValue = true
 				break
 			}

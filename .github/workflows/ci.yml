@@ -1,0 +1,89 @@
+name: CI
+
+# 触发：推送到主分支、以及所有 PR。
+# 之前项目没有任何 CI，`go vet` 与前端类型检查都只靠本地自觉，
+# 这是「改动质量全靠人」的根因。
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+# 同一分支的新推送取消上一次未跑完的任务，避免排队
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: 后端（vet / test / build）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # 以 go.mod 为准，避免本地与 CI 版本漂移
+          go-version-file: go.mod
+          cache: true
+
+      - name: 静态检查
+        run: go vet ./...
+
+      - name: 单元测试
+        # -count=1 关掉测试结果缓存，否则改了代码也可能命中旧结果
+        run: go test ./... -count=1
+
+      - name: 编译入口
+        run: go build -o /dev/null ./cmd/server
+
+      - name: 编译迁移工具
+        run: go build -o /dev/null ./cmd/migrate
+
+  frontend:
+    name: 前端（类型检查 / 构建）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # 用 ci 而不是 install：严格按 lock 文件安装，保证可重现
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npx vue-tsc --noEmit
+
+      - name: 构建
+        run: npx vite build
+
+  # ────────────────────────────────────────────────────────────
+  # golangci-lint：先以「不阻断」方式跑起来。
+  #
+  # 为什么不禁用、也不直接阻断：
+  #   · go vet 覆盖不到 unused / ineffassign / staticcheck 这些问题
+  #   · 但仓库当前没有 golangci-lint 基线，直接设为阻断会让 CI 长期变红，
+  #     反而促使大家忽略 CI
+  # 待基线清理干净后，把 continue-on-error 去掉即可转为强制。
+  # ────────────────────────────────────────────────────────────
+  lint-advisory:
+    name: 静态检查（观察项，不阻断）
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m

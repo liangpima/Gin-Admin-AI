@@ -282,7 +282,7 @@ func (s *userService) FindList(tenantID uint, req *dto.UserListRequest) ([]inter
 	if req.Page < 1 {
 		req.Page = 1
 	}
-	req.PageSize = common.NormalizePageSize(req.PageSize)
+	req.Page, req.PageSize = common.NormalizePageParams(req.Page, req.PageSize)
 	return s.query(tenantID, req, req.Page, req.PageSize)
 }
 

@@ -67,8 +67,7 @@ func (ctl *DictController) FindTypeList(c *gin.Context) {
 		PageSize int    `form:"pageSize"`
 	}
 	c.ShouldBindQuery(&req)
-	req.Page = common.NormalizePage(req.Page)
-	req.PageSize = common.NormalizePageSize(req.PageSize)
+	req.Page, req.PageSize = common.NormalizePageParams(req.Page, req.PageSize)
 	list, total, err := ctl.dictService.FindTypeList(req.Name, req.Page, req.PageSize)
 	if err != nil {
 		common.FailWith(c, err)
@@ -150,8 +149,7 @@ func (ctl *DictController) FindDataList(c *gin.Context) {
 	c.ShouldBindQuery(&req)
 	// 分页参数必须取自请求：此前这里硬编码 page=1/pageSize=10，
 	// 前端传 pageSize=100 被静默忽略，字典数据超过 10 条就再也看不到。
-	req.Page = common.NormalizePage(req.Page)
-	req.PageSize = common.NormalizePageSize(req.PageSize)
+	req.Page, req.PageSize = common.NormalizePageParams(req.Page, req.PageSize)
 
 	list, total, err := ctl.dictService.FindDataList(req.DictType, req.Page, req.PageSize)
 	if err != nil {

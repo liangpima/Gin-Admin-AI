@@ -76,8 +76,7 @@ func (ctl *AgreementController) FindList(c *gin.Context) {
 		PageSize int    `form:"pageSize"`
 	}
 	c.ShouldBindQuery(&req)
-	req.Page = common.NormalizePage(req.Page)
-	req.PageSize = common.NormalizePageSize(req.PageSize)
+	req.Page, req.PageSize = common.NormalizePageParams(req.Page, req.PageSize)
 	list, total, err := ctl.agreementService.FindList(req.Name, req.Type, req.Status, req.Page, req.PageSize)
 	if err != nil {
 		common.FailWith(c, err)

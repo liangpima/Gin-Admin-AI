@@ -81,11 +81,15 @@ func (s *roleService) Create(req *dto.CreateRoleRequest, operatorID, tenantID ui
 }
 
 func (s *roleService) Update(req *dto.UpdateRoleRequest, operatorID, tenantID uint) error {
-	// 同 Create：角色 code 全局唯一，改编码时也按全局校验
-	if count, err := s.roleRepo.CountByCode(req.Code, req.ID); err != nil {
-		return err
-	} else if count > 0 {
-		return common.NewBizError("角色编码已存在")
+	// 同 Create：角色 code 全局唯一，改编码时也按全局校验。
+	// 只在请求提供了 code 时校验 —— 部分更新（如只保存权限）不带 code，
+	// 拿空串去查既无意义，也会掩盖真实意图。
+	if req.Code != "" {
+		if count, err := s.roleRepo.CountByCode(req.Code, req.ID); err != nil {
+			return err
+		} else if count > 0 {
+			return common.NewBizError("角色编码已存在")
+		}
 	}
 
 	role, err := s.roleRepo.FindByID(tenantID, req.ID)
@@ -96,12 +100,27 @@ func (s *roleService) Update(req *dto.UpdateRoleRequest, operatorID, tenantID ui
 		return err
 	}
 
-	role.Name = req.Name
-	role.Code = req.Code
-	role.Sort = req.Sort
-	role.Status = req.Status
-	role.DataScope = req.DataScope
-	role.Remark = req.Remark
+	// 逐字段判断「是否提供」再赋值，实现真正的部分更新。
+	// 无条件赋值会把未提供的字段清成零值（历史上就是靠校验拦住了，
+	// 代价是权限分配功能直接不可用）。
+	if req.Name != "" {
+		role.Name = req.Name
+	}
+	if req.Code != "" {
+		role.Code = req.Code
+	}
+	if req.Sort != nil {
+		role.Sort = *req.Sort
+	}
+	if req.Status != nil {
+		role.Status = *req.Status
+	}
+	if req.DataScope != nil {
+		role.DataScope = *req.DataScope
+	}
+	if req.Remark != nil {
+		role.Remark = *req.Remark
+	}
 	role.UpdateBy = operatorID
 
 	if err := s.roleRepo.Update(tenantID, role); err != nil {
@@ -159,7 +178,7 @@ func (s *roleService) FindList(tenantID uint, req *dto.RoleListRequest) ([]inter
 	if req.Page < 1 {
 		req.Page = 1
 	}
-	req.PageSize = common.NormalizePageSize(req.PageSize)
+	req.Page, req.PageSize = common.NormalizePageParams(req.Page, req.PageSize)
 
 	roles, total, err := s.roleRepo.FindList(tenantID, req.Name, req.Code, req.Status, req.Page, req.PageSize)
 	if err != nil {

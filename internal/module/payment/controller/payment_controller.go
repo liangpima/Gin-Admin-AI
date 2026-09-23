@@ -76,7 +76,12 @@ func (ctl *PaymentController) CreateOrder(c *gin.Context) {
 	}
 
 	if result.PayError != nil {
-		result.PayInfo["payError"] = result.PayError.Error()
+		// 不回传渠道原始错误：里面可能带证书路径、商户配置、上游报文等实现细节。
+		// 真实错误进日志供排查，对外只给可理解的提示。
+		// （前端并未消费 payError，去掉不影响交互。）
+		logger.Log.Errorf("[payment] 发起支付失败: channel=%s amount=%d err=%v",
+			req.Channel, req.Amount, result.PayError)
+		result.PayInfo["payError"] = "发起支付失败，请稍后重试或联系管理员"
 	}
 
 	common.Success(c, result.PayInfo)
@@ -153,16 +158,19 @@ func (ctl *PaymentController) WechatNotify(c *gin.Context) {
 
 	result, err := gw.ParseNotify(body, c.Request.Header)
 	if err != nil {
-		logger.Log.Infof("[pay-notify] wechat parse failed: %v", err)
-		c.JSON(200, gin.H{"code": "FAIL", "message": err.Error()})
+		// 回调接口是公开的（无鉴权），任何人都能 POST 过来 ——
+		// 回传 err.Error() 等于把证书/商户配置等内部细节交出去。
+		// 渠道侧只需要知道「失败、请重试」，细节留在日志里。
+		logger.Log.Errorf("[pay-notify] wechat parse failed: %v", err)
+		c.JSON(200, gin.H{"code": "FAIL", "message": "处理失败"})
 		return
 	}
 
 	logger.Log.Infof("[pay-notify] wechat order_no=%s trade_no=%s status=%s", result.OrderNo, result.TradeNo, result.Status)
 
 	if err := ctl.paymentService.HandleNotify("wechat", result); err != nil {
-		logger.Log.Infof("[pay-notify] wechat handle failed: %v", err)
-		c.JSON(200, gin.H{"code": "FAIL", "message": err.Error()})
+		logger.Log.Errorf("[pay-notify] wechat handle failed: %v", err)
+		c.JSON(200, gin.H{"code": "FAIL", "message": "处理失败"})
 		return
 	}
 

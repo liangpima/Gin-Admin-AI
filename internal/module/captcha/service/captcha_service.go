@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"go-admin/internal/cache"
+	"go-admin/internal/logger"
 	"go-admin/internal/module/captcha/model"
 
 	"golang.org/x/image/font"
@@ -199,7 +200,15 @@ func ConsumeVerifiedToken(token string) bool {
 	if err != nil || !exists {
 		return false
 	}
-	_ = cache.Del(ctx, key)
+
+	// 删除失败时返回 false（fail-closed），而不是放行：
+	// 凭证是一次性的，删不掉就意味着它还能被复用（TTL 内），
+	// 那「一次验证一次登录」的保证就破了。
+	// 代价只是让用户重做一次验证码，比留一个可复用的凭证划算。
+	if err := cache.Del(ctx, key); err != nil {
+		logger.Log.Errorf("[captcha] 一次性凭证删除失败，已拒绝本次消费: key=%s err=%v", key, err)
+		return false
+	}
 	return true
 }
 

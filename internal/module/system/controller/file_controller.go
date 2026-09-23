@@ -1,11 +1,8 @@
 package controller
 
 import (
-	"net/url"
-
-	"go-admin/config"
 	"go-admin/internal/common"
-	"go-admin/internal/module/system/model"
+	"go-admin/internal/logger"
 	"go-admin/internal/module/system/service"
 	"go-admin/pkg/upload"
 
@@ -35,35 +32,10 @@ func (ctl *FileController) Upload(c *gin.Context) {
 		return
 	}
 
-	maxSize := int64(config.Cfg.Upload.MaxSize) * 1024 * 1024
-	if maxSize <= 0 {
-		maxSize = 10 * 1024 * 1024 // 默认 10MB
-	}
-	if file.Size > maxSize {
-		common.Error(c, common.CodeFileTooLarge, "文件大小不能超过10MB")
-		return
-	}
-
-	storagePath, err := upload.Upload(file)
+	// 大小校验、落库、存储细节都在 Service（规则 1：Controller 只取参与返回）
+	dbFile, err := ctl.fileService.Upload(
+		common.GetTenantID(c), common.GetCurrentUserID(c), file)
 	if err != nil {
-		common.Error(c, common.CodeUploadFailed, "上传失败: "+err.Error())
-		return
-	}
-
-	fileURL := upload.GetURL(storagePath)
-
-	dbFile := &model.SysFile{
-		Name:     file.Filename,
-		Path:     storagePath,
-		URL:      fileURL,
-		Size:     file.Size,
-		MimeType: file.Header.Get("Content-Type"),
-	}
-	dbFile.CreateBy = common.GetCurrentUserID(c)
-	dbFile.UpdateBy = common.GetCurrentUserID(c)
-
-	tenantID := common.GetTenantID(c)
-	if err := ctl.fileService.Create(tenantID, dbFile); err != nil {
 		common.FailWith(c, err)
 		return
 	}
@@ -142,19 +114,19 @@ func (ctl *FileController) Delete(c *gin.Context) {
 		return
 	}
 
-	_ = upload.Delete(file.Path)
-
+	// 先删库记录，再删磁盘文件 —— 顺序不能反。
+	// 反过来的话，一旦库记录删除失败，就会留下一条指向已删文件的坏记录，
+	// 前端展示时会 404；而先删记录则最坏只留下一个孤儿文件（不占用户可见面），
+	// 属于可接受的残留。
 	if err := ctl.fileService.Delete(tenantID, id); err != nil {
 		common.FailWith(c, err)
 		return
 	}
-	common.Success(c, nil)
-}
 
-func encodeURL(rawURL string) string {
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return rawURL
+	// 孤儿文件不影响功能，但会白占磁盘，必须留下痕迹以便排查与清理
+	if err := upload.Delete(file.Path); err != nil {
+		logger.Log.Errorf("[file] 删除磁盘文件失败，已产生孤儿文件: path=%s err=%v", file.Path, err)
 	}
-	return parsed.String()
+
+	common.Success(c, nil)
 }

@@ -1,40 +1,23 @@
 package controller
 
 import (
-	"context"
-	"fmt"
-	"strconv"
-	"strings"
-	"time"
 
-	"go-admin/internal/cache"
 	"go-admin/internal/common"
-	"go-admin/internal/logger"
-	captchaService "go-admin/internal/module/captcha/service"
 	"go-admin/internal/module/system/dto"
-	"go-admin/internal/module/system/model"
 	"go-admin/internal/module/system/service"
-	"go-admin/pkg/auth"
 
 	"github.com/gin-gonic/gin"
 )
 
-const (
-	maxLoginAttempts  = 5
-	loginLockDuration = 15 * time.Minute
-)
-
 type AuthController struct {
-	authService    service.AuthService
-	logService     service.LogService
-	captchaService captchaService.CaptchaService
+	authService service.AuthService
+	logService  service.LogService
 }
 
 func NewAuthController() *AuthController {
 	return &AuthController{
-		authService:    service.NewAuthService(),
-		logService:     service.NewLogService(),
-		captchaService: captchaService.NewCaptchaService(),
+		authService: service.NewAuthService(),
+		logService:  service.NewLogService(),
 	}
 }
 
@@ -52,48 +35,16 @@ func (ctl *AuthController) Login(c *gin.Context) {
 		return
 	}
 
-	// 人机校验：凭证由 /captcha/verify 校验通过后签发，一次性。
-	//
-	// 早前的写法在第一次 ShouldBindJSON 之后又绑定一次请求体取验证码坐标 ——
-	// 请求体已被首次绑定读尽，二次绑定必然失败且错误被丢弃（Points 恒为空），
-	// 于是整个校验分支从未执行过，登录实际没有任何人机校验。
-	if !captchaService.ConsumeVerifiedToken(req.CaptchaToken) {
-		common.Error(c, common.CodeBadRequest, "验证码无效或已失效，请重新验证")
-		return
-	}
-
-	// 登录限频：IP 与账号双维度计数。
-	// 仅按 IP 计数时攻击者更换 IP 即可绕过，因此同时对账号维度计数。
-	ctx := context.Background()
-	ipKey := "login:fail:ip:" + common.NormalizeIP(c.ClientIP())
-	accountKey := "login:fail:account:" + req.Username
-
-	if loginLocked(ctx, ipKey, accountKey) {
-		ctl.saveLoginLog(c, 0, req.Username, 0, "登录频率过高")
-		common.Error(c, common.CodeBadRequest,
-			fmt.Sprintf("登录失败次数过多，请%d分钟后再试", int(loginLockDuration.Minutes())))
-		return
-	}
-
-	resp, err := ctl.authService.Login(&req)
+	// Controller 只做两件事：取参、把 HTTP 侧信息（IP/UA）交给 Service。
+	// 人机校验、限频、锁定判定、登录日志都已在 authService.Login 内完成（规则 1）。
+	resp, err := ctl.authService.Login(&req, &dto.LoginContext{
+		IP:        common.NormalizeIP(c.ClientIP()),
+		UserAgent: c.Request.UserAgent(),
+	})
 	if err != nil {
-		recordLoginFailure(ctx, ipKey, accountKey)
-		ctl.saveLoginLog(c, 0, req.Username, 0, err.Error())
-		// 失败原因按语义区分：凭证错误/账号禁用等业务问题回 400，
-		// Redis 不可用等系统问题回 500 —— 后者不该记成「请求参数错误」
 		common.FailWith(c, err)
 		return
 	}
-
-	// 登录成功，清除失败计数
-	_ = cache.Del(ctx, ipKey, accountKey)
-
-	// 从签发的 token 解析租户，使登录日志归属到正确租户
-	loginTenantID := uint(0)
-	if claims, err := auth.ParseToken(resp.AccessToken); err == nil {
-		loginTenantID = claims.TenantID
-	}
-	ctl.saveLoginLog(c, loginTenantID, req.Username, 1, "登录成功")
 	common.Success(c, resp)
 }
 
@@ -136,25 +87,17 @@ func (ctl *AuthController) Logout(c *gin.Context) {
 	var req dto.LogoutRequest
 	_ = c.ShouldBindJSON(&req)
 
-	authHeader := c.GetHeader("Authorization")
-	if authHeader != "" && len(authHeader) > 7 {
-		accessToken := authHeader[7:]
-		// 将 access token 加入黑名单，剩余有效时间作为过期时间
-		if claims, err := auth.ParseToken(accessToken); err == nil {
-			if claims.ExpiresAt != nil {
-				if ttl := time.Until(claims.ExpiresAt.Time); ttl > 0 {
-					if err := cache.RevokeToken(context.Background(), accessToken, ttl); err != nil {
-						logger.Log.Warnf("token加入黑名单失败: %v", err)
-					}
-				}
-			}
-			// 连带吊销 refresh token。
-			// 之前这里把 access token 当作 refresh token 去删（键名 refresh_token:<accessToken>），
-			// 删的是一个从未存在的键，导致登出后 refresh token 仍可换发新 access token。
-			if err := ctl.authService.Logout(claims.UserID, req.RefreshToken); err != nil {
-				logger.Log.Warnf("吊销refresh token失败: %v", err)
-			}
-		}
+	// 只负责取 header 与 body；拉黑与吊销都在 Service。
+	// 注：历史上这里曾把 access token 当 refresh token 去删（键名对不上），
+	// 导致登出后 refresh token 仍可换发新 access token —— 该修复在 Service 内保留。
+	accessToken := ""
+	if authHeader := c.GetHeader("Authorization"); len(authHeader) > 7 {
+		accessToken = authHeader[7:]
+	}
+
+	if err := ctl.authService.LogoutByToken(accessToken, req.RefreshToken); err != nil {
+		common.FailWith(c, err)
+		return
 	}
 	common.Success(c, nil)
 }
@@ -181,70 +124,3 @@ func (ctl *AuthController) GetUserInfo(c *gin.Context) {
 	common.Success(c, resp)
 }
 
-// loginLocked 判断任一维度的失败次数是否已达上限。
-// Redis 不可用（读取报错）时不做限制，避免缓存故障导致正常用户无法登录。
-func loginLocked(ctx context.Context, keys ...string) bool {
-	for _, key := range keys {
-		v, err := cache.Get(ctx, key)
-		if err != nil {
-			continue
-		}
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			continue
-		}
-		if n >= maxLoginAttempts {
-			return true
-		}
-	}
-	return false
-}
-
-// recordLoginFailure 记录一次登录失败。
-//
-// 用 SETNX 带 TTL 建键，而不是「INCR 之后再 EXPIRE」：
-// 后者是两次独立往返，若 INCR 成功而 EXPIRE 失败（网络抖动、Redis 主从切换），
-// 该 key 就**永远不会过期**，这个 IP 或账号会被永久锁死，只能人工清 Redis 才能恢复。
-// SETNX 把 TTL 与建键合成一次原子操作；键已存在时不做任何事，原有 TTL 不受影响，
-// 因此窗口语义仍是「首次失败起算的固定 15 分钟」。
-func recordLoginFailure(ctx context.Context, keys ...string) {
-	for _, key := range keys {
-		if _, err := cache.SetNX(ctx, key, 0, loginLockDuration); err != nil {
-			continue
-		}
-		if _, err := cache.Incr(ctx, key); err != nil {
-			continue
-		}
-	}
-}
-
-// saveLoginLog 记录登录日志；tenantID 为登录用户的租户，未识别时传 0
-func (ctl *AuthController) saveLoginLog(c *gin.Context, tenantID uint, username string, status int8, msg string) {
-	ua := c.Request.UserAgent()
-	browser := parseUA(ua, []string{"Chrome", "Firefox", "Safari", "Edge", "Opera"})
-	os := parseUA(ua, []string{"Windows", "Mac OS X", "Linux", "Android", "iOS"})
-
-	log := &model.SysLoginLog{
-		TenantID:  tenantID,
-		Username:  username,
-		IP:        common.NormalizeIP(c.ClientIP()),
-		Browser:   browser,
-		OS:        os,
-		Status:    status,
-		Msg:       msg,
-		LoginTime: time.Now(),
-	}
-	if err := ctl.logService.CreateLoginLog(log); err != nil {
-		logger.Log.Warnf("记录登录日志失败: %v", err)
-	}
-}
-
-func parseUA(ua string, keywords []string) string {
-	lower := strings.ToLower(ua)
-	for _, kw := range keywords {
-		if strings.Contains(lower, strings.ToLower(kw)) {
-			return kw
-		}
-	}
-	return "Unknown"
-}

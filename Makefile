@@ -1,4 +1,4 @@
-.PHONY: build run clean lint test swagger migrate migrate-status
+.PHONY: build run clean lint test check check-backend check-frontend swagger migrate migrate-status
 
 APP_NAME := go-admin
 BUILD_DIR := ./dist
@@ -17,6 +17,17 @@ lint:
 
 test:
 	go test ./...
+
+# check 与 CI（.github/workflows/ci.yml）保持一致：提交前跑一遍即可等价于 CI
+check: check-backend check-frontend
+
+check-backend: lint test
+	@echo "后端检查通过"
+
+check-frontend:
+	cd web && npx vue-tsc --noEmit
+	cd web && npx vite build
+	@echo "前端检查通过"
 
 # 执行未应用的数据库迁移（读取 config/config.yaml 里的 database.* 配置）
 migrate:
@@ -39,6 +50,7 @@ help:
 	@echo "  make clean          - Clean build artifacts"
 	@echo "  make lint           - Run go vet"
 	@echo "  make test           - Run tests"
+	@echo "  make check          - 跑一遍 CI 的全部检查（后端 + 前端），提交前建议执行"
 	@echo "  make migrate        - Apply pending DB migrations"
 	@echo "  make migrate-status - Show DB migration status"
 	@echo "  make swagger        - Generate swagger docs"

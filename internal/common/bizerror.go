@@ -33,6 +33,14 @@ func NewBizErrorf(format string, args ...interface{}) error {
 	return &BizError{Code: CodeBadRequest, Msg: fmt.Sprintf(format, args...)}
 }
 
+// NewBizErrorWithCode 业务失败但需要指定业务码（如 CodeFileTooLarge）。
+//
+// 为什么不直接用 NewBizError：不同业务码前端处理方式不同（文件过大要提示换文件，
+// 参数错误只需弹一下），统一成 400 会让前端只能靠文案区分。
+func NewBizErrorWithCode(code int, msg string) error {
+	return &BizError{Code: code, Msg: msg}
+}
+
 // NewNotFoundError 操作的目标资源不存在，对应 404。
 // 与 400 的区别：400 是「请求本身有问题」，404 是「请求没问题但引用了不存在的东西」。
 func NewNotFoundError(msg string) error {

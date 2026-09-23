@@ -31,8 +31,7 @@ func (ctl *LogController) FindOperationLogList(c *gin.Context) {
 		PageSize int    `form:"pageSize"`
 	}
 	c.ShouldBindQuery(&req)
-	req.Page = common.NormalizePage(req.Page)
-	req.PageSize = common.NormalizePageSize(req.PageSize)
+	req.Page, req.PageSize = common.NormalizePageParams(req.Page, req.PageSize)
 	tenantID := common.GetTenantID(c)
 	list, total, err := ctl.logService.FindOperationLogList(tenantID, req.Title, nil, req.Page, req.PageSize)
 	if err != nil {
@@ -58,8 +57,7 @@ func (ctl *LogController) FindLoginLogList(c *gin.Context) {
 		PageSize int    `form:"pageSize"`
 	}
 	c.ShouldBindQuery(&req)
-	req.Page = common.NormalizePage(req.Page)
-	req.PageSize = common.NormalizePageSize(req.PageSize)
+	req.Page, req.PageSize = common.NormalizePageParams(req.Page, req.PageSize)
 	tenantID := common.GetTenantID(c)
 	list, total, err := ctl.logService.FindLoginLogList(tenantID, req.Username, nil, req.Page, req.PageSize)
 	if err != nil {

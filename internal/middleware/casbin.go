@@ -255,7 +255,11 @@ func resolveRoleCodes(c *gin.Context) []string {
 	}
 
 	if len(codes) > 0 {
-		_ = cache.Set(ctx, cacheKey, strings.Join(codes, ","), rbacRoleCacheTTL)
+		// 缓存写失败只影响性能（下次调用重新查库），不影响正确性，
+		// 因此不打断请求；但也不静默丢弃 —— 留 Warn 以便发现 Redis 异常。
+		if err := cache.Set(ctx, cacheKey, strings.Join(codes, ","), rbacRoleCacheTTL); err != nil {
+			logger.Log.Warnf("[casbin] 角色缓存写入失败（仅影响性能）: userID=%d err=%v", userID, err)
+		}
 	}
 	return codes
 }
@@ -277,5 +281,10 @@ func splitRoleCodes(v string) []string {
 // ClearRoleCache 清除指定用户的角色缓存。
 // 角色授权/编码变更后调用，避免缓存导致权限延迟生效。
 func ClearRoleCache(tenantID, userID uint) {
-	_ = cache.Del(context.Background(), fmt.Sprintf("rbac:roles:%d:%d", tenantID, userID))
+	// 这个错误不能静默：清理失败意味着被撤销的角色仍会命中缓存，
+	// 直到 TTL 到期前权限变更都不生效 —— 属于「撤销不生效」的安全问题。
+	if err := cache.Del(context.Background(), fmt.Sprintf("rbac:roles:%d:%d", tenantID, userID)); err != nil {
+		logger.Log.Errorf("[casbin] 角色缓存清理失败，权限变更可能延迟生效: tenant=%d user=%d err=%v",
+			tenantID, userID, err)
+	}
 }
