@@ -65,14 +65,21 @@ type CreateMemberLevelRequest struct {
 	Status    int8    `json:"status" binding:"oneof=0 1"`
 }
 
-type UpdateMemberLevelRequest struct {
-	ID        uint    `json:"id" binding:"required"`
-	Name      string  `json:"name" binding:"required,max=64"`
-	MinPoints int64   `json:"minPoints"`
-	Discount  float64 `json:"discount" binding:"min=1,max=10"`
-	Icon      string  `json:"icon" binding:"max=256"`
-	Sort      int     `json:"sort"`
-	Status    int8    `json:"status" binding:"oneof=0 1"`
+type UpdateMemberLevelRequest struct//
+// 与 UpdateMemberRequest / UpdateRoleRequest 同一套约定：**部分更新**。
+// 数值字段与「可清空」字段用指针，以区分「未提供」与「显式设为 0 / 空串」——
+// 用值类型的话，oneof=0 1 这类校验会对缺省零值生效，把部分更新请求挡在门外
+// （角色与会员就各踩过一次，一个导致权限分配恒 400，一个把会员改成停用）。
+{
+	ID        uint     `json:"id" binding:"required"`
+	Name      string   `json:"name" binding:"omitempty,max=64"`
+	MinPoints *int64   `json:"minPoints"`
+	// 折扣率仍用浮点：它在库里就是浮点列，改整数需要迁移，
+	// 且不参与金额计算（只作为展示与换算系数），风险低于改动面。
+	Discount  *float64 `json:"discount" binding:"omitempty,min=1,max=10"`
+	Icon      *string  `json:"icon" binding:"omitempty,max=256"`
+	Sort      *int     `json:"sort"`
+	Status    *int8    `json:"status" binding:"omitempty,oneof=0 1"`
 }
 
 type MemberLevelListRequest struct {
@@ -88,12 +95,17 @@ type CreateMemberTagRequest struct {
 	Status int8   `json:"status" binding:"oneof=0 1"`
 }
 
-type UpdateMemberTagRequest struct {
-	ID     uint   `json:"id" binding:"required"`
-	Name   string `json:"name" binding:"required,max=64"`
-	Color  string `json:"color" binding:"max=20"`
-	Sort   int    `json:"sort"`
-	Status int8   `json:"status" binding:"oneof=0 1"`
+type UpdateMemberTagRequest struct//
+// 与 UpdateMemberRequest / UpdateRoleRequest 同一套约定：**部分更新**。
+// 数值字段与「可清空」字段用指针，以区分「未提供」与「显式设为 0 / 空串」——
+// 用值类型的话，oneof=0 1 这类校验会对缺省零值生效，把部分更新请求挡在门外
+// （角色与会员就各踩过一次，一个导致权限分配恒 400，一个把会员改成停用）。
+{
+	ID     uint    `json:"id" binding:"required"`
+	Name   string  `json:"name" binding:"omitempty,max=64"`
+	Color  *string `json:"color" binding:"omitempty,max=20"`
+	Sort   *int    `json:"sort"`
+	Status *int8   `json:"status" binding:"omitempty,oneof=0 1"`
 }
 
 type MemberTagListRequest struct {

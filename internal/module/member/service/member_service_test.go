@@ -263,3 +263,159 @@ func TestUpdateTagsRejectsCrossTenant(t *testing.T) {
 		t.Errorf("校验失败后原有标签被破坏: %v", tagIDs)
 	}
 }
+
+// newMemberWithProfile 创建一个字段饱满的会员：性别、生日、备注、等级、标签都有值，
+// 用于验证「部分更新不得清掉未提供的字段」。
+func newMemberWithProfile(t *testing.T, s *memberService, phone string, levelID uint) *model.Member {
+	t.Helper()
+	birthday := "1990-05-20"
+	req := baseCreateReq(phone)
+	req.Gender = 2
+	req.Birthday = birthday
+	req.LevelID = levelID
+	req.Remark = "重要会员"
+	if err := s.Create(req, 1, tenantA); err != nil {
+		t.Fatalf("创建会员失败: %v", err)
+	}
+	m, err := s.memberRepo.FindByPhone(tenantA, phone)
+	if err != nil || m == nil {
+		t.Fatalf("会员未创建: %v", err)
+	}
+	return m
+}
+
+// TestUpdateMemberLevelOnlyKeepsOtherFields 「只改等级」事故回归。
+//
+// 事故实测记录：前端「修改等级」只提交 {id, levelId}，旧实现无条件赋值
+// 把 status 从 1 清成 0（会员被静默停用）、gender 从 2 清成 0。
+// 本用例复现该请求形状，锁定「未提供的字段必须原样保留」。
+// 如果实现被改回无条件赋值，这里会红。
+func TestUpdateMemberLevelOnlyKeepsOtherFields(t *testing.T) {
+	s := newTestMemberService(t)
+	level := seedLevel(t, tenantA, "白金会员")
+	m := newMemberWithProfile(t, s, "13800000021", 0)
+
+	err := s.Update(&dto.UpdateMemberRequest{ID: m.ID, LevelID: &level.ID}, 1, tenantA)
+	if err != nil {
+		t.Fatalf("只提交等级应更新成功: %v", err)
+	}
+
+	got, err := s.memberRepo.FindByID(tenantA, m.ID)
+	if err != nil {
+		t.Fatalf("回读会员失败: %v", err)
+	}
+	if got.LevelID != level.ID {
+		t.Errorf("等级未更新：期望 %d，实际 %d", level.ID, got.LevelID)
+	}
+	if got.Status != 1 {
+		t.Errorf("status 被部分更新清成停用（复现了历史事故）：%d", got.Status)
+	}
+	if got.Gender != 2 {
+		t.Errorf("gender 被部分更新清零（复现了历史事故）：%d", got.Gender)
+	}
+	if got.Nickname != "测试会员" {
+		t.Errorf("nickname 不应变化: %q", got.Nickname)
+	}
+	if got.Remark != "重要会员" {
+		t.Errorf("remark 不应变化: %q", got.Remark)
+	}
+	if got.Birthday == nil {
+		t.Error("birthday 不应被清掉")
+	}
+	if got.MemberNo != m.MemberNo {
+		t.Errorf("会员编号不应变化: %q -> %q", m.MemberNo, got.MemberNo)
+	}
+}
+
+// TestUpdateMemberExplicitZeroStatus 「显式停用」必须生效。
+//
+// 指针方案的另一半约束：放宽对零值的校验之后，用户仍要能把状态改成 0。
+// 若实现把零值当「未提供」跳过，停用操作会静默失败。
+func TestUpdateMemberExplicitZeroStatus(t *testing.T) {
+	s := newTestMemberService(t)
+	m := newMemberWithProfile(t, s, "13800000022", 0)
+
+	status := int8(0)
+	err := s.Update(&dto.UpdateMemberRequest{ID: m.ID, Status: &status}, 1, tenantA)
+	if err != nil {
+		t.Fatalf("停用会员应成功: %v", err)
+	}
+
+	got, _ := s.memberRepo.FindByID(tenantA, m.ID)
+	if got.Status != 0 {
+		t.Errorf("显式 status=0 未生效，实际 %d", got.Status)
+	}
+	if got.Gender != 2 {
+		t.Errorf("只改状态不应影响性别: %d", got.Gender)
+	}
+}
+
+// TestUpdateMemberEmptyBirthdayClears 生日指针的三态语义：
+// nil 不动、非空串设置、空串清空。
+func TestUpdateMemberEmptyBirthdayClears(t *testing.T) {
+	s := newTestMemberService(t)
+	m := newMemberWithProfile(t, s, "13800000023", 0)
+	if m.Birthday == nil {
+		t.Fatal("准备数据失败：生日应为已设置状态")
+	}
+
+	empty := ""
+	if err := s.Update(&dto.UpdateMemberRequest{ID: m.ID, Birthday: &empty}, 1, tenantA); err != nil {
+		t.Fatalf("清空生日应成功: %v", err)
+	}
+	got, _ := s.memberRepo.FindByID(tenantA, m.ID)
+	if got.Birthday != nil {
+		t.Errorf("传空串应清空生日，实际 %v", *got.Birthday)
+	}
+}
+
+// TestUpdateMemberEmptyTagIdsClears 标签的 nil / 空切片语义区分：
+// TagIds 缺省（nil）不动标签；显式传 [] 才清空。
+func TestUpdateMemberEmptyTagIdsClears(t *testing.T) {
+	s := newTestMemberService(t)
+	tag := seedTag(t, tenantA, "待清空标签")
+	req := baseCreateReq("13800000024")
+	req.TagIds = []uint{tag.ID}
+	if err := s.Create(req, 1, tenantA); err != nil {
+		t.Fatalf("准备数据失败: %v", err)
+	}
+	m, _ := s.memberRepo.FindByPhone(tenantA, req.Phone)
+
+	// 只改昵称：标签必须原样保留
+	if err := s.Update(&dto.UpdateMemberRequest{ID: m.ID, Nickname: "改名"}, 1, tenantA); err != nil {
+		t.Fatalf("只改昵称应成功: %v", err)
+	}
+	tagIDs, _ := s.memberRepo.FindTagIDsByMemberID(tenantA, m.ID)
+	if len(tagIDs) != 1 {
+		t.Fatalf("未提供 tagIds 时标签不应变化: %v", tagIDs)
+	}
+
+	// 显式空切片：清空
+	if err := s.Update(&dto.UpdateMemberRequest{ID: m.ID, TagIds: []uint{}}, 1, tenantA); err != nil {
+		t.Fatalf("清空标签应成功: %v", err)
+	}
+	tagIDs, _ = s.memberRepo.FindTagIDsByMemberID(tenantA, m.ID)
+	if len(tagIDs) != 0 {
+		t.Errorf("传空切片应清空标签，实际 %v", tagIDs)
+	}
+}
+
+// TestUpdateMemberCrossTenantRejected 拿其他租户的会员 ID 更新必须失败。
+func TestUpdateMemberCrossTenantRejected(t *testing.T) {
+	s := newTestMemberService(t)
+	req := baseCreateReq("13800000025")
+	if err := s.Create(req, 1, tenantB); err != nil {
+		t.Fatalf("准备数据失败: %v", err)
+	}
+	m, _ := s.memberRepo.FindByPhone(tenantB, req.Phone)
+
+	nickname := "劫持"
+	err := s.Update(&dto.UpdateMemberRequest{ID: m.ID, Nickname: nickname}, 1, tenantA)
+	if err == nil {
+		t.Fatal("更新其他租户的会员应失败")
+	}
+	got, _ := s.memberRepo.FindByID(tenantB, m.ID)
+	if got.Nickname == nickname {
+		t.Error("跨租户更新竟然生效了")
+	}
+}

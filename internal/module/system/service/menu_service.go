@@ -102,32 +102,61 @@ func (s *menuService) Update(req *dto.UpdateMenuRequest, operatorID uint) error 
 		return err
 	}
 
-	if err := s.ensureParentExists(req.ParentID); err != nil {
-		return err
+	// ParentID 为 nil 表示本次不移动菜单，父级相关校验一并跳过
+	if req.ParentID != nil {
+		if err := s.ensureParentExists(*req.ParentID); err != nil {
+			return err
+		}
+
+		// 禁止把菜单挂到自己或自己的后代之下：会形成环，
+		// 该子树将无法从根节点遍历到，等于从界面上消失却仍留在库里
+		if cycle, err := hasCycleInHierarchy(req.ID, *req.ParentID, s.menuRepo.FindParentID); err != nil {
+			return err
+		} else if cycle {
+			return common.NewBizError("不能将菜单移动到它自己或它的下级之下")
+		}
+		menu.ParentID = *req.ParentID
 	}
 
-	// 禁止把菜单挂到自己或自己的后代之下：会形成环，
-	// 该子树将无法从根节点遍历到，等于从界面上消失却仍留在库里
-	if cycle, err := hasCycleInHierarchy(req.ID, req.ParentID, s.menuRepo.FindParentID); err != nil {
-		return err
-	} else if cycle {
-		return common.NewBizError("不能将菜单移动到它自己或它的下级之下")
+	if req.Name != "" {
+		menu.Name = req.Name
 	}
-
-	menu.ParentID = req.ParentID
-	menu.Name = req.Name
-	menu.Path = req.Path
-	menu.Component = req.Component
-	menu.Redirect = req.Redirect
-	menu.Icon = req.Icon
-	menu.Title = req.Title
-	menu.Type = req.Type
-	menu.Permission = req.Permission
-	menu.Sort = req.Sort
-	menu.Visible = req.Visible
-	menu.Status = req.Status
-	menu.IsExternal = req.IsExternal
-	menu.IsCache = req.IsCache
+	if req.Path != nil {
+		menu.Path = *req.Path
+	}
+	if req.Component != nil {
+		menu.Component = *req.Component
+	}
+	if req.Redirect != nil {
+		menu.Redirect = *req.Redirect
+	}
+	if req.Icon != nil {
+		menu.Icon = *req.Icon
+	}
+	if req.Title != "" {
+		menu.Title = req.Title
+	}
+	if req.Type != nil {
+		menu.Type = *req.Type
+	}
+	if req.Permission != nil {
+		menu.Permission = *req.Permission
+	}
+	if req.Sort != nil {
+		menu.Sort = *req.Sort
+	}
+	if req.Visible != nil {
+		menu.Visible = *req.Visible
+	}
+	if req.Status != nil {
+		menu.Status = *req.Status
+	}
+	if req.IsExternal != nil {
+		menu.IsExternal = *req.IsExternal
+	}
+	if req.IsCache != nil {
+		menu.IsCache = *req.IsCache
+	}
 	menu.UpdateBy = operatorID
 
 	if err := s.menuRepo.Update(menu); err != nil {

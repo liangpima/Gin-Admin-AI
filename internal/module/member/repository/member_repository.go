@@ -146,14 +146,24 @@ func (r *memberRepository) ReplaceTags(tenantID, memberID uint, tagIDs []uint) e
 
 // FindTagIDsByMemberID 查询会员的标签 ID 列表。
 //
-// 同样不能对 pay_member_tag_rel 套 TenantScope（该表无 tenant_id 列）。
-// 隔离性由调用方保证：memberID 必然来自一次已按租户过滤的会员查询
-// （见 memberService.FindList / UpdateTags），因此这里不再重复过滤。
+// 同样不能对 pay_member_tag_rel 套 TenantScope（该表无 tenant_id 列），
+// 改为按「member_id 属于本租户」的子查询施加约束（与 FindMenuIDsByRoleID 同构）。
+//
+// 调用方（memberService）确实已按租户过滤过会员，这里是**第二道**防线：
+// 参数写了 tenantID 却不用它，等于邀请后来者直接传任意 memberID 读别人数据，
+// 而签名本身还宣称支持租户隔离。宁可多查一次子查询，也不留这个陷阱。
 func (r *memberRepository) FindTagIDsByMemberID(tenantID, memberID uint) ([]uint, error) {
 	var tagIDs []uint
-	err := database.DB.Model(&model.MemberTagRel{}).
-		Where("member_id = ?", memberID).
-		Pluck("tag_id", &tagIDs).Error
+	query := database.DB.Model(&model.MemberTagRel{}).Where("member_id = ?", memberID)
+	if tenantID > 0 {
+		// 限定会员必须属于当前租户：memberID 是可枚举的主键，
+		// 不加过滤则任意租户都能读出其他租户会员的标签关联。
+		// 关联表 pay_member_tag_rel 只有 member_id/tag_id，无 tenant_id，
+		// 只能通过子查询回连 pay_member 施加约束（与 FindMenuIDsByRoleID 同构）。
+		query = query.Where("member_id IN (?)",
+			database.DB.Model(&model.Member{}).Select("id").Where("tenant_id = ?", tenantID))
+	}
+	err := query.Pluck("tag_id", &tagIDs).Error
 	return tagIDs, err
 }
 

@@ -50,12 +50,24 @@ func (s *memberLevelService) Update(req *dto.UpdateMemberLevelRequest, operatorI
 	if err != nil {
 		return common.NewNotFoundError("等级不存在")
 	}
-	level.Name = req.Name
-	level.MinPoints = req.MinPoints
-	level.Discount = req.Discount
-	level.Icon = req.Icon
-	level.Sort = req.Sort
-	level.Status = req.Status
+	if req.Name != "" {
+		level.Name = req.Name
+	}
+	if req.MinPoints != nil {
+		level.MinPoints = *req.MinPoints
+	}
+	if req.Discount != nil {
+		level.Discount = *req.Discount
+	}
+	if req.Icon != nil {
+		level.Icon = *req.Icon
+	}
+	if req.Sort != nil {
+		level.Sort = *req.Sort
+	}
+	if req.Status != nil {
+		level.Status = *req.Status
+	}
 	level.UpdateBy = operatorID
 	return s.levelRepo.Update(tenantID, level)
 }

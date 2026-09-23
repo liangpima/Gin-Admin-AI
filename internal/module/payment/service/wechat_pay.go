@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"crypto"
 	"crypto/aes"
@@ -14,13 +13,13 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io"
-	"net/http"
 	neturl "net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"go-admin/pkg/httpx"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -37,16 +36,27 @@ type WechatPayConfig struct {
 	NotifyURL string
 }
 
+// WechatPayGateway 微信支付网关。
+//
+// 出网统一走 pkg/httpx：Service 层不直接依赖 net/http（分层约定）。
+// 超时由 httpx 统一给（默认 10s），不在这里重复设。
 type WechatPayGateway struct {
 	config WechatPayConfig
-	client *http.Client
+	client *httpx.Client
 }
 
 func NewWechatPayGateway(cfg WechatPayConfig) *WechatPayGateway {
 	return &WechatPayGateway{
 		config: cfg,
-		client: &http.Client{Timeout: 10 * time.Second},
+		client: httpx.NewClient(httpx.DefaultTimeout),
 	}
+}
+
+// HeaderGetter 只声明本包用到的读取能力，不直接依赖 http.Header。
+// http.Header 本身就有 Get(string) string，天然满足此接口，
+// 所以 controller 侧传 c.Request.Header 无需任何改动。
+type HeaderGetter interface {
+	Get(key string) string
 }
 
 func (g *WechatPayGateway) Prepay(ctx context.Context, orderNo, subject, body string, amount int64, openID string) (map[string]interface{}, error) {
@@ -129,7 +139,7 @@ func (g *WechatPayGateway) generateJSAPIPayInfo(prepayID string) (map[string]int
 	}, nil
 }
 
-func (g *WechatPayGateway) ParseNotify(body []byte, headers http.Header) (*PayNotifyResult, error) {
+func (g *WechatPayGateway) ParseNotify(body []byte, headers HeaderGetter) (*PayNotifyResult, error) {
 	result := &PayNotifyResult{
 		Status:  "fail",
 		RawData: string(body),
@@ -405,39 +415,30 @@ func (g *WechatPayGateway) decryptResource(ciphertext, nonce, associatedData str
 // 才能真正中断这次出网调用。早前这里写死 context.Background()，
 // 而调用方一律传 nil，导致网关方法签名上的 ctx 参数形同虚设。
 //
-// 入口的 nil 防御不是多余的：http.NewRequestWithContext 收到 nil ctx
-// 会直接 panic，而这是资金链路，宁可退化为无取消能力也不能崩。
+// 入口的 nil ctx 防御保留在这里而不是下沉到 httpx：上层传 nil 是
+// 「没有取消能力」的信号，网关应显式降级而不是让底层 panic。
+// （资金链路宁可退化也不能崩。）
 func (g *WechatPayGateway) doRequest(ctx context.Context, method, url string, body []byte) ([]byte, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
+	// 签名必须在请求发出前算好：APIv3 的签名串里含 body 摘要，
+	// 顺序错了会导致网关侧验签失败。
 	authorization, err := g.generateAuthorization(method, url, string(body))
 	if err != nil {
 		return nil, fmt.Errorf("生成支付请求签名失败: %w", err)
 	}
-	req.Header.Set("Authorization", authorization)
 
-	resp, err := g.client.Do(req)
+	header := map[string]string{
+		"Content-Type":  "application/json",
+		"Accept":        "application/json",
+		"Authorization": authorization,
+	}
+	// 非 2xx 也要读 body：微信把错误码放在响应体里，丢掉就没法定位问题
+	respBody, status, err := g.client.Do(ctx, method, url, body, header)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("wechatpay request failed(%d): %s", resp.StatusCode, string(respBody))
+	if status >= 400 {
+		return nil, fmt.Errorf("wechatpay request failed(%d): %s", status, string(respBody))
 	}
-
 	return respBody, nil
 }
 

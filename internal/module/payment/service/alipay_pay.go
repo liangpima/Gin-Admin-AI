@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -11,13 +10,13 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"go-admin/pkg/httpx"
 )
 
 type AlipayConfig struct {
@@ -28,15 +27,18 @@ type AlipayConfig struct {
 	PublicKeyID string
 }
 
+// AlipayGateway 支付宝网关。
+//
+// 出网统一走 pkg/httpx：Service 层不直接依赖 net/http（分层约定）。
 type AlipayGateway struct {
 	config AlipayConfig
-	client *http.Client
+	client *httpx.Client
 }
 
 func NewAlipayGateway(cfg AlipayConfig) *AlipayGateway {
 	return &AlipayGateway{
 		config: cfg,
-		client: &http.Client{Timeout: 10 * time.Second},
+		client: httpx.NewClient(httpx.DefaultTimeout),
 	}
 }
 
@@ -428,8 +430,9 @@ func (g *AlipayGateway) getPublicKey() (*rsa.PublicKey, error) {
 // doRequest 发起一次支付宝网关请求。
 //
 // ctx 由调用方透传，使上层超时/取消能真正中断这次出网调用。
-// 入口的 nil 防御不是多余的：http.NewRequestWithContext 收到 nil ctx
-// 会直接 panic，而这是资金链路，宁可退化为无取消能力也不能崩。
+//
+// nil ctx 防御保留在这里：上层传 nil 是「没有取消能力」的信号，
+// 网关应显式降级，而不是指望底层不炸 —— 这是资金链路。
 func (g *AlipayGateway) doRequest(ctx context.Context, method, requestURL string, params map[string]string) ([]byte, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -440,19 +443,17 @@ func (g *AlipayGateway) doRequest(ctx context.Context, method, requestURL string
 		form.Set(k, v)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, requestURL, bytes.NewBufferString(form.Encode()))
+	respBody, status, err := g.client.Do(ctx, method, requestURL, []byte(form.Encode()),
+		map[string]string{"Content-Type": "application/x-www-form-urlencoded"})
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := g.client.Do(req)
-	if err != nil {
-		return nil, err
+	// 支付宝把错误放在 JSON 里的 code 字段，所以这里对非 2xx 只做兜底报错，
+	// 前提是响应体确实不是 JSON（JSON 场景交由解析方给出更精确的提示）。
+	if status >= 400 && !json.Valid(respBody) {
+		return nil, fmt.Errorf("alipay request failed(%d): %s", status, string(respBody))
 	}
-	defer resp.Body.Close()
-
-	return io.ReadAll(resp.Body)
+	return respBody, nil
 }
 
 func buildFormQuery(params map[string]string) string {

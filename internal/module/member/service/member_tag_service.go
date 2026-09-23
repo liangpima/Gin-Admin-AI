@@ -48,10 +48,18 @@ func (s *memberTagService) Update(req *dto.UpdateMemberTagRequest, operatorID, t
 	if err != nil {
 		return common.NewNotFoundError("标签不存在")
 	}
-	tag.Name = req.Name
-	tag.Color = req.Color
-	tag.Sort = req.Sort
-	tag.Status = req.Status
+	if req.Name != "" {
+		tag.Name = req.Name
+	}
+	if req.Color != nil {
+		tag.Color = *req.Color
+	}
+	if req.Sort != nil {
+		tag.Sort = *req.Sort
+	}
+	if req.Status != nil {
+		tag.Status = *req.Status
+	}
 	tag.UpdateBy = operatorID
 	return s.tagRepo.Update(tenantID, tag)
 }

@@ -25,6 +25,7 @@ type mockUserRepo struct {
 
 	// 记录调用情况，供断言
 	createdUsers    []*model.SysUser
+	updatedUsers    []*model.SysUser
 	replacedRoles   []uint
 	resetPwdCalls   int
 	lastResetPwdVal string
@@ -60,7 +61,13 @@ func (m *mockUserRepo) FindList(tenantID uint, username, phone string, status *i
 	return nil, 0, nil
 }
 
-func (m *mockUserRepo) Update(user *model.SysUser) error { return nil }
+func (m *mockUserRepo) Update(user *model.SysUser) error {
+	// 记录快照而非指针：Service 在 Update 前就地修改同一个对象，
+	// 只存指针的话断言时看到的永远是最终状态，检测不出「字段被清成零值」
+	snapshot := *user
+	m.updatedUsers = append(m.updatedUsers, &snapshot)
+	return nil
+}
 
 func (m *mockUserRepo) Delete(tenantID, id uint) error { return nil }
 

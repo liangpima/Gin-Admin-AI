@@ -437,3 +437,73 @@ func TestUserServiceUpdateRoles(t *testing.T) {
 		}
 	})
 }
+
+// TestUserUpdatePartialKeepsFields 「只改状态」的部分更新回归。
+//
+// 背景：UpdateUserRequest 改为指针语义后，nil 字段必须原样保留。
+// 若实现被改回无条件赋值，未提供的 email/phone/deptId/remark 会被清成零值。
+func TestUserUpdatePartialKeepsFields(t *testing.T) {
+	full := &model.SysUser{
+		Nickname: "老昵称",
+		Email:    "keep@example.com",
+		Phone:    "13800000001",
+		Status:   1,
+		DeptID:   9,
+	}
+	full.Remark = "保留我"
+	repo := &mockUserRepo{findByIDFn: func(uint, uint) (*model.SysUser, error) {
+		return full, nil
+	}}
+	svc := newTestUserService(repo)
+
+	status := int8(0)
+	if err := svc.Update(testTenantID, &dto.UpdateUserRequest{ID: full.ID, Status: &status}, 1); err != nil {
+		t.Fatalf("只改状态应成功: %v", err)
+	}
+	if len(repo.updatedUsers) != 1 {
+		t.Fatalf("应落库一次，实际 %d 次", len(repo.updatedUsers))
+	}
+	got := repo.updatedUsers[0]
+	if got.Status != 0 {
+		t.Errorf("显式 status=0 未生效: %d", got.Status)
+	}
+	if got.Email != "keep@example.com" {
+		t.Errorf("email 被部分更新清掉了: %q", got.Email)
+	}
+	if got.Phone != "13800000001" {
+		t.Errorf("phone 被部分更新清掉了: %q", got.Phone)
+	}
+	if got.DeptID != 9 {
+		t.Errorf("deptId 被部分更新清掉了: %d", got.DeptID)
+	}
+	if got.Remark != "保留我" {
+		t.Errorf("remark 被部分更新清掉了: %q", got.Remark)
+	}
+}
+
+// TestUserUpdateEmptyRoleIdsClears RoleIds 的 nil / 空切片语义：
+// 缺省不动角色，显式 [] 才清空（清空还要走 normalizeRoleIDs 后落库）。
+func TestUserUpdateEmptyRoleIdsClears(t *testing.T) {
+	repo := &mockUserRepo{findByIDFn: func(uint, uint) (*model.SysUser, error) {
+		return &model.SysUser{Nickname: "n"}, nil
+	}}
+	svc := newTestUserService(repo)
+
+	// nil：不触发 ReplaceRoles
+	if err := svc.Update(testTenantID, &dto.UpdateUserRequest{ID: 1, Nickname: stringp2("改名")}, 1); err != nil {
+		t.Fatalf("只改昵称应成功: %v", err)
+	}
+	if repo.replacedRoles != nil {
+		t.Error("未提供 roleIds 时不应改写角色关联")
+	}
+
+	// 空切片：清空
+	if err := svc.Update(testTenantID, &dto.UpdateUserRequest{ID: 1, RoleIds: []uint{}}, 1); err != nil {
+		t.Fatalf("清空角色应成功: %v", err)
+	}
+	if len(repo.updatedUsers) != 2 {
+		t.Fatalf("两次都应落库，实际 %d 次", len(repo.updatedUsers))
+	}
+}
+
+func stringp2(v string) *string { return &v }

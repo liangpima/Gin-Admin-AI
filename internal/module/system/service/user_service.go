@@ -206,12 +206,25 @@ func (s *userService) Update(tenantID uint, req *dto.UpdateUserRequest, operator
 		return err
 	}
 
-	user.Nickname = req.Nickname
-	user.Email = req.Email
-	user.Phone = req.Phone
-	user.Status = req.Status
-	user.DeptID = req.DeptID
-	user.Remark = req.Remark
+	// 逐字段判断「是否提供」：指针为 nil 即本次不涉及该字段
+	if req.Nickname != nil {
+		user.Nickname = *req.Nickname
+	}
+	if req.Email != nil {
+		user.Email = *req.Email
+	}
+	if req.Phone != nil {
+		user.Phone = *req.Phone
+	}
+	if req.Status != nil {
+		user.Status = *req.Status
+	}
+	if req.DeptID != nil {
+		user.DeptID = *req.DeptID
+	}
+	if req.Remark != nil {
+		user.Remark = *req.Remark
+	}
 	user.UpdateBy = operatorID
 
 	if err := s.userRepo.Update(user); err != nil {

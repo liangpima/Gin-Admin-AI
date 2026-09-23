@@ -85,24 +85,39 @@ func (s *deptService) Update(req *dto.UpdateDeptRequest, operatorID uint) error 
 		return err
 	}
 
-	if err := s.ensureParentExists(req.ParentID); err != nil {
-		return err
+	// ParentID 为 nil 表示本次不移动部门，父级相关校验一并跳过
+	if req.ParentID != nil {
+		if err := s.ensureParentExists(*req.ParentID); err != nil {
+			return err
+		}
+
+		// 同菜单：禁止把部门挂到自己或自己的下级之下，避免产生遍历不到的孤儿子树
+		if cycle, err := hasCycleInHierarchy(req.ID, *req.ParentID, s.deptRepo.FindParentID); err != nil {
+			return err
+		} else if cycle {
+			return common.NewBizError("不能将部门移动到它自己或它的下级之下")
+		}
+		dept.ParentID = *req.ParentID
 	}
 
-	// 同菜单：禁止把部门挂到自己或自己的下级之下，避免产生遍历不到的孤儿子树
-	if cycle, err := hasCycleInHierarchy(req.ID, req.ParentID, s.deptRepo.FindParentID); err != nil {
-		return err
-	} else if cycle {
-		return common.NewBizError("不能将部门移动到它自己或它的下级之下")
+	if req.Name != "" {
+		dept.Name = req.Name
 	}
-
-	dept.ParentID = req.ParentID
-	dept.Name = req.Name
-	dept.Sort = req.Sort
-	dept.Leader = req.Leader
-	dept.Phone = req.Phone
-	dept.Email = req.Email
-	dept.Status = req.Status
+	if req.Sort != nil {
+		dept.Sort = *req.Sort
+	}
+	if req.Leader != nil {
+		dept.Leader = *req.Leader
+	}
+	if req.Phone != nil {
+		dept.Phone = *req.Phone
+	}
+	if req.Email != nil {
+		dept.Email = *req.Email
+	}
+	if req.Status != nil {
+		dept.Status = *req.Status
+	}
 	dept.UpdateBy = operatorID
 
 	return s.deptRepo.Update(dept)
