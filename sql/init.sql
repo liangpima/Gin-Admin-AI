@@ -317,7 +317,19 @@ CREATE TABLE IF NOT EXISTS `casbin_rule` (
   `v4` varchar(200) DEFAULT '',
   `v5` varchar(200) DEFAULT '',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `idx_casbin_rule` (`ptype`, `v0`, `v1`, `v2`, `v3`, `v4`, `v5`)
+  -- 唯一索引必须带前缀长度。InnoDB 单个索引上限 3072 字节，而 utf8mb4 下
+  -- 7 列 × varchar(200) = 7 × 800 = 5600 字节，不带前缀会直接报
+  -- ERROR 1071 Specified key was too long。
+  --
+  -- 这个错误只在**全新库**执行本文件时暴露：表已存在时 CREATE TABLE IF NOT
+  -- EXISTS 会整条跳过，不做校验，所以老库上一直没暴露过。
+  --
+  -- 前缀长度按各列真实取值留足余量：ptype 只有 p/g、v1 固定 default、
+  -- v3 是 HTTP 方法、v4/v5 未使用，只有 v2 存权限码故给到 191。
+  -- 合计 (10+64+32+191+10+10+10) × 4 = 1308 字节。
+  -- 代价：前缀唯一意味着「前 191 字符相同」的两个权限码会被判重 ——
+  -- 实际权限码约 20 字符，不会触发。
+  UNIQUE KEY `idx_casbin_rule` (`ptype`(10), `v0`(64), `v1`(32), `v2`(191), `v3`(10), `v4`(10), `v5`(10))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Casbin权限策略表';
 
 -- ============================================================

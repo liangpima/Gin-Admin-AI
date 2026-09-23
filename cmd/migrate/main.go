@@ -101,9 +101,9 @@ const migrationsTable = "schema_migrations"
 
 // openDB 建立迁移专用的数据库连接。
 //
-// 与主服务不同的唯一一点是 multiStatements=true：一个迁移文件通常包含多条语句，
-// 不开这个参数驱动会拒绝执行。它常被担心的 SQL 注入在此不成立 ——
-// 迁移脚本是仓库内的受控文件，不存在任何用户输入拼接。
+// 刻意**不开** multiStatements：语句由 splitStatements 逐条切好后单条执行。
+// 开着它反而有害 —— 若切分出错（比如漏判了某个分隔符），多条语句会被当成
+// 一次请求悄悄执行掉；关掉之后服务端会直接报语法错误，问题立刻暴露。
 func openDB() (*sql.DB, error) {
 	dsn := config.Cfg.Database.DSN()
 
@@ -111,7 +111,7 @@ func openDB() (*sql.DB, error) {
 	if strings.Contains(dsn, "?") {
 		sep = "&"
 	}
-	dsn += sep + "multiStatements=true&timeout=10s"
+	dsn += sep + "timeout=10s"
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
@@ -193,17 +193,23 @@ func applyPending(db *sql.DB, pending []migration) error {
 			return fmt.Errorf("读取 %s 失败: %w", m.path, err)
 		}
 
-		fmt.Printf("执行 %s ... ", m.version)
+		// 先切分再执行：DELIMITER 是客户端指令，必须自己处理，
+		// 整文件丢给 db.Exec 会在 DELIMITER 处直接语法错误（详见 splitStatements）。
+		stmts, err := splitStatements(string(content))
+		if err != nil {
+			return fmt.Errorf("解析 %s 失败: %w", m.path, err)
+		}
+		if len(stmts) == 0 {
+			return fmt.Errorf("迁移 %s 未解析出任何语句（文件为空或只有注释）", m.version)
+		}
+
+		fmt.Printf("执行 %s (%d 条语句) ... ", m.version, len(stmts))
 
 		// 刻意不用事务：MySQL 的 DDL 隐式提交，事务无法回滚它，
 		// 加上只会让人误以为失败能自动回滚。幂等性由脚本自身保证。
-		if _, err := db.Exec(string(content)); err != nil {
+		if err := execStatements(db, m.version, stmts); err != nil {
 			fmt.Println("失败")
-			return fmt.Errorf(
-				"迁移 %s 执行失败: %w\n"+
-					"· 该文件**未**被标记为已应用，修正脚本后重新执行即可（前面成功的不会重跑）\n"+
-					"· DDL 无法回滚：若已执行了一部分语句，请对照脚本人工确认残留状态",
-				m.version, err)
+			return err
 		}
 
 		if _, err := db.Exec(
@@ -220,6 +226,35 @@ func applyPending(db *sql.DB, pending []migration) error {
 		fmt.Println("完成")
 	}
 	return nil
+}
+
+// execStatements 逐条执行语句。
+//
+// 为什么逐条而不是整文件一次性执行：出错时能指出**是第几条、内容是什么**。
+// 迁移脚本动辄上百行，只报「第 310 行附近语法错误」很难定位；
+// 而且 DDL 无法回滚，越早知道断点越容易判断残留状态。
+func execStatements(db *sql.DB, version string, stmts []string) error {
+	for i, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf(
+				"迁移 %s 第 %d/%d 条语句执行失败: %w\n"+
+					"· 语句内容: %s\n"+
+					"· 该文件**未**被标记为已应用，修正脚本后重新执行即可（前面成功的不会重跑）\n"+
+					"· DDL 无法回滚：若已执行了一部分语句，请对照脚本人工确认残留状态",
+				version, i+1, len(stmts), err, summarizeStatement(stmt))
+		}
+	}
+	return nil
+}
+
+// summarizeStatement 把语句压成单行并截断，用于错误提示。
+func summarizeStatement(stmt string) string {
+	const maxLen = 200
+	s := strings.Join(strings.Fields(stmt), " ")
+	if len([]rune(s)) <= maxLen {
+		return s
+	}
+	return string([]rune(s)[:maxLen]) + " ...（已截断）"
 }
 
 func exitf(format string, args ...interface{}) {
