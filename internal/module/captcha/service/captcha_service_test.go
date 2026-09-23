@@ -4,6 +4,8 @@ import (
 	"image"
 	"image/color"
 	"testing"
+
+	"go-admin/internal/module/captcha/model"
 )
 
 // TestRandomCharsNoDuplicate 验证生成的验证码字符互不重复。
@@ -219,5 +221,207 @@ func TestDrawnGlyphsMatchRecordedPoints(t *testing.T) {
 					round, string(runes[i]), cx, cy, points[i].X, points[i].Y, dx, dy, tolerancePx)
 			}
 		}
+	}
+}
+
+// TestMinPointGapExceedsHitArea 钉住「间距」与「点击容差」之间的不变量。
+//
+// 校验时以目标点为中心、±tolerancePx 的矩形为命中区。若两点间距
+// 小于 2*tolerancePx，两个命中区就会重叠：用户点在 A 的容差边缘，
+// 可能同时落在 B 的容差内，判定顺序一变结果就变 —— 表现为
+// 「明明点对了却验证失败」，且难以复现。改任一常量都必须满足该关系。
+func TestMinPointGapExceedsHitArea(t *testing.T) {
+	if minPointGap <= 2*tolerancePx {
+		t.Fatalf("目标点最小间距 %d 必须大于 2×点击容差 %d（= %d），否则命中区重叠",
+			minPointGap, tolerancePx, 2*tolerancePx)
+	}
+}
+
+// TestHasCollision 避让判定必须是「矩形相交」，而不是圆形距离。
+func TestHasCollision(t *testing.T) {
+	placed := []model.Point{{X: 300, Y: 100}}
+
+	cases := []struct {
+		name      string
+		x, y      int
+		wantClash bool
+	}{
+		{"完全重合", 300, 100, true},
+		{"横向过近", 300 + minPointGap - 1, 100, true},
+		{"纵向过近", 300, 100 + minPointGap - 1, true},
+		{"横向刚好达标", 300 + minPointGap, 100, false},
+		{"纵向刚好达标", 300, 100 + minPointGap, false},
+		{"对角线方向：两轴都过近", 300 + minPointGap - 1, 100 + minPointGap - 1, true},
+		{"远距离", 50, 190, false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := hasCollision(c.x, c.y, placed); got != c.wantClash {
+				t.Errorf("hasCollision(%d,%d) = %v，期望 %v", c.x, c.y, got, c.wantClash)
+			}
+		})
+	}
+}
+
+// TestRandomPointsNoCollision 多轮生成，断言任意两点都满足避让约束。
+//
+// 单轮通过可能是碰巧，所以跑多轮；同时覆盖边界内的随机性。
+func TestRandomPointsNoCollision(t *testing.T) {
+	const rounds = 300
+	s := &captchaService{}
+
+	for round := 0; round < rounds; round++ {
+		points, err := s.randomPoints(charCount)
+		if err != nil {
+			t.Fatalf("第 %d 轮生成坐标失败: %v", round, err)
+		}
+		if len(points) != charCount {
+			t.Fatalf("第 %d 轮应生成 %d 个点，实际 %d 个", round, charCount, len(points))
+		}
+
+		for i := 0; i < len(points); i++ {
+			for j := i + 1; j < len(points); j++ {
+				dx := absInt(points[i].X - points[j].X)
+				dy := absInt(points[i].Y - points[j].Y)
+				if dx < minPointGap && dy < minPointGap {
+					t.Fatalf("第 %d 轮第 %d/%d 点相撞：(%d,%d) 与 (%d,%d)，dx=%d dy=%d（均需 ≥ %d）",
+						round, i+1, j+1, points[i].X, points[i].Y, points[j].X, points[j].Y,
+						dx, dy, minPointGap)
+				}
+			}
+		}
+	}
+}
+
+// TestRandomPointsWithinMargins 目标点必须落在预留边距内，
+// 否则字符会被画到画布外（截图里表现为字符被裁掉一半）。
+func TestRandomPointsWithinMargins(t *testing.T) {
+	s := &captchaService{}
+
+	for round := 0; round < 100; round++ {
+		points, err := s.randomPoints(charCount)
+		if err != nil {
+			t.Fatalf("生成坐标失败: %v", err)
+		}
+		for i, p := range points {
+			if p.X < pointMarginX || p.X > bgWidth-pointMarginX {
+				t.Fatalf("第 %d 轮第 %d 点横坐标 %d 越界（应在 [%d, %d]）",
+					round, i+1, p.X, pointMarginX, bgWidth-pointMarginX)
+			}
+			if p.Y < pointMarginY || p.Y > bgHeight-pointMarginY {
+				t.Fatalf("第 %d 轮第 %d 点纵坐标 %d 越界（应在 [%d, %d]）",
+					round, i+1, p.Y, pointMarginY, bgHeight-pointMarginY)
+			}
+		}
+	}
+}
+
+// TestRandomPointsAllDifferent 3 个点必须互不相同。
+//
+// 验证码是「按提示顺序点击」，两个目标点重合会让用户无论点哪都只能命中一个，
+// 必然失败。
+func TestRandomPointsAllDifferent(t *testing.T) {
+	s := &captchaService{}
+
+	for round := 0; round < 100; round++ {
+		points, err := s.randomPoints(charCount)
+		if err != nil {
+			t.Fatalf("生成坐标失败: %v", err)
+		}
+		seen := make(map[model.Point]bool, len(points))
+		for i, p := range points {
+			if seen[p] {
+				t.Fatalf("第 %d 轮第 %d 点 (%d,%d) 与前面的点重合", round, i+1, p.X, p.Y)
+			}
+			seen[p] = true
+		}
+	}
+}
+
+// 移动端显示参数：与前端实际渲染保持一致，改动任一侧都要同步这里。
+//
+//	弹窗宽 = 视口宽 × 92%（项目 assets/styles/index.scss 的移动端全局约定）
+//	图片显示宽 = 弹窗宽 − body 左右内边距（全局约定 16px × 2）
+const (
+	mobileViewportWidth = 390 // iPhone 12/13/14 逻辑宽度
+	mobileDialogRatio   = 0.92
+	mobileBodyPaddingX  = 32
+)
+
+func mobileDisplayWidth() float64 {
+	return mobileViewportWidth*mobileDialogRatio - mobileBodyPaddingX
+}
+
+// TestMobileTapTargetSize 钉住「手机上点得中」这个可用性要求。
+//
+// 前端把原图等比缩放到容器宽度，命中区随之缩小：
+//
+//	手机命中区(px) = 2 × tolerancePx × (显示宽 / 出图宽)
+//
+// 必须不小于 44px（移动端可点最小尺寸）。出图 640 宽时它只有约 30px，
+// 用户反复点不中——这正是本用例要防住的回归。
+func TestMobileTapTargetSize(t *testing.T) {
+	displayWidth := mobileDisplayWidth()
+	scale := displayWidth / float64(bgWidth)
+	hitBox := 2 * float64(tolerancePx) * scale
+
+	t.Logf("出图 %dx%d，手机显示宽 %.0fpx，缩放比 %.2f，命中区 %.1fpx",
+		bgWidth, bgHeight, displayWidth, scale, hitBox)
+
+	if hitBox < 44 {
+		t.Errorf("手机上命中区仅 %.1fpx，低于 44px 可点下限：出图宽 %d、容差 %d、显示宽 %.0f",
+			hitBox, bgWidth, tolerancePx, displayWidth)
+	}
+}
+
+// TestMobileGlyphReadable 字符墨迹在手机上要看得清。
+//
+// 出图尺寸决定缩放比，字号决定墨迹大小；两者共同决定用户看到的字有多大。
+// 门槛取 24px 高：低于此值字符明显偏小，用户需要凑近才能辨认。
+func TestMobileGlyphReadable(t *testing.T) {
+	s := &captchaService{}
+	img := newOpaqueCanvas()
+	s.drawChar(img, bgWidth/2, bgHeight/2, 'A')
+
+	minX, minY, maxX, maxY, ok := inkBounds(img)
+	if !ok {
+		t.Fatal("字符未绘制出任何像素")
+	}
+	inkW := maxX - minX + 1
+	inkH := maxY - minY + 1
+
+	scale := mobileDisplayWidth() / float64(bgWidth)
+	onScreenH := float64(inkH) * scale
+	onScreenW := float64(inkW) * scale
+
+	t.Logf("原图墨迹 %dx%d，手机显示约 %.0fx%.0fpx（缩放比 %.2f）",
+		inkW, inkH, onScreenW, onScreenH, scale)
+
+	if onScreenH < 24 {
+		t.Errorf("手机上字符高仅 %.1fpx，偏小难辨认（原图墨迹高 %d，缩放比 %.2f）",
+			onScreenH, inkH, scale)
+	}
+}
+
+// TestGlyphFitsWithinMargins 半个字符墨迹必须小于边距，
+// 否则字符会越过画布边界被裁掉（表现为字符缺角，用户看不清是什么字）。
+func TestGlyphFitsWithinMargins(t *testing.T) {
+	s := &captchaService{}
+	img := newOpaqueCanvas()
+	s.drawChar(img, bgWidth/2, bgHeight/2, 'W') // W 是最宽的字形之一
+
+	minX, minY, maxX, maxY, ok := inkBounds(img)
+	if !ok {
+		t.Fatal("字符未绘制出任何像素")
+	}
+	inkW := maxX - minX + 1
+	inkH := maxY - minY + 1
+
+	if inkW/2+1 > pointMarginX {
+		t.Errorf("半个字符宽 %d 超过横向边距 %d，字符会被裁切", inkW/2, pointMarginX)
+	}
+	if inkH/2+1 > pointMarginY {
+		t.Errorf("半个字符高 %d 超过纵向边距 %d，字符会被裁切", inkH/2, pointMarginY)
 	}
 }

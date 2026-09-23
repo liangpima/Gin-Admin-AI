@@ -24,11 +24,53 @@ import (
 const (
 	captchaPrefix = "captcha:"
 	captchaExpiry = 5 * time.Minute
-	bgWidth       = 640
-	bgHeight      = 200
-	charCount     = 3
-	charSize      = 90
-	tolerancePx   = 30
+
+	// bgWidth / bgHeight 出图尺寸，保持 3.2:1 比例。
+	//
+	// 这两个值直接决定手机上的可读性与可点性：前端按容器宽度等比缩放，
+	// 原图越宽、缩放比越小。640 宽在手机上要缩到约 0.51 倍，字符墨迹只剩
+	// 12x18px，命中区也只有约 30px（低于 44px 的可点下限），点起来很费劲。
+	// 收敛到 480x150 后缩放比约 0.68，配合放大字号与容差，
+	// 手机上墨迹约 20x31px、命中区约 54px。
+	//
+	// 比例保持不变是刻意的：前端用 aspect-ratio 占位，
+	// 改比例会让占位高度与实际出图不符（弹窗高度会跳）。
+	bgWidth  = 480
+	bgHeight = 150
+
+	charCount = 3
+
+	// charScale 字符放大倍数。Face7x13 是 7x13 的点阵字体，
+	// 放大 5 倍后墨迹约 30x45（原来放大 4 倍只有 24x36，手机上偏小）。
+	charScale = 5
+
+	// pointMarginX / pointMarginY 目标点距画布边缘的最小距离。
+	// 必须留出半个字符墨迹（约 15x23），否则字符会被画到画布外而缺角。
+	pointMarginX = 45
+	pointMarginY = 30
+
+	// tolerancePx 校验时允许的点击偏差（原图像素）。
+	//
+	// 手机上的实际命中区 = 2 * tolerancePx * 显示缩放比，取值需保证
+	// 缩放后仍不小于 44px（移动端可点最小尺寸）：
+	// 2 * 40 * 0.68 ≈ 54px ✓。原值 30 在手机上只有约 30px，很容易点不中。
+	tolerancePx = 40
+
+	// minPointGap 两个目标点之间的最小间距（矩形避让）。
+	//
+	// 必须大于 2*tolerancePx：校验时以目标点为中心、±tolerancePx 的矩形是
+	// 命中区，间距不足会让两个命中区重叠 —— 用户点在 A 附近却被判成命中 B，
+	// 表现为「明明点对了却验证失败」。
+	// 90 同时大于字符墨迹（30x45），保证两个字符视觉上也不重叠。
+	minPointGap = 90
+
+	// maxPlaceAttempts 单个目标点的最大重试次数。
+	//
+	// 必须有上限：拒采样在空间紧张时可能连续失败，无上限就成了
+	// 「生成验证码把 CPU 占满」的隐患。宁可返回错误让用户重试一次。
+	// 画布收敛后可用位置变少（第三个点最差只有约 8% 的成功率），
+	// 故上限提到 500，把整体失败概率压到 1e-18 量级。
+	maxPlaceAttempts = 500
 )
 
 var charPool = []rune("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
@@ -109,15 +151,7 @@ func (s *captchaService) Verify(token string, points []model.Point) (*model.Capt
 
 	for i, p := range points {
 		expected := data.Points[i]
-		dx := p.X - expected.X
-		dy := p.Y - expected.Y
-		if dx < 0 {
-			dx = -dx
-		}
-		if dy < 0 {
-			dy = -dy
-		}
-		if dx > tolerancePx || dy > tolerancePx {
+		if absInt(p.X-expected.X) > tolerancePx || absInt(p.Y-expected.Y) > tolerancePx {
 			return &model.CaptchaVerifyResponse{
 				Success: false,
 				Message: "验证失败，请重试",
@@ -195,37 +229,60 @@ func (s *captchaService) randomChars(n int) (string, error) {
 	return string(pool[:n]), nil
 }
 
+// randomPoints 生成 n 个互不重叠的目标点。
+//
+// 采用「拒采样 + 重试上限」：随机取点，与已放置的点做矩形避让检测，
+// 冲突就重取。此前的实现有两个真实缺陷 —— 重取时把 randInt 的错误丢掉了
+// （`x, _ = randInt(...)`），且外层用 `j = -1` 重来，**没有重试上限**，
+// 空间紧张时会一直转下去。现在空间不足直接返回错误：让用户重新点一次
+// 「换一张」，远好过请求挂住。
 func (s *captchaService) randomPoints(n int) ([]model.Point, error) {
-	points := make([]model.Point, n)
-	marginX := 60
-	marginY := 50
+	points := make([]model.Point, 0, n)
 	for i := 0; i < n; i++ {
-		x, err := randInt(marginX, bgWidth-marginX)
-		if err != nil {
-			return nil, err
-		}
-		y, err := randInt(marginY, bgHeight-marginY)
-		if err != nil {
-			return nil, err
-		}
-		for j := 0; j < i; j++ {
-			dx := x - points[j].X
-			dy := y - points[j].Y
-			if dx < 0 {
-				dx = -dx
+		placed := false
+		for attempt := 0; attempt < maxPlaceAttempts; attempt++ {
+			x, err := randInt(pointMarginX, bgWidth-pointMarginX)
+			if err != nil {
+				return nil, fmt.Errorf("生成目标点横坐标失败: %w", err)
 			}
-			if dy < 0 {
-				dy = -dy
+			y, err := randInt(pointMarginY, bgHeight-pointMarginY)
+			if err != nil {
+				return nil, fmt.Errorf("生成目标点纵坐标失败: %w", err)
 			}
-			if dx < charSize && dy < charSize {
-				x, _ = randInt(marginX, bgWidth-marginX)
-				y, _ = randInt(marginY, bgHeight-marginY)
-				j = -1
+			if hasCollision(x, y, points) {
+				continue
 			}
+			points = append(points, model.Point{X: x, Y: y})
+			placed = true
+			break
 		}
-		points[i] = model.Point{X: x, Y: y}
+		if !placed {
+			return nil, fmt.Errorf(
+				"放置第 %d 个目标点失败：%d 次尝试内找不到与已有 %d 个点互不冲突的位置",
+				i+1, maxPlaceAttempts, len(points))
+		}
 	}
 	return points, nil
+}
+
+// hasCollision 判断候选点与已放置点是否冲突。
+//
+// 用矩形判定而不是圆形：字符按矩形墨迹绘制，矩形判定与视觉一致；
+// 圆形判定会在对角线方向放过「看起来仍然挨在一起」的点。
+func hasCollision(x, y int, placed []model.Point) bool {
+	for _, p := range placed {
+		if absInt(x-p.X) < minPointGap && absInt(y-p.Y) < minPointGap {
+			return true
+		}
+	}
+	return false
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 func (s *captchaService) generateBackground(chars string, points []model.Point) image.Image {
@@ -240,7 +297,10 @@ func (s *captchaService) generateBackground(chars string, points []model.Point) 
 		}
 	}
 
-	for i := 0; i < 20; i++ {
+	// 干扰线与噪点的数量随画布面积等比缩放。
+	// 画布缩小后若数量不变，密度会上升约 1.8 倍，字符反而更难辨认 ——
+	// 干扰的目的是防机器识别，不该把真人一起干扰掉。
+	for i := 0; i < 12; i++ {
 		sx, _ := randInt(0, bgWidth)
 		sy, _ := randInt(0, bgHeight)
 		ex, _ := randInt(0, bgWidth)
@@ -251,7 +311,7 @@ func (s *captchaService) generateBackground(chars string, points []model.Point) 
 		s.drawLine(img, sx, sy, ex, ey, color.RGBA{R: cr, G: cg, B: cb, A: 120})
 	}
 
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 30; i++ {
 		px, _ := randInt(0, bgWidth)
 		py, _ := randInt(0, bgHeight)
 		img.SetRGBA(px, py, color.RGBA{
@@ -272,7 +332,7 @@ func (s *captchaService) generateBackground(chars string, points []model.Point) 
 }
 
 func (s *captchaService) drawChar(img *image.RGBA, x, y int, ch rune) {
-	scale := 4
+	scale := charScale
 	face := basicfont.Face7x13
 
 	// 先把字符绘制到临时画布上，便于测量其真实墨迹范围
