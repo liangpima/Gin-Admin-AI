@@ -100,10 +100,10 @@ async function handleCreate() {
       orderString: data.orderString,
       orderNo: data.orderNo,
     }
-  } catch (err: any) {
+  } catch (err) {
     payResult.value = {
       success: false,
-      message: err.message || '创建失败',
+      message: err instanceof Error ? err.message : '创建失败',
     }
   } finally {
     submitting.value = false

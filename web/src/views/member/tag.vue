@@ -42,19 +42,19 @@
         </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row)">编辑</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
+            <el-button type="primary" link size="small" @click="handleEdit(row as MemberTagItem)">编辑</el-button>
+            <el-button type="danger" link size="small" @click="handleDelete(row as MemberTagItem)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
 
-      <el-pagination
-        v-model:current-page="queryParams.page"
-        v-model:page-size="queryParams.pageSize"
+      <Pagination
+        v-model:page="queryParams.page"
+        v-model:limit="queryParams.pageSize"
         :total="total"
         layout="total, prev, pager, next"
-        style="margin-top: 16px; justify-content: flex-end"
-        @current-change="loadData"
+        :background="false"
+        @pagination="loadData"
       />
     </el-card>
 
@@ -81,12 +81,12 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { getMemberTagList, createMemberTag, updateMemberTag, deleteMemberTag } from '@/api/member'
+import { getMemberTagList, createMemberTag, updateMemberTag, deleteMemberTag , type MemberTagItem} from '@/api/member'
 import FormDialog from '@/components/FormDialog/index.vue'
 
 const loading = ref(false)
 const submitLoading = ref(false)
-const tableData = ref<any[]>([])
+const tableData = ref<MemberTagItem[]>([])
 const total = ref(0)
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
@@ -141,7 +141,7 @@ function handleAdd() {
   dialogVisible.value = true
 }
 
-function handleEdit(row: any) {
+function handleEdit(row: MemberTagItem) {
   resetForm()
   Object.assign(form, {
     id: row.id,
@@ -173,7 +173,7 @@ async function handleSubmit() {
   }
 }
 
-async function handleDelete(row: any) {
+async function handleDelete(row: MemberTagItem) {
   await ElMessageBox.confirm('确认删除该标签？', '提示', { type: 'warning' })
   await deleteMemberTag(row.id)
   ElMessage.success('删除成功')

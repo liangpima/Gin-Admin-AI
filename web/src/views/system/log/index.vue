@@ -36,7 +36,13 @@
               <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
             </el-table-column>
           </el-table>
-          <el-pagination v-model:current-page="opQuery.page" :total="opTotal" layout="total, prev, pager, next" style="margin-top: 16px; justify-content: flex-end" @current-change="loadOpLogs" />
+          <Pagination
+        v-model:page="opQuery.page"
+        :total="opTotal"
+        layout="total, prev, pager, next"
+        :background="false"
+        @pagination="loadOpLogs"
+      />
         </el-tab-pane>
 
         <el-tab-pane label="登录日志" name="login">
@@ -72,7 +78,13 @@
               <template #default="{ row }">{{ formatDateTime(row.loginTime) }}</template>
             </el-table-column>
           </el-table>
-          <el-pagination v-model:current-page="loginQuery.page" :total="loginTotal" layout="total, prev, pager, next" style="margin-top: 16px; justify-content: flex-end" @current-change="loadLoginLogs" />
+          <Pagination
+        v-model:page="loginQuery.page"
+        :total="loginTotal"
+        layout="total, prev, pager, next"
+        :background="false"
+        @pagination="loadLoginLogs"
+      />
         </el-tab-pane>
       </el-tabs>
     </el-card>
@@ -81,18 +93,18 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { getOperationLogs, getLoginLogs } from '@/api/log'
+import { getOperationLogs, getLoginLogs , type OperationLogItem, LoginLogItem} from '@/api/log'
 import { formatDateTime } from '@/utils/format'
 
 const activeTab = ref('operation')
 
 const opLoading = ref(false)
-const opLogs = ref<any[]>([])
+const opLogs = ref<OperationLogItem[]>([])
 const opTotal = ref(0)
 const opQuery = reactive({ title: '', page: 1, pageSize: 10 })
 
 const loginLoading = ref(false)
-const loginLogs = ref<any[]>([])
+const loginLogs = ref<LoginLogItem[]>([])
 const loginTotal = ref(0)
 const loginQuery = reactive({ username: '', page: 1, pageSize: 10 })
 

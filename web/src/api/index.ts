@@ -1,4 +1,4 @@
-import axios, { type AxiosInstance, type AxiosResponse } from 'axios'
+import axios, { type AxiosInstance, type AxiosResponse, type AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 import { getToken, removeToken } from '@/utils/auth'
 import router from '@/router'
@@ -94,6 +94,28 @@ service.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+/**
+ * http：对 service 的类型化门面。
+ *
+ * 为什么需要它：axios 的 get/post/put/delete 是**双泛型** `get<T, R>` ——
+ * T 是响应体类型、R 是返回值类型。本项目在拦截器里已经把 response 解包成
+ * 业务对象，所以调用方只关心「返回什么」，写 `request.get<any, Result<X>>`
+ * 里的那个 any 纯粹是为了让 axios 的签名通过，属于噪音；更糟的是它掩盖了
+ * 真正的问题 —— 有些调用干脆不写泛型，返回值就静默退化成 any。
+ *
+ * 门面把它收敛成单个泛型：`http.get<Result<X>>(url)`，一眼能看出返回什么。
+ */
+export const http = {
+  get: <T>(url: string, config?: AxiosRequestConfig) =>
+    service.get<unknown, T>(url, config),
+  post: <T>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
+    service.post<unknown, T>(url, data, config),
+  put: <T>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
+    service.put<unknown, T>(url, data, config),
+  delete: <T>(url: string, config?: AxiosRequestConfig) =>
+    service.delete<unknown, T>(url, config),
+}
 
 export default service
 

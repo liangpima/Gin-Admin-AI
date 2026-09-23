@@ -1,13 +1,14 @@
 import { defineStore } from 'pinia'
-import type { RouteLocationNormalized } from 'vue-router'
+import type { LocationQueryRaw, RouteLocationNormalized, RouteMeta, RouteParamsRaw } from 'vue-router'
 
-interface TagView {
+export interface TagView {
   path: string
   name?: string | symbol | null | undefined
   title?: string
-  meta?: any
-  query?: any
-  params?: any
+  // 直接用 vue-router 的类型，别用 any 把路由元信息与查询参数抹平
+  meta?: RouteMeta
+  query?: LocationQueryRaw
+  params?: RouteParamsRaw
 }
 
 interface TagsViewState {

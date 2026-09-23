@@ -1,4 +1,5 @@
-import request from './index'
+import type { MenuItem } from '@/api/menu'
+import { http } from './index'
 import type { Result } from './index'
 
 export interface LoginParams {
@@ -24,21 +25,21 @@ export interface UserInfoResult {
   phone: string
   roles: { id: number; name: string; code: string }[]
   buttons: string[]
-  menus: any[]
+  menus: MenuItem[]
 }
 
 export function login(data: LoginParams) {
-  return request.post<any, Result<LoginResult>>('/auth/login', data)
+  return http.post<Result<LoginResult>>('/auth/login', data)
 }
 
 export function refreshToken(data: { refreshToken: string }) {
-  return request.post<any, Result<LoginResult>>('/auth/refresh', data)
+  return http.post<Result<LoginResult>>('/auth/refresh', data)
 }
 
 export function logout(refreshToken?: string) {
-  return request.post<any, Result>('/auth/logout', { refreshToken })
+  return http.post<Result>('/auth/logout', { refreshToken })
 }
 
 export function getUserInfo() {
-  return request.get<any, Result<UserInfoResult>>('/auth/userInfo')
+  return http.get<Result<UserInfoResult>>('/auth/userInfo')
 }

@@ -38,7 +38,7 @@ import { useRoute } from 'vue-router'
 import { useAppStore } from '@/store/modules/app'
 import { usePermissionStore } from '@/store/modules/permission'
 import { useResponsive } from '@/hooks/useResponsive'
-import { getConfigByPrefix } from '@/api/config'
+import { getConfigByPrefix, type ConfigItem } from '@/api/config'
 import SidebarItem from './SidebarItem.vue'
 
 const route = useRoute()
@@ -65,7 +65,7 @@ const sidebarClass = computed(() => ({
 
 const menuRoutes = computed(() => {
   if (!permissionStore.routesLoaded) return []
-  return permissionStore.routes.filter((r: any) => !r.meta?.hidden)
+  return permissionStore.routes.filter((r) => !r.meta?.hidden)
 })
 
 watch(isMobile, (val) => {
@@ -84,9 +84,9 @@ onMounted(async () => {
   }
   try {
     const res = await getConfigByPrefix('site.')
-    const list: any[] = res.data || []
+    const list: ConfigItem[] = res.data || []
     const map: Record<string, string> = {}
-    list.forEach((item: any) => {
+    list.forEach((item) => {
       const key = item.key?.replace('site.', '')
       if (key) map[key] = item.value || ''
     })

@@ -26,15 +26,16 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { RouteRecordRaw } from 'vue-router'
 
 const props = defineProps<{
-  item: any
+  item: RouteRecordRaw
   basePath: string
 }>()
 
 const visibleChildren = computed(() => {
   if (!props.item.children) return []
-  return props.item.children.filter((c: any) => !c.meta?.hidden)
+  return props.item.children.filter((c) => !c.meta?.hidden)
 })
 
 const hasMultiChildren = computed(() => visibleChildren.value.length > 1)

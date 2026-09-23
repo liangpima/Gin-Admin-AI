@@ -160,8 +160,8 @@ async function handleLogin() {
     await userStore.login(loginForm.username, loginForm.password, captchaToken.value)
     ElMessage.success('登录成功')
     router.push('/')
-  } catch (err: any) {
-    ElMessage.error(err.message || '登录失败')
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '登录失败')
     // 验证码一次性，登录失败后必须重新验证
     resetCaptcha()
   } finally {

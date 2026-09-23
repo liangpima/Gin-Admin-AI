@@ -1,4 +1,4 @@
-import request from './index'
+import { http } from './index'
 import type { Result, PageResult } from './index'
 
 export interface DictTypeItem {
@@ -58,23 +58,23 @@ export interface UpdateDictDataPayload {
 }
 
 export function getDictTypeList(params: DictQuery & { name?: string }) {
-  return request.get<any, Result<PageResult<DictTypeItem>>>('/system/dict/type/list', { params })
+  return http.get<Result<PageResult<DictTypeItem>>>('/system/dict/type/list', { params })
 }
 
 export function createDictType(data: CreateDictTypePayload) {
-  return request.post<any, Result>('/system/dict/type', data)
+  return http.post<Result>('/system/dict/type', data)
 }
 
 export function updateDictType(id: number, data: UpdateDictTypePayload) {
-  return request.put<any, Result>(`/system/dict/type/${id}`, data)
+  return http.put<Result>(`/system/dict/type/${id}`, data)
 }
 
 export function deleteDictType(id: number) {
-  return request.delete<any, Result>(`/system/dict/type/${id}`)
+  return http.delete<Result>(`/system/dict/type/${id}`)
 }
 
 export function getDictDataList(params: DictQuery & { dictType?: string }) {
-  return request.get<any, Result<PageResult<DictDataItem>>>('/system/dict/data/list', { params })
+  return http.get<Result<PageResult<DictDataItem>>>('/system/dict/data/list', { params })
 }
 
 /**
@@ -82,17 +82,17 @@ export function getDictDataList(params: DictQuery & { dictType?: string }) {
  * 只要求登录态（不需要 system:dict:list），因此普通操作员也能正常拿到选项。
  */
 export function getDictDataByType(type: string) {
-  return request.get<any, Result<DictDataItem[]>>(`/system/dict/data/type/${type}`)
+  return http.get<Result<DictDataItem[]>>(`/system/dict/data/type/${type}`)
 }
 
 export function createDictData(data: CreateDictDataPayload) {
-  return request.post<any, Result>('/system/dict/data', data)
+  return http.post<Result>('/system/dict/data', data)
 }
 
 export function updateDictData(id: number, data: UpdateDictDataPayload) {
-  return request.put<any, Result>(`/system/dict/data/${id}`, data)
+  return http.put<Result>(`/system/dict/data/${id}`, data)
 }
 
 export function deleteDictData(id: number) {
-  return request.delete<any, Result>(`/system/dict/data/${id}`)
+  return http.delete<Result>(`/system/dict/data/${id}`)
 }

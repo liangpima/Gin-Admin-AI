@@ -32,7 +32,7 @@
               v-if="item.mimeType?.startsWith('image/')"
               :src="item.url"
               loading="lazy"
-              @error="(e: any) => e.target.style.display = 'none'"
+              @error="(e: Event) => ((e.target as HTMLElement).style.display = 'none')"
             />
             <img
               v-else-if="item.mimeType?.startsWith('video/')"
@@ -55,13 +55,13 @@
         <el-empty v-if="tableData.length === 0" description="暂无文件" />
       </div>
 
-      <el-pagination
-        v-model:current-page="page"
-        v-model:page-size="pageSize"
+      <Pagination
+        v-model:page="page"
+        v-model:limit="pageSize"
         :total="total"
         layout="total, prev, pager, next"
-        style="margin-top: 16px; justify-content: flex-end"
-        @current-change="loadData"
+        :background="false"
+        @pagination="loadData"
       />
     </el-card>
 
@@ -80,10 +80,10 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Document } from '@element-plus/icons-vue'
-import { getFileList, deleteFile, uploadFile } from '@/api/file'
+import { getFileList, deleteFile, uploadFile , type FileItem} from '@/api/file'
 
 const loading = ref(false)
-const tableData = ref<any[]>([])
+const tableData = ref<FileItem[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(24)
@@ -97,9 +97,9 @@ const showViewer = ref(false)
 const viewerUrl = ref('')
 const viewerIndex = ref(0)
 
-const imageList = computed(() => tableData.value.map((f: any) => f.url))
+const imageList = computed(() => tableData.value.map((f) => f.url))
 
-function openPreview(item: any) {
+function openPreview(item: FileItem) {
   if (!item.mimeType?.startsWith('image/')) {
     ElMessage.warning('该文件格式不支持预览')
     return
@@ -188,7 +188,7 @@ async function loadData() {
   }
 }
 
-async function handleDelete(row: any) {
+async function handleDelete(row: FileItem) {
   try {
     await ElMessageBox.confirm(`确定要删除文件「${row.name}」吗？`, '提示', { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' })
     await deleteFile(row.id)

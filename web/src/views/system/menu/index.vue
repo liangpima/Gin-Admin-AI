@@ -36,8 +36,8 @@
         <el-table-column label="操作" width="180">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="handleAdd(row.id)">新增</el-button>
-            <el-button type="primary" link size="small" @click="handleEdit(row)">编辑</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
+            <el-button type="primary" link size="small" @click="handleEdit(row as MenuItem)">编辑</el-button>
+            <el-button type="danger" link size="small" @click="handleDelete(row as MenuItem)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -93,16 +93,19 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { getMenuTree, createMenu, updateMenu, deleteMenu } from '@/api/menu'
+import { getMenuTree, createMenu, updateMenu, deleteMenu , type MenuItem} from '@/api/menu'
 import FormDialog from '@/components/FormDialog/index.vue'
 
 const loading = ref(false)
 const submitLoading = ref(false)
-const tableData = ref<any[]>([])
+const tableData = ref<MenuItem[]>([])
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 const formRef = ref<FormInstance>()
-const menuOptions = ref<any[]>([])
+// 同 dept：树选择器的合成根节点只带 id/title/children
+type MenuOption = Pick<MenuItem, 'id' | 'title' | 'children'>
+
+const menuOptions = ref<MenuOption[]>([])
 
 const form = reactive({
   id: 0,
@@ -157,7 +160,7 @@ function handleAdd(parentId = 0) {
   dialogVisible.value = true
 }
 
-function handleEdit(row: any) {
+function handleEdit(row: MenuItem) {
   resetForm()
   Object.assign(form, row)
   dialogTitle.value = '编辑菜单'
@@ -182,7 +185,7 @@ async function handleSubmit() {
   }
 }
 
-async function handleDelete(row: any) {
+async function handleDelete(row: MenuItem) {
   await ElMessageBox.confirm('确认删除该菜单？', '提示', { type: 'warning' })
   await deleteMenu(row.id)
   ElMessage.success('删除成功')

@@ -1,4 +1,4 @@
-import request from './index'
+import { http } from './index'
 import type { Result } from './index'
 
 export interface DashboardStats {
@@ -12,5 +12,5 @@ export interface DashboardStats {
 }
 
 export function getDashboardStats() {
-  return request.get<any, Result<DashboardStats>>('/dashboard/stats')
+  return http.get<Result<DashboardStats>>('/dashboard/stats')
 }

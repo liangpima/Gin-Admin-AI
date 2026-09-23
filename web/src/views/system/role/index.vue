@@ -47,22 +47,21 @@
         </el-table-column>
         <el-table-column label="操作" width="200">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row)">编辑</el-button>
-            <el-button type="primary" link size="small" @click="handlePermission(row)">权限</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
+            <el-button type="primary" link size="small" @click="handleEdit(row as RoleItem)">编辑</el-button>
+            <el-button type="primary" link size="small" @click="handlePermission(row as RoleItem)">权限</el-button>
+            <el-button type="danger" link size="small" @click="handleDelete(row as RoleItem)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
 
-      <el-pagination
-        v-model:current-page="queryParams.page"
-        v-model:page-size="queryParams.pageSize"
+      <Pagination
+        v-model:page="queryParams.page"
+        v-model:limit="queryParams.pageSize"
         :page-sizes="[10, 20, 50]"
         :total="total"
         layout="total, sizes, prev, pager, next"
-        style="margin-top: 16px; justify-content: flex-end"
-        @size-change="loadData"
-        @current-change="loadData"
+        :background="false"
+        @pagination="loadData"
       />
     </el-card>
 
@@ -104,15 +103,15 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { getRoleList, createRole, updateRole, deleteRole } from '@/api/role'
+import { ElMessage, ElMessageBox, ElTree, type FormInstance } from 'element-plus'
+import { getRoleList, createRole, updateRole, deleteRole, type RoleItem } from '@/api/role'
 import FormDialog from '@/components/FormDialog/index.vue'
 import { formatDateTime } from '@/utils/format'
-import { getMenuTree } from '@/api/menu'
+import { getMenuTree, type MenuItem } from '@/api/menu'
 
 const loading = ref(false)
 const submitLoading = ref(false)
-const tableData = ref<any[]>([])
+const tableData = ref<RoleItem[]>([])
 const total = ref(0)
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
@@ -120,10 +119,11 @@ const formRef = ref<FormInstance>()
 
 const permDialogVisible = ref(false)
 const permLoading = ref(false)
-const menuTree = ref<any[]>([])
+const menuTree = ref<MenuItem[]>([])
 const checkedMenuIds = ref<number[]>([])
 const currentRoleId = ref(0)
-const menuTreeRef = ref<any>()
+// el-tree 实例类型：直接用 InstanceType 取，避免手写一份不完整的接口
+const menuTreeRef = ref<InstanceType<typeof ElTree>>()
 
 const queryParams = reactive({
   name: '',
@@ -183,7 +183,7 @@ function handleAdd() {
   dialogVisible.value = true
 }
 
-function handleEdit(row: any) {
+function handleEdit(row: RoleItem) {
   resetForm()
   Object.assign(form, row)
   dialogTitle.value = '编辑角色'
@@ -208,14 +208,14 @@ async function handleSubmit() {
   }
 }
 
-async function handleDelete(row: any) {
+async function handleDelete(row: RoleItem) {
   await ElMessageBox.confirm('确认删除该角色？', '提示', { type: 'warning' })
   await deleteRole(row.id)
   ElMessage.success('删除成功')
   loadData()
 }
 
-async function handlePermission(row: any) {
+async function handlePermission(row: RoleItem) {
   currentRoleId.value = row.id
   checkedMenuIds.value = row.menuIds || []
   try {
@@ -230,7 +230,9 @@ async function handlePermSubmit() {
   try {
     const checkedKeys = menuTreeRef.value?.getCheckedKeys() || []
     const halfCheckedKeys = menuTreeRef.value?.getHalfCheckedKeys() || []
-    const menuIds = [...checkedKeys, ...halfCheckedKeys]
+    // el-tree 的 key 类型是 string | number（取决于 data 里的 node-key 实际类型）。
+    // 本项目的菜单 id 是数字，这里显式转回 number，避免把字符串 ID 传给后端。
+    const menuIds = [...checkedKeys, ...halfCheckedKeys].map((k) => Number(k))
     await updateRole({ id: currentRoleId.value, menuIds })
     ElMessage.success('权限分配成功')
     permDialogVisible.value = false

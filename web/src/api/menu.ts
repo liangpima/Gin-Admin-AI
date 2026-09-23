@@ -1,4 +1,4 @@
-import request from './index'
+import { http } from './index'
 import type { Result } from './index'
 
 export interface MenuItem {
@@ -21,21 +21,21 @@ export interface MenuItem {
 }
 
 export function getMenuTree() {
-  return request.get<any, Result<MenuItem[]>>('/system/menu/tree')
+  return http.get<Result<MenuItem[]>>('/system/menu/tree')
 }
 
 export function getAllMenus() {
-  return request.get<any, Result<MenuItem[]>>('/system/menu/all')
+  return http.get<Result<MenuItem[]>>('/system/menu/all')
 }
 
-export function createMenu(data: any) {
-  return request.post<any, Result>('/system/menu', data)
+export function createMenu(data: Partial<MenuItem>) {
+  return http.post<Result>('/system/menu', data)
 }
 
-export function updateMenu(data: any) {
-  return request.put<any, Result>('/system/menu', data)
+export function updateMenu(data: Partial<MenuItem>) {
+  return http.put<Result>('/system/menu', data)
 }
 
 export function deleteMenu(id: number) {
-  return request.delete<any, Result>(`/system/menu/${id}`)
+  return http.delete<Result>(`/system/menu/${id}`)
 }

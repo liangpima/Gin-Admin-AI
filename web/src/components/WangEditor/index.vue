@@ -61,7 +61,7 @@ const editorConfig = {
     },
     uploadVideo: {
       customBrowseAndUpload(insertFn: (url: string, poster?: string) => void) {
-        insertFnRef.value = insertFn as any
+        insertFnRef.value = insertFn as (url: string, alt?: string, href?: string) => void
         videoPickerVisible.value = true
       },
     },

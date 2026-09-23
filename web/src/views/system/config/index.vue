@@ -21,12 +21,19 @@
         </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row)">编辑</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
+            <el-button type="primary" link size="small" @click="handleEdit(row as ConfigItem)">编辑</el-button>
+            <el-button type="danger" link size="small" @click="handleDelete(row as ConfigItem)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
-      <el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" layout="total, prev, pager, next" style="margin-top: 16px; justify-content: flex-end" @current-change="loadData" />
+      <Pagination
+        v-model:page="page"
+        v-model:limit="pageSize"
+        :total="total"
+        layout="total, prev, pager, next"
+        :background="false"
+        @pagination="loadData"
+      />
     </el-card>
 
     <FormDialog v-model="dialogVisible" :title="dialogTitle" :loading="submitLoading" @submit="handleSubmit">
@@ -45,13 +52,13 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { getConfigList, createConfig, updateConfig, deleteConfig } from '@/api/config'
+import { getConfigList, createConfig, updateConfig, deleteConfig , type ConfigItem} from '@/api/config'
 import FormDialog from '@/components/FormDialog/index.vue'
 import { formatDateTime } from '@/utils/format'
 
 const loading = ref(false)
 const submitLoading = ref(false)
-const tableData = ref<any[]>([])
+const tableData = ref<ConfigItem[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(10)
@@ -79,7 +86,7 @@ function handleAdd() {
   dialogTitle.value = '新增配置'; dialogVisible.value = true
 }
 
-function handleEdit(row: any) {
+function handleEdit(row: ConfigItem) {
   Object.assign(form, row)
   dialogTitle.value = '编辑配置'; dialogVisible.value = true
 }
@@ -95,7 +102,7 @@ async function handleSubmit() {
   } finally { submitLoading.value = false }
 }
 
-async function handleDelete(row: any) {
+async function handleDelete(row: ConfigItem) {
   await ElMessageBox.confirm('确认删除？', '提示', { type: 'warning' })
   await deleteConfig(row.id)
   ElMessage.success('删除成功'); loadData()

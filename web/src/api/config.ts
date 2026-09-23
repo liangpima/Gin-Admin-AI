@@ -1,4 +1,4 @@
-import request from './index'
+import request, { http } from './index'
 import type { Result } from './index'
 
 export interface ConfigItem {
@@ -32,21 +32,21 @@ export function deleteConfig(id: number) {
 }
 
 export function getConfigByPrefix(prefix: string) {
-  return request.get<any, Result<ConfigItem[]>>('/system/config/prefix', { params: { prefix } })
+  return http.get<Result<ConfigItem[]>>('/system/config/prefix', { params: { prefix } })
 }
 
 export function batchSaveConfig(prefix: string, items: { key: string; value: string }[]) {
-  return request.put<any, Result>('/system/config/batch', { prefix, items })
+  return http.put<Result>('/system/config/batch', { prefix, items })
 }
 
 export function getSiteInfo() {
-  return request.get<any, Result<Record<string, string>>>('/site/info')
+  return http.get<Result<Record<string, string>>>('/site/info')
 }
 
 export function uploadCert(file: File) {
   const formData = new FormData()
   formData.append('file', file)
-  return request.post<any, Result<{ path: string; filename: string }>>('/system/config/upload', formData, {
+  return http.post<Result<{ path: string; filename: string }>>('/system/config/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
 }

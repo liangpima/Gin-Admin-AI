@@ -67,7 +67,7 @@
               v-model="row.levelId"
               placeholder="无等级"
               style="width: 100%"
-              @change="(val: number) => handleLevelChange(row, val)"
+              @change="(val: number) => handleLevelChange(row as MemberRow, val)"
             >
               <el-option :label="'无等级'" :value="0" />
               <el-option v-for="level in levelList" :key="level.id" :label="level.name" :value="level.id" />
@@ -83,7 +83,7 @@
               collapse-tags-tooltip
               placeholder="请选择标签"
               style="width: 100%"
-              @change="(val: number[]) => handleTagChange(row, val)"
+              @change="(val: number[]) => handleTagChange(row as MemberRow, val)"
             >
               <el-option v-for="tag in tagList" :key="tag.id" :label="tag.name" :value="tag.id" />
             </el-select>
@@ -92,7 +92,7 @@
         <el-table-column prop="points" label="积分" width="80" align="right" />
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
-            <el-switch v-model="row.status" :active-value="1" :inactive-value="0" @change="handleStatusChange(row)" />
+            <el-switch v-model="row.status" :active-value="1" :inactive-value="0" @change="handleStatusChange(row as MemberRow)" />
           </template>
         </el-table-column>
         <el-table-column label="注册时间" width="170">
@@ -100,21 +100,20 @@
         </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row)">编辑</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
+            <el-button type="primary" link size="small" @click="handleEdit(row as MemberRow)">编辑</el-button>
+            <el-button type="danger" link size="small" @click="handleDelete(row as MemberRow)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
 
-      <el-pagination
-        v-model:current-page="queryParams.page"
-        v-model:page-size="queryParams.pageSize"
+      <Pagination
+        v-model:page="queryParams.page"
+        v-model:limit="queryParams.pageSize"
         :page-sizes="[10, 20, 50]"
         :total="total"
         layout="total, sizes, prev, pager, next"
-        style="margin-top: 16px; justify-content: flex-end"
-        @size-change="loadData"
-        @current-change="loadData"
+        :background="false"
+        @pagination="loadData"
       />
     </el-card>
 
@@ -185,20 +184,24 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { getMemberList, createMember, updateMember, deleteMember, updateMemberStatus, updateMemberTags, getAllMemberLevels, getAllMemberTags } from '@/api/member'
+import { getMemberList, createMember, updateMember, deleteMember, updateMemberStatus, updateMemberTags, getAllMemberLevels, getAllMemberTags, type MemberItem, type MemberLevelItem, type MemberTagItem } from '@/api/member'
 import ImagePicker from '@/components/ImagePicker/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
 import { formatDateTime } from '@/utils/format'
 
 const loading = ref(false)
 const submitLoading = ref(false)
-const tableData = ref<any[]>([])
+// 列表行 = 接口返回的 MemberItem + 前端映射出来的 tagIds。
+// 接口给的是 tags（对象数组），表格里要按 id 做多选回显，所以映射时补 tagIds。
+type MemberRow = MemberItem & { tagIds: number[] }
+
+const tableData = ref<MemberRow[]>([])
 const total = ref(0)
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 const formRef = ref<FormInstance>()
-const levelList = ref<any[]>([])
-const tagList = ref<any[]>([])
+const levelList = ref<MemberLevelItem[]>([])
+const tagList = ref<MemberTagItem[]>([])
 const avatarPickerVisible = ref(false)
 
 const queryParams = reactive({
@@ -234,9 +237,9 @@ async function loadData() {
   loading.value = true
   try {
     const res = await getMemberList(queryParams)
-    tableData.value = res.data.list.map((item: any) => ({
+    tableData.value = res.data.list.map((item) => ({
       ...item,
-      tagIds: item.tags?.map((t: any) => t.id) || [],
+      tagIds: item.tags?.map((t) => t.id) || [],
     }))
     total.value = res.data.total
   } finally {
@@ -271,7 +274,7 @@ function handleReset() {
   handleSearch()
 }
 
-async function handleStatusChange(row: any) {
+async function handleStatusChange(row: MemberRow) {
   try {
     await updateMemberStatus({ id: row.id, status: row.status })
     ElMessage.success('状态修改成功')
@@ -280,7 +283,7 @@ async function handleStatusChange(row: any) {
   }
 }
 
-async function handleTagChange(row: any, tagIds: number[]) {
+async function handleTagChange(row: MemberRow, tagIds: number[]) {
   try {
     await updateMemberTags({ id: row.id, tagIds })
     ElMessage.success('标签修改成功')
@@ -289,7 +292,7 @@ async function handleTagChange(row: any, tagIds: number[]) {
   }
 }
 
-async function handleLevelChange(row: any, levelId: number) {
+async function handleLevelChange(row: MemberRow, levelId: number) {
   try {
     await updateMember({ id: row.id, levelId })
     ElMessage.success('等级修改成功')
@@ -320,7 +323,7 @@ function handleAdd() {
   dialogVisible.value = true
 }
 
-function handleEdit(row: any) {
+function handleEdit(row: MemberRow) {
   resetForm()
   Object.assign(form, {
     id: row.id,
@@ -360,7 +363,7 @@ async function handleSubmit() {
   }
 }
 
-async function handleDelete(row: any) {
+async function handleDelete(row: MemberRow) {
   await ElMessageBox.confirm('确认删除该会员？', '提示', { type: 'warning' })
   await deleteMember(row.id)
   ElMessage.success('删除成功')

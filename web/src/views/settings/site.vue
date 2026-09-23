@@ -62,7 +62,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, type FormInstance } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { getConfigByPrefix, batchSaveConfig } from '@/api/config'
+import { getConfigByPrefix, batchSaveConfig , type ConfigItem } from '@/api/config'
 import ImagePicker from '@/components/ImagePicker/index.vue'
 
 const PREFIX = 'site.'
@@ -85,6 +85,11 @@ const form = reactive({
   memberIdDigits: 6,
 })
 
+// 配置项是动态键：字段名由后端配置项名推导，无法用字面量联合类型约束。
+// 用 Record 收口而不是 any —— 至少能保证读写的是字符串，
+// 也避免 (form as any) 这种把整个表单类型抹掉的做法。
+const formValues = form as unknown as Record<string, string | number>
+
 const fieldMap: Record<string, string> = {
   name: 'name',
   title: 'title',
@@ -103,15 +108,15 @@ async function loadData() {
   loading.value = true
   try {
     const res = await getConfigByPrefix(PREFIX)
-    const list: any[] = res.data || []
-    list.forEach((item: any) => {
+    const list: ConfigItem[] = res.data || []
+    list.forEach((item) => {
       const field = fieldMap[item.key?.replace(PREFIX, '')]
       if (field) {
-        let val = item.value || ''
+        let val: string | number = item.value || ''
         if (field === 'memberIdDigits') {
           val = parseInt(val, 10) || 6
         }
-        ;(form as any)[field] = val
+        ;formValues[field] = val
       }
     })
   } finally {
@@ -128,7 +133,7 @@ async function handleSave() {
   try {
     const items = Object.entries(fieldMap).map(([field, key]) => ({
       key,
-      value: String((form as any)[field] ?? ''),
+      value: String(formValues[field] ?? ''),
     }))
     await batchSaveConfig(PREFIX, items)
     ElMessage.success('保存成功')

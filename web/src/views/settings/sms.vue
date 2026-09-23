@@ -64,7 +64,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, type FormInstance } from 'element-plus'
-import { getConfigByPrefix, batchSaveConfig } from '@/api/config'
+import { getConfigByPrefix, batchSaveConfig , type ConfigItem } from '@/api/config'
 
 const PREFIX = 'sms.'
 const activeTab = ref('config')
@@ -79,6 +79,11 @@ const form = reactive({
   secret_key: '',
   sign_name: '',
 })
+
+// 配置项是动态键：字段名由后端配置项名推导，无法用字面量联合类型约束。
+// 用 Record 收口而不是 any —— 至少能保证读写的是字符串，
+// 也避免 (form as any) 这种把整个表单类型抹掉的做法。
+const formValues = form as unknown as Record<string, string>
 
 interface TemplateItem {
   key: string
@@ -160,11 +165,11 @@ async function loadData() {
   loading.value = true
   try {
     const res = await getConfigByPrefix(PREFIX)
-    const list: any[] = res.data || []
-    list.forEach((item: any) => {
+    const list: ConfigItem[] = res.data || []
+    list.forEach((item) => {
       const rawKey = item.key?.replace(PREFIX, '')
       if (configFields[rawKey]) {
-        ;(form as any)[configFields[rawKey]] = item.value || ''
+        ;formValues[configFields[rawKey]] = item.value || ''
       }
       const tpl = templates.find((t) => t.key === rawKey)
       if (tpl) {
@@ -173,7 +178,7 @@ async function loadData() {
     })
 
     templates.forEach((tpl) => {
-      const enabledItem = list.find((item: any) => item.key === `${PREFIX}${tpl.key}_enabled`)
+      const enabledItem = list.find((item) => item.key === `${PREFIX}${tpl.key}_enabled`)
       if (enabledItem) {
         tpl.enabled = enabledItem.value === '1'
       }
@@ -189,7 +194,7 @@ async function handleSave() {
     const items: { key: string; value: string }[] = []
 
     Object.entries(configFields).forEach(([field, key]) => {
-      items.push({ key, value: (form as any)[field] || '' })
+      items.push({ key, value: formValues[field] || '' })
     })
 
     templates.forEach((tpl) => {

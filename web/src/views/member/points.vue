@@ -56,13 +56,13 @@
         </el-table-column>
       </el-table>
 
-      <el-pagination
-        v-model:current-page="queryParams.page"
-        v-model:page-size="queryParams.pageSize"
+      <Pagination
+        v-model:page="queryParams.page"
+        v-model:limit="queryParams.pageSize"
         :total="total"
         layout="total, prev, pager, next"
-        style="margin-top: 16px; justify-content: flex-end"
-        @current-change="loadData"
+        :background="false"
+        @pagination="loadData"
       />
     </el-card>
   </div>
@@ -70,11 +70,11 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { getPointsLogList } from '@/api/member'
+import { getPointsLogList , type PointsLogItem} from '@/api/member'
 import { formatDateTime } from '@/utils/format'
 
 const loading = ref(false)
-const tableData = ref<any[]>([])
+const tableData = ref<PointsLogItem[]>([])
 const total = ref(0)
 
 const queryParams = reactive({

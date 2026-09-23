@@ -59,13 +59,13 @@
         </el-table-column>
       </el-table>
 
-      <el-pagination
-        v-model:current-page="page"
-        v-model:page-size="pageSize"
+      <Pagination
+        v-model:page="page"
+        v-model:limit="pageSize"
         :total="total"
         layout="total, prev, pager, next"
-        style="margin-top: 16px; justify-content: flex-end"
-        @current-change="loadData"
+        :background="false"
+        @pagination="loadData"
       />
     </el-card>
 

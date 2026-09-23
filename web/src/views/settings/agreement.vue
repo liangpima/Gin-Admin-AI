@@ -52,7 +52,7 @@
         <el-table-column prop="sort" label="排序" width="70" />
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
-            <el-switch v-model="row.status" :active-value="1" :inactive-value="0" @change="handleStatusChange(row)" />
+            <el-switch v-model="row.status" :active-value="1" :inactive-value="0" @change="handleStatusChange(row as AgreementItem)" />
           </template>
         </el-table-column>
         <el-table-column label="创建时间" width="170">
@@ -60,21 +60,20 @@
         </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row)">编辑</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
+            <el-button type="primary" link size="small" @click="handleEdit(row as AgreementItem)">编辑</el-button>
+            <el-button type="danger" link size="small" @click="handleDelete(row as AgreementItem)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
 
-      <el-pagination
-        v-model:current-page="queryParams.page"
-        v-model:page-size="queryParams.pageSize"
+      <Pagination
+        v-model:page="queryParams.page"
+        v-model:limit="queryParams.pageSize"
         :page-sizes="[10, 20, 50]"
         :total="total"
         layout="total, sizes, prev, pager, next"
-        style="margin-top: 16px; justify-content: flex-end"
-        @size-change="loadData"
-        @current-change="loadData"
+        :background="false"
+        @pagination="loadData"
       />
     </el-card>
 
@@ -108,7 +107,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { getAgreementList, createAgreement, updateAgreement, deleteAgreement } from '@/api/agreement'
+import { getAgreementList, createAgreement, updateAgreement, deleteAgreement , type AgreementItem } from '@/api/agreement'
 import WangEditor from '@/components/WangEditor/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
 import { formatDateTime } from '@/utils/format'
@@ -129,7 +128,7 @@ const typeMap: Record<string, string> = {
 
 const loading = ref(false)
 const submitLoading = ref(false)
-const tableData = ref<any[]>([])
+const tableData = ref<AgreementItem[]>([])
 const total = ref(0)
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
@@ -180,7 +179,7 @@ function handleReset() {
   handleSearch()
 }
 
-async function handleStatusChange(row: any) {
+async function handleStatusChange(row: AgreementItem) {
   try {
     await updateAgreement({ id: row.id, status: row.status })
     ElMessage.success('状态修改成功')
@@ -200,7 +199,7 @@ function handleAdd() {
   dialogVisible.value = true
 }
 
-function handleEdit(row: any) {
+function handleEdit(row: AgreementItem) {
   form.id = row.id
   form.title = row.title
   form.content = row.content || ''
@@ -230,7 +229,7 @@ async function handleSubmit() {
   }
 }
 
-async function handleDelete(row: any) {
+async function handleDelete(row: AgreementItem) {
   await ElMessageBox.confirm('确认删除该协议？', '提示', { type: 'warning' })
   await deleteAgreement(row.id)
   ElMessage.success('删除成功')

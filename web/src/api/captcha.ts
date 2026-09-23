@@ -1,4 +1,4 @@
-import request from './index'
+import { http } from './index'
 import type { Result } from './index'
 
 export interface CaptchaGenerateResponse {
@@ -21,9 +21,9 @@ export interface CaptchaVerifyResponse {
 }
 
 export function getCaptcha() {
-  return request.get<any, Result<CaptchaGenerateResponse>>('/captcha/generate')
+  return http.get<Result<CaptchaGenerateResponse>>('/captcha/generate')
 }
 
 export function verifyCaptcha(data: { token: string; points: CaptchaPoint[] }) {
-  return request.post<any, Result<CaptchaVerifyResponse>>('/captcha/verify', data)
+  return http.post<Result<CaptchaVerifyResponse>>('/captcha/verify', data)
 }

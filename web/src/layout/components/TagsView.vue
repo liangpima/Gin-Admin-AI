@@ -26,7 +26,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useTagsViewStore } from '@/store/modules/tagsView'
+import { useTagsViewStore, type TagView } from '@/store/modules/tagsView'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,11 +34,11 @@ const tagsViewStore = useTagsViewStore()
 
 const visitedViews = computed(() => tagsViewStore.visitedViews)
 
-function isActive(tag: any): boolean {
+function isActive(tag: TagView): boolean {
   return tag.path === route.path
 }
 
-function closeTag(tag: any) {
+function closeTag(tag: TagView) {
   tagsViewStore.delView(tag)
   if (isActive(tag)) {
     const views = tagsViewStore.visitedViews

@@ -1,4 +1,4 @@
-import request from './index'
+import { http } from './index'
 import type { Result, PageResult } from './index'
 
 export interface FileItem {
@@ -17,16 +17,16 @@ export interface FileItem {
 export function uploadFile(file: File) {
   const formData = new FormData()
   formData.append('file', file)
-  return request.post<any, Result<{ id: number; name: string; url: string; size: number }>>(
+  return http.post<Result<{ id: number; name: string; url: string; size: number }>>(
     '/system/file/upload',
     formData,
   )
 }
 
 export function getFileList(params: { name?: string; mimeType?: string; sortOrder?: string; page: number; pageSize: number }) {
-  return request.get<any, Result<PageResult<FileItem>>>('/system/file/list', { params })
+  return http.get<Result<PageResult<FileItem>>>('/system/file/list', { params })
 }
 
 export function deleteFile(id: number) {
-  return request.delete<any, Result>(`/system/file/${id}`)
+  return http.delete<Result>(`/system/file/${id}`)
 }

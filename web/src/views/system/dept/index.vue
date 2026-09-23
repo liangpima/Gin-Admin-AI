@@ -23,8 +23,8 @@
         <el-table-column label="操作" width="180">
           <template #default="{ row }">
             <el-button type="primary" link size="small" @click="handleAdd(row.id)">新增</el-button>
-            <el-button type="primary" link size="small" @click="handleEdit(row)">编辑</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
+            <el-button type="primary" link size="small" @click="handleEdit(row as DeptItem)">编辑</el-button>
+            <el-button type="danger" link size="small" @click="handleDelete(row as DeptItem)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -64,16 +64,21 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { getDeptTree, createDept, updateDept, deleteDept } from '@/api/dept'
+import { getDeptTree, createDept, updateDept, deleteDept , type DeptItem} from '@/api/dept'
 import FormDialog from '@/components/FormDialog/index.vue'
 
 const loading = ref(false)
 const submitLoading = ref(false)
-const tableData = ref<any[]>([])
+const tableData = ref<DeptItem[]>([])
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 const formRef = ref<FormInstance>()
-const deptOptions = ref<any[]>([])
+// 树选择器的选项只需要 id + 显示名 + children。
+// 单独定义而不是复用 DeptItem：合成出来的「根部门」节点没有
+// parentId/sort/leader 等字段，为了凑类型给它编造无意义的值是自欺欺人。
+type DeptOption = Pick<DeptItem, 'id' | 'name' | 'children'>
+
+const deptOptions = ref<DeptOption[]>([])
 
 const form = reactive({
   id: 0,
@@ -118,7 +123,7 @@ function handleAdd(parentId = 0) {
   dialogVisible.value = true
 }
 
-function handleEdit(row: any) {
+function handleEdit(row: DeptItem) {
   resetForm()
   Object.assign(form, row)
   dialogTitle.value = '编辑部门'
@@ -143,7 +148,7 @@ async function handleSubmit() {
   }
 }
 
-async function handleDelete(row: any) {
+async function handleDelete(row: DeptItem) {
   await ElMessageBox.confirm('确认删除该部门？', '提示', { type: 'warning' })
   await deleteDept(row.id)
   ElMessage.success('删除成功')

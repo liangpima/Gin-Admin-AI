@@ -47,19 +47,19 @@
         </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row)">编辑</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row)">删除</el-button>
+            <el-button type="primary" link size="small" @click="handleEdit(row as MemberLevelItem)">编辑</el-button>
+            <el-button type="danger" link size="small" @click="handleDelete(row as MemberLevelItem)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
 
-      <el-pagination
-        v-model:current-page="queryParams.page"
-        v-model:page-size="queryParams.pageSize"
+      <Pagination
+        v-model:page="queryParams.page"
+        v-model:limit="queryParams.pageSize"
         :total="total"
         layout="total, prev, pager, next"
-        style="margin-top: 16px; justify-content: flex-end"
-        @current-change="loadData"
+        :background="false"
+        @pagination="loadData"
       />
     </el-card>
 
@@ -104,13 +104,13 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { getMemberLevelList, createMemberLevel, updateMemberLevel, deleteMemberLevel } from '@/api/member'
+import { getMemberLevelList, createMemberLevel, updateMemberLevel, deleteMemberLevel , type MemberLevelItem} from '@/api/member'
 import ImagePicker from '@/components/ImagePicker/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
 
 const loading = ref(false)
 const submitLoading = ref(false)
-const tableData = ref<any[]>([])
+const tableData = ref<MemberLevelItem[]>([])
 const total = ref(0)
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
@@ -170,7 +170,7 @@ function handleAdd() {
   dialogVisible.value = true
 }
 
-function handleEdit(row: any) {
+function handleEdit(row: MemberLevelItem) {
   resetForm()
   Object.assign(form, {
     id: row.id,
@@ -204,7 +204,7 @@ async function handleSubmit() {
   }
 }
 
-async function handleDelete(row: any) {
+async function handleDelete(row: MemberLevelItem) {
   await ElMessageBox.confirm('确认删除该等级？', '提示', { type: 'warning' })
   await deleteMemberLevel(row.id)
   ElMessage.success('删除成功')

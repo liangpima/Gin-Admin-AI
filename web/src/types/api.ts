@@ -27,7 +27,7 @@ export interface UserInfoResult {
   email: string
   roles: { id: number; name: string; code: string }[]
   buttons: string[]
-  menus: any[]
+  menus: MenuItem[]
 }
 
 export interface LoginResult {

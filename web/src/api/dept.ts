@@ -1,4 +1,4 @@
-import request from './index'
+import { http } from './index'
 import type { Result } from './index'
 
 export interface DeptItem {
@@ -14,17 +14,17 @@ export interface DeptItem {
 }
 
 export function getDeptTree() {
-  return request.get<any, Result<DeptItem[]>>('/system/dept/tree')
+  return http.get<Result<DeptItem[]>>('/system/dept/tree')
 }
 
-export function createDept(data: any) {
-  return request.post<any, Result>('/system/dept', data)
+export function createDept(data: Partial<DeptItem>) {
+  return http.post<Result>('/system/dept', data)
 }
 
-export function updateDept(data: any) {
-  return request.put<any, Result>('/system/dept', data)
+export function updateDept(data: Partial<DeptItem>) {
+  return http.put<Result>('/system/dept', data)
 }
 
 export function deleteDept(id: number) {
-  return request.delete<any, Result>(`/system/dept/${id}`)
+  return http.delete<Result>(`/system/dept/${id}`)
 }

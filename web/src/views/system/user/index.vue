@@ -61,7 +61,7 @@
               collapse-tags-tooltip
               placeholder="请选择角色"
               style="width: 100%"
-              @change="(val: number[]) => handleRoleChange(row, val)"
+              @change="(val: number[]) => handleRoleChange(row as UserItem, val)"
             >
               <el-option v-for="role in roleList" :key="role.id" :label="role.name" :value="role.id" />
             </el-select>
@@ -76,13 +76,13 @@
               placeholder="选择部门"
               check-strictly
               style="width: 100%"
-              @change="(val: number) => handleDeptChange(row, val)"
+              @change="(val: number) => handleDeptChange(row as UserItem, val)"
             />
           </template>
         </el-table-column>
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
-            <el-switch v-model="row.status" :active-value="1" :inactive-value="0" @change="handleStatusChange(row)" />
+            <el-switch v-model="row.status" :active-value="1" :inactive-value="0" @change="handleStatusChange(row as UserItem)" />
           </template>
         </el-table-column>
         <el-table-column label="创建时间" width="170">
@@ -96,21 +96,20 @@
                 { label: '重置密码', icon: 'Key', color: 'var(--el-color-warning)' },
                 { label: '删除', icon: 'Delete', color: 'var(--el-color-danger)' }
               ]"
-              @command="(cmd: string) => handleAction(cmd, row)"
+              @command="(cmd: string) => handleAction(cmd, row as UserItem)"
             />
           </template>
         </el-table-column>
       </el-table>
 
-      <el-pagination
-        v-model:current-page="queryParams.page"
-        v-model:page-size="queryParams.pageSize"
+      <Pagination
+        v-model:page="queryParams.page"
+        v-model:limit="queryParams.pageSize"
         :page-sizes="[10, 20, 50]"
         :total="total"
         layout="total, sizes, prev, pager, next"
-        style="margin-top: 16px; justify-content: flex-end"
-        @size-change="loadData"
-        @current-change="loadData"
+        :background="false"
+        @pagination="loadData"
       />
     </el-card>
 
@@ -168,24 +167,24 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { getUserList, createUser, updateUser, deleteUser, resetPassword, updateUserStatus, updateUserRoles, updateUserDept, exportUsers } from '@/api/user'
+import { getUserList, createUser, updateUser, deleteUser, resetPassword, updateUserStatus, updateUserRoles, updateUserDept, exportUsers, type UserItem } from '@/api/user'
 import ImagePicker from '@/components/ImagePicker/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
 import MobileAction from '@/components/MobileAction/index.vue'
 import { formatDateTime } from '@/utils/format'
-import { getAllRoles } from '@/api/role'
-import { getDeptTree } from '@/api/dept'
+import { getAllRoles, type RoleItem } from '@/api/role'
+import { getDeptTree, type DeptItem } from '@/api/dept'
 import { useDict, type DictOption } from '@/hooks/useDict'
 
 const loading = ref(false)
 const submitLoading = ref(false)
-const tableData = ref<any[]>([])
+const tableData = ref<UserItem[]>([])
 const total = ref(0)
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 const formRef = ref<FormInstance>()
-const roleList = ref<any[]>([])
-const deptTree = ref<any[]>([])
+const roleList = ref<RoleItem[]>([])
+const deptTree = ref<DeptItem[]>([])
 const avatarPickerVisible = ref(false)
 
 const queryParams = reactive({
@@ -240,9 +239,9 @@ async function loadData() {
   loading.value = true
   try {
     const res = await getUserList(queryParams)
-    tableData.value = res.data.list.map((item: any) => ({
+    tableData.value = res.data.list.map((item) => ({
       ...item,
-      roleIds: item.roles?.map((r: any) => r.id) || [],
+      roleIds: item.roles?.map((r) => r.id) || [],
     }))
     total.value = res.data.total
   } finally {
@@ -276,7 +275,7 @@ function handleReset() {
   handleSearch()
 }
 
-async function handleStatusChange(row: any) {
+async function handleStatusChange(row: UserItem) {
   try {
     await updateUserStatus({ id: row.id, status: row.status })
     ElMessage.success('状态修改成功')
@@ -285,7 +284,7 @@ async function handleStatusChange(row: any) {
   }
 }
 
-async function handleRoleChange(row: any, roleIds: number[]) {
+async function handleRoleChange(row: UserItem, roleIds: number[]) {
   try {
     await updateUserRoles({ id: row.id, roleIds })
     ElMessage.success('角色修改成功')
@@ -294,7 +293,7 @@ async function handleRoleChange(row: any, roleIds: number[]) {
   }
 }
 
-async function handleDeptChange(row: any, deptId: number) {
+async function handleDeptChange(row: UserItem, deptId: number) {
   try {
     await updateUserDept({ id: row.id, deptId })
     ElMessage.success('部门修改成功')
@@ -328,13 +327,14 @@ const exporting = ref(false)
 async function handleExport() {
   exporting.value = true
   try {
-    const res: any = await exportUsers({
+    const res = await exportUsers({
       username: queryParams.username,
       phone: queryParams.phone,
       status: queryParams.status,
     })
 
-    const blob = new Blob([res.data], {
+    // http 门面已把 axios 的 response 解包，这里拿到的就是 Blob 本体
+    const blob = new Blob([res], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     })
     const url = window.URL.createObjectURL(blob)
@@ -360,7 +360,7 @@ function handleAdd() {
   dialogVisible.value = true
 }
 
-function handleEdit(row: any) {
+function handleEdit(row: UserItem) {
   resetForm()
   Object.assign(form, {
     id: row.id,
@@ -370,7 +370,7 @@ function handleEdit(row: any) {
     phone: row.phone,
     email: row.email,
     deptId: row.deptId,
-    roleIds: row.roles?.map((r: any) => r.id) || [],
+    roleIds: row.roles?.map((r) => r.id) || [],
     status: row.status,
     remark: row.remark,
   })
@@ -397,14 +397,14 @@ async function handleSubmit() {
   }
 }
 
-async function handleDelete(row: any) {
+async function handleDelete(row: UserItem) {
   await ElMessageBox.confirm('确认删除该管理员？', '提示', { type: 'warning' })
   await deleteUser(row.id)
   ElMessage.success('删除成功')
   loadData()
 }
 
-async function handleResetPwd(row: any) {
+async function handleResetPwd(row: UserItem) {
   const { value } = await ElMessageBox.prompt('请输入新密码', '重置密码', {
     inputPattern: /.{6,}/,
     inputErrorMessage: '密码长度不能少于6位',
@@ -417,7 +417,7 @@ function handleAvatarPick(url: string | string[]) {
   form.avatar = url as string
 }
 
-function handleAction(cmd: string, row: any) {
+function handleAction(cmd: string, row: UserItem) {
   switch (cmd) {
     case '编辑':
       handleEdit(row)

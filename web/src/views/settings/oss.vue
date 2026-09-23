@@ -58,7 +58,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, type FormInstance } from 'element-plus'
-import { getConfigByPrefix, batchSaveConfig } from '@/api/config'
+import { getConfigByPrefix, batchSaveConfig , type ConfigItem } from '@/api/config'
 
 const PREFIX = 'oss.'
 const loading = ref(false)
@@ -75,6 +75,11 @@ const form = reactive({
   local_backup: '0',
 })
 
+// 配置项是动态键：字段名由后端配置项名推导，无法用字面量联合类型约束。
+// 用 Record 收口而不是 any —— 至少能保证读写的是字符串，
+// 也避免 (form as any) 这种把整个表单类型抹掉的做法。
+const formValues = form as unknown as Record<string, string>
+
 const fieldMap: Record<string, string> = {
   type: 'type',
   endpoint: 'endpoint',
@@ -89,11 +94,11 @@ async function loadData() {
   loading.value = true
   try {
     const res = await getConfigByPrefix(PREFIX)
-    const list: any[] = res.data || []
-    list.forEach((item: any) => {
+    const list: ConfigItem[] = res.data || []
+    list.forEach((item) => {
       const field = fieldMap[item.key?.replace(PREFIX, '')]
       if (field) {
-        ;(form as any)[field] = item.value || ''
+        ;formValues[field] = item.value || ''
       }
     })
   } finally {
@@ -106,7 +111,7 @@ async function handleSave() {
   try {
     const items = Object.entries(fieldMap).map(([field, key]) => ({
       key,
-      value: (form as any)[field] || '',
+      value: formValues[field] || '',
     }))
     await batchSaveConfig(PREFIX, items)
     ElMessage.success('保存成功')

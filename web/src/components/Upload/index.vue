@@ -23,7 +23,7 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, type UploadFile, type UploadUserFile } from 'element-plus'
 import { getToken } from '@/utils/auth'
 
 const props = withDefaults(defineProps<{
@@ -33,7 +33,7 @@ const props = withDefaults(defineProps<{
   accept?: string
   tip?: string
   maxSize?: number
-  fileList?: any[]
+  fileList?: UploadUserFile[]
 }>(), {
   multiple: false,
   limit: 1,
@@ -43,10 +43,12 @@ const props = withDefaults(defineProps<{
   fileList: () => [],
 })
 
+// 直接用 Element Plus 自带的类型，不要自己写 any：
+// 这些回调的签名由 el-upload 决定，抄错一个字段就会在运行期才暴露。
 const emit = defineEmits<{
-  success: [response: any, file: any]
-  remove: [file: any]
-  error: [error: any]
+  success: [response: unknown, file: UploadFile]
+  remove: [file: UploadFile]
+  error: [error: Error]
 }>()
 
 const uploadRef = ref()
@@ -64,12 +66,12 @@ function handleBeforeUpload(file: File) {
   return true
 }
 
-function handleSuccess(response: any, file: any) {
+function handleSuccess(response: unknown, file: UploadFile) {
   ElMessage.success('上传成功')
   emit('success', response, file)
 }
 
-function handleError(error: any) {
+function handleError(error: Error) {
   ElMessage.error('上传失败')
   emit('error', error)
 }
@@ -78,7 +80,7 @@ function handleExceed() {
   ElMessage.warning(`最多只能上传 ${props.limit} 个文件`)
 }
 
-function handleRemove(file: any) {
+function handleRemove(file: UploadFile) {
   emit('remove', file)
 }
 </script>

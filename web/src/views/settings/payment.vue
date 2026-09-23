@@ -27,7 +27,7 @@
           <el-upload
             :auto-upload="false"
             :limit="1"
-            :on-change="(file: any) => handleCertUpload(file, 'wechat_cert_pem')"
+            :on-change="(file: UploadFile) => handleCertUpload(file, 'wechat_cert_pem')"
             :on-remove="() => handleCertRemove('wechat_cert_pem')"
             accept=".pem,.crt,.cer"
           >
@@ -42,7 +42,7 @@
           <el-upload
             :auto-upload="false"
             :limit="1"
-            :on-change="(file: any) => handleCertUpload(file, 'wechat_key_pem')"
+            :on-change="(file: UploadFile) => handleCertUpload(file, 'wechat_key_pem')"
             :on-remove="() => handleCertRemove('wechat_key_pem')"
             accept=".pem,.key"
           >
@@ -81,9 +81,9 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, type FormInstance } from 'element-plus'
+import { ElMessage, type UploadFile, type FormInstance } from 'element-plus'
 import { Upload } from '@element-plus/icons-vue'
-import { getConfigByPrefix, batchSaveConfig, uploadCert } from '@/api/config'
+import { getConfigByPrefix, batchSaveConfig, uploadCert , type ConfigItem } from '@/api/config'
 
 const PREFIX = 'pay.'
 const loading = ref(false)
@@ -104,6 +104,11 @@ const form = reactive({
   return_url: '',
 })
 
+// 配置项是动态键：字段名由后端配置项名推导，无法用字面量联合类型约束。
+// 用 Record 收口而不是 any —— 至少能保证读写的是字符串，
+// 也避免 (form as any) 这种把整个表单类型抹掉的做法。
+const formValues = form as unknown as Record<string, string>
+
 const fieldMap: Record<string, string> = {
   wechat_app_id: 'wechat_app_id',
   wechat_mch_id: 'wechat_mch_id',
@@ -122,11 +127,11 @@ async function loadData() {
   loading.value = true
   try {
     const res = await getConfigByPrefix(PREFIX)
-    const list: any[] = res.data || []
-    list.forEach((item: any) => {
+    const list: ConfigItem[] = res.data || []
+    list.forEach((item) => {
       const field = fieldMap[item.key?.replace(PREFIX, '')]
       if (field) {
-        ;(form as any)[field] = item.value || ''
+        ;formValues[field] = item.value || ''
       }
     })
   } finally {
@@ -134,11 +139,17 @@ async function loadData() {
   }
 }
 
-async function handleCertUpload(file: any, field: string) {
-  const rawFile = file.raw || file
+async function handleCertUpload(file: UploadFile, field: string) {
+  // 用 file.raw（浏览器原生 File），而不是退回 file 本身 ——
+  // UploadFile 只是 el-upload 的包装对象，直接当 File 用会传错东西
+  const rawFile = file.raw
+  if (!rawFile) {
+    ElMessage.error('无法读取所选文件')
+    return
+  }
   try {
     const res = await uploadCert(rawFile)
-    ;(form as any)[field] = res.data.path
+    ;formValues[field] = res.data.path
     ElMessage.success('证书上传成功')
   } catch {
     ElMessage.error('证书上传失败')
@@ -146,7 +157,7 @@ async function handleCertUpload(file: any, field: string) {
 }
 
 function handleCertRemove(field: string) {
-  ;(form as any)[field] = ''
+  ;formValues[field] = ''
 }
 
 async function handleSave() {
@@ -154,7 +165,7 @@ async function handleSave() {
   try {
     const items = Object.entries(fieldMap).map(([field, key]) => ({
       key,
-      value: (form as any)[field] || '',
+      value: formValues[field] || '',
     }))
     await batchSaveConfig(PREFIX, items)
     ElMessage.success('保存成功')

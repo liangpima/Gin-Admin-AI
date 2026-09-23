@@ -43,7 +43,7 @@
           @click="toggleSelect(item)"
         >
           <div class="image-picker__img">
-            <img v-if="item.mimeType?.startsWith('image/')" :src="item.url" loading="lazy" @error="(e: any) => e.target.style.display = 'none'" />
+            <img v-if="item.mimeType?.startsWith('image/')" :src="item.url" loading="lazy" @error="(e: Event) => ((e.target as HTMLElement).style.display = 'none')" />
             <img v-else-if="item.mimeType?.startsWith('video/')" src="/images/media.png" class="image-picker__video-cover" />
             <div v-else class="image-picker__video-icon">
               <el-icon :size="32"><VideoCamera /></el-icon>
