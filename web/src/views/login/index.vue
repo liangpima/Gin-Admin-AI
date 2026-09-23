@@ -141,7 +141,9 @@ function onCaptchaSuccess(token: string) {
 function resetCaptcha() {
   captchaVerified.value = false
   captchaToken.value = ''
-  captchaRef.value?.refresh()
+  // 验证码是一次性的（后端校验通过即作废），登录失败后必须重新验证：
+  // reset() 会清掉「已验证」状态并丢弃当前图，用户点触发器会拿到新图
+  captchaRef.value?.reset()
 }
 
 async function handleLogin() {
