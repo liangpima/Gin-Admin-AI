@@ -378,15 +378,24 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   每页在 375px 宽实测（用 CDP Emulation 方式，见工作日志）。
 
 ### P3-2 路由与鉴权收尾（前端）
-- **补 `pathMatch(.*)` 404 catch-all**（实测全仓无 `pathMatch`）：现在访问未匹配的
-  路径只有控制台告警 + 一片空白，没有干净的 404 页。这条是真需求。
-- `router/index.ts:51-53` 的 `else { next() }`：**2026-09-24 复核后需要重新定性**。
-  它不是"roles 非空即放行"的鉴权绕过 —— 走到这条分支时 `addRoute` 已经完成，
-  没被注册的路径本来就渲染不出内容，所以不构成越权（后端 Casbin 另有兜底）。
-  实际影响是"未匹配路由落到空白页"这一体验问题，与上一条 catch-all 是同一件事。
-  **动手前先复核**：如果确认只是体验问题，就不必按安全项排期。
-- token 从 `js-cookie` 迁到 httpOnly cookie：需后端 `Set-Cookie` 配合 + CSRF 防护
-  （SameSite=Strict 已够用，Bearer 头方案可并存过渡）。改造面较大，单独立项。
+- ✅ **`pathMatch(.*)*` 404 catch-all 已补**（`web/src/router/routes/static.ts`）。
+  此前访问未匹配的路径只会得到控制台一条 "No match found for location" 警告
+  加一片空白页 —— 用户的感受是「页面坏了」，而不是「地址写错了」，
+  这两件事需要给出不同的反馈。
+  新增 `web/src/router/routes/static.spec.ts`（6 个用例）守住两件事：
+  未匹配路径必须落到 `/404`；兜底**不能盖住**具体路径，包括之后通过
+  `addRoute` 动态注册的业务路由。第二条是真正容易写错的地方 ——
+  Vue Router 4 按路径具体度打分，catch-all 放在数组最后只是可读性约定，
+  **不是**它能正确工作的原因；万一有人把它改成前缀匹配 `/:pathMatch(.*)`，
+  所有业务页面都会变成 404，值得用用例钉住。
+  变异验证：把 path 改成非通配 → 4 条用例转红。
+- ✅ **`router/index.ts:51-53` 的 `else { next() }` 经复核不需要额外校验**：
+  走到这条分支时 `addRoute` 已经完成，没被注册的路径本来就渲染不出内容，
+  所以不构成越权（后端 Casbin 另有兜底）。它原本的症状就是「未匹配路由落到
+  空白页」，已由上面的 catch-all 一并解决 —— **不必按安全项排期**。
+- token 从 `js-cookie` 迁到 httpOnly cookie（**可选小项，未执行**）：
+  需后端 `Set-Cookie` 配合 + CSRF 防护（`SameSite=Strict` 已够用，Bearer 头
+  方案可并存过渡）。改造面较大，单独立项。
 
 ### P3-3 清理项
 - **5 个孤儿组件**（`SvgIcon`/`TableSkeleton`/`PageHeader`/`RightPanel`/`Upload`）：
