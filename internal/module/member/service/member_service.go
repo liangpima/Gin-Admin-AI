@@ -364,7 +364,12 @@ func (s *memberService) generateMemberNo(tenantID uint, digits int) (string, err
 		return fmt.Sprintf(format, startNum), nil
 	}
 
-	// 首次初始化：如果序列为1，把计数器对齐到「库内最大值 + 1」
+	// 首次初始化：如果序列为1，把计数器对齐到「刚发出的编号」。
+	//
+	// 对齐值必须是 startNum 而不是 startNum+1：计数器在 INCR 语义下表示
+	// 「上一次发出的编号」，所以下一次 INCR 恰好得到 startNum+1。
+	// 写成 startNum+1 会让编号凭空跳一位（100001 之后直接发 100003），
+	// 用户看到跳号会以为有会员数据丢失。
 	if seq == 1 {
 		startNum, dbErr := s.memberNoFromDB(tenantID, digits)
 		if dbErr != nil {
@@ -373,7 +378,7 @@ func (s *memberService) generateMemberNo(tenantID uint, digits int) (string, err
 			return "", fmt.Errorf("生成会员编号失败: %w", dbErr)
 		}
 
-		if setErr := cache.Set(ctx, key, strconv.Itoa(startNum+1), 0); setErr != nil {
+		if setErr := cache.Set(ctx, key, strconv.Itoa(startNum), 0); setErr != nil {
 			// 这个错误**不能吞**：对齐失败时 key 会停在 1，下一次 Incr 返回 2，
 			// 于是把 000002 这种与历史编号冲突的值发出去。
 			// 处理方式是删掉计数器，让下次调用重新走初始化分支；

@@ -12,6 +12,8 @@ import (
 	systemModel "go-admin/internal/module/system/model"
 	systemService "go-admin/internal/module/system/service"
 	"go-admin/internal/testsupport"
+
+	"gorm.io/gorm"
 )
 
 // ⚠️ 本文件的用例都会改写包级 database.DB，因此**不能** t.Parallel。
@@ -20,13 +22,29 @@ const (
 	tenantB uint = 2
 )
 
-func newTestMemberService(t *testing.T) *memberService {
+// newMemberDB 建一个包含 member 模块全部表的内存库并注入 database.DB。
+//
+// 单独抽出来是因为同一包内既有「构造完整 memberService」的用例，也有
+// 只测某个薄封装 Service 的用例；两边共用一份建表清单，避免日后新增表时
+// 只改了一处，另一处的用例因为「表不存在」而以奇怪的方式失败。
+func newMemberDB(t *testing.T) *gorm.DB {
 	t.Helper()
+	// 默认把 Redis 置空：会员编号生成有「Redis 计数器」与「按库内最大值推导」
+	// 两条分支，不固定 Redis 状态的话，同一批用例在不同机器上（甚至同一机器
+	// 连续两次运行之间）走的分支不同 —— 覆盖率会摆动，断言也不再可复现。
+	// 需要真实 Redis 的用例自己调 testsupport.WithTestRedis 覆盖掉。
+	testsupport.WithNilRedis(t)
+
 	// 先建库（会注入 database.DB），再构造仓储 —— 仓储在构造时捕获 database.DB
 	// SysConfig 也要建：Create 会读取「会员编号位数」配置
-	testsupport.NewDB(t,
+	return testsupport.NewDB(t,
 		&model.Member{}, &model.MemberLevel{}, &model.MemberTag{}, &model.MemberTagRel{},
-		&systemModel.SysConfig{})
+		&model.PointsLog{}, &systemModel.SysConfig{})
+}
+
+func newTestMemberService(t *testing.T) *memberService {
+	t.Helper()
+	newMemberDB(t)
 	return &memberService{
 		memberRepo:    repository.NewMemberRepository(),
 		tagRepo:       repository.NewMemberTagRepository(),
@@ -468,17 +486,23 @@ func TestCreatePhoneDuplicateCheck(t *testing.T) {
 	})
 }
 
-// stubMemberRepo 只实现查重路径用到的两个方法。
+// stubMemberRepo 只实现查重 / 编号推导路径用到的三个方法。
 // 内嵌 repository.MemberRepository 接口来满足类型要求：
 // 未实现的方法一旦被调用会 panic，这正好能暴露「测试路径与预期不符」。
 type stubMemberRepo struct {
 	repository.MemberRepository
 	findByPhoneErr error
+	findMaxNoErr   error
+	maxMemberNo    string
 	created        int
 }
 
 func (s *stubMemberRepo) FindByPhone(tenantID uint, phone string) (*model.Member, error) {
 	return &model.Member{}, s.findByPhoneErr
+}
+
+func (s *stubMemberRepo) FindMaxMemberNo(tenantID uint) (string, error) {
+	return s.maxMemberNo, s.findMaxNoErr
 }
 
 func (s *stubMemberRepo) Create(*model.Member) error {

@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"go-admin/config"
 	"go-admin/internal/cache"
 	"go-admin/internal/common"
+	"go-admin/internal/testsupport"
 	"go-admin/pkg/auth"
 
 	"github.com/gin-gonic/gin"
@@ -89,38 +89,16 @@ func bodyCode(t *testing.T, w *httptest.ResponseRecorder) int {
 }
 
 // withNilRedis 显式把 cache 的客户端置空，模拟「Redis 不可用」。
-//
-// 必须显式置 nil 而不是依赖环境：同包其它用例会初始化 Redis，
-// 不显式清掉的话这条用例的结果就取决于执行顺序。
+// 实现见 testsupport：member 模块也要用同一套门控，两处各写一份会漂移。
 func withNilRedis(t *testing.T) {
 	t.Helper()
-	prev := cache.RDB
-	cache.RDB = nil
-	t.Cleanup(func() { cache.RDB = prev })
+	testsupport.WithNilRedis(t)
 }
 
 // withTestRedis 连到本机/CI 的 Redis；连不上就跳过。
-//
-// 走「连不上则 skip」而不是硬依赖，是为了让 `go test ./...` 在没有 Redis 的
-// 机器上仍然能跑（与 internal/database 用 TEST_MYSQL_* 门控是同一取舍）。
-// CI 上通过 ci.yml 的 services 起一个 Redis，因此这些用例在 CI 里是真跑的。
 func withTestRedis(t *testing.T) {
 	t.Helper()
-
-	prevRDB := cache.RDB
-	t.Cleanup(func() { cache.RDB = prevRDB })
-
-	addr := os.Getenv("TEST_REDIS_ADDR")
-	if addr == "" {
-		addr = "127.0.0.1:6379"
-	}
-	prevAddr := config.Cfg.Redis.Addr
-	config.Cfg.Redis.Addr = addr
-	t.Cleanup(func() { config.Cfg.Redis.Addr = prevAddr })
-
-	if err := cache.Init(); err != nil {
-		t.Skipf("Redis 不可用（%s），跳过：%v", addr, err)
-	}
+	testsupport.WithTestRedis(t)
 }
 
 // withJWTTTL 临时把 token 有效期设为正常值。
@@ -980,7 +958,18 @@ func TestOperationLogFallsBackToRealPath(t *testing.T) {
 // TestSetRoleResolverAndClearRoleCache 两个此前 0% 的包级函数。
 func TestSetRoleResolverAndClearRoleCache(t *testing.T) {
 	t.Run("SetRoleResolver 生效", func(t *testing.T) {
-		withRoleResolver(t, stubRoleResolver{codes: []string{"editor"}})
+		// 显式置空 Redis：这样「缓存必然未命中」是确定的。
+		// 此前这里没有固定 Redis 状态，而 Redis 里可能残留着上一次运行写入的
+		// rbac:roles:1:7（TTL 60 秒）—— 命中缓存时解析器根本不被调用，
+		// 用例照样通过，包覆盖率却在 92.2% / 92.7% 之间摆动。
+		withNilRedis(t)
+
+		resolver := &countingRoleResolver{codes: []string{"editor"}}
+		// 必须走 SetRoleResolver 本身：此前用的是 withRoleResolver（直接给包级变量
+		// 赋值），于是 SetRoleResolver 始终 0% —— 用例名宣称覆盖了它，实际没有。
+		prev := roleResolver
+		SetRoleResolver(resolver)
+		t.Cleanup(func() { roleResolver = prev })
 
 		got, err := RoleCodesFor(1, 7)
 		if err != nil {
@@ -988,6 +977,30 @@ func TestSetRoleResolverAndClearRoleCache(t *testing.T) {
 		}
 		if len(got) != 1 || got[0] != "editor" {
 			t.Errorf("应解析出 editor，实际 %v", got)
+		}
+		// 断言解析器真的被调用过 —— 只断言返回值的话，
+		// 「命中残留缓存」也能让用例通过，测试就悄悄失去了区分力。
+		if resolver.calls != 1 {
+			t.Errorf("缓存未命中时必须查一次解析器，实际 %d 次", resolver.calls)
+		}
+	})
+
+	t.Run("解析器未注入时拒绝", func(t *testing.T) {
+		withNilRedis(t)
+		// roleResolver 为 nil 属启动配置错误。此时必须返回错误（上层按无角色
+		// 拒绝 → 403），而不是返回空角色列表被当成「有权限」。
+		withRoleResolver(t, nil)
+
+		if _, err := RoleCodesFor(1, 7); err == nil {
+			t.Error("解析器未注入时必须返回错误（fail-closed），不能静默放行")
+		}
+	})
+
+	t.Run("userID 为 0 直接返回空", func(t *testing.T) {
+		// 未登录/系统内部调用没有用户身份，不该去查库或查缓存
+		got, err := RoleCodesFor(1, 0)
+		if err != nil || got != nil {
+			t.Errorf("userID=0 应返回 (nil, nil)，实际 (%v, %v)", got, err)
 		}
 	})
 
@@ -1017,4 +1030,78 @@ func TestSetRoleResolverAndClearRoleCache(t *testing.T) {
 			t.Error("ClearRoleCache 应删除角色缓存键")
 		}
 	})
+}
+
+// TestRoleCodesForCaching 角色解析的两条路径：未命中则查解析器并回填、命中则不查。
+//
+// 与上面那条用例分开写，是为了让「缓存命中」这条路径也能**确定性**覆盖 ——
+// 它此前是靠 Redis 残留键偶然命中的，无法复现也就无法回归。
+func TestRoleCodesForCaching(t *testing.T) {
+	const (
+		tenant uint = 1
+		user   uint = 7
+	)
+	key := fmt.Sprintf("rbac:roles:%d:%d", tenant, user)
+
+	t.Run("未命中查解析器并回填，随后命中", func(t *testing.T) {
+		withTestRedis(t)
+		// 清掉可能残留的键，保证起点是「未命中」
+		ClearRoleCache(tenant, user)
+		t.Cleanup(func() { ClearRoleCache(tenant, user) })
+
+		resolver := &countingRoleResolver{codes: []string{"editor"}}
+		withRoleResolver(t, resolver)
+
+		got, err := RoleCodesFor(tenant, user)
+		if err != nil || len(got) != 1 || got[0] != "editor" {
+			t.Fatalf("首次解析失败: got=%v err=%v", got, err)
+		}
+		if resolver.calls != 1 {
+			t.Fatalf("首次应查一次解析器，实际 %d 次", resolver.calls)
+		}
+
+		// 回填后再调一次：应直接命中缓存
+		got, err = RoleCodesFor(tenant, user)
+		if err != nil || len(got) != 1 || got[0] != "editor" {
+			t.Fatalf("二次解析失败: got=%v err=%v", got, err)
+		}
+		if resolver.calls != 1 {
+			t.Errorf("回填后应命中缓存，解析器不应再被调用（实际 %d 次）", resolver.calls)
+		}
+	})
+
+	t.Run("命中缓存时不查解析器", func(t *testing.T) {
+		withTestRedis(t)
+
+		if err := cache.Set(context.Background(), key, "cached-role", time.Minute); err != nil {
+			t.Fatalf("准备缓存失败: %v", err)
+		}
+		t.Cleanup(func() { ClearRoleCache(tenant, user) })
+
+		// 解析器故意返回错误：一旦被调用，用例即转红
+		withRoleResolver(t, stubRoleResolver{err: fmt.Errorf("命中缓存时不该查解析器")})
+
+		got, err := RoleCodesFor(tenant, user)
+		if err != nil {
+			t.Fatalf("命中缓存时不应报错: %v", err)
+		}
+		if len(got) != 1 || got[0] != "cached-role" {
+			t.Errorf("应返回缓存里的角色，实际 %v", got)
+		}
+	})
+}
+
+// countingRoleResolver 记录被调用次数，用于区分「走了缓存」与「走了解析器」。
+//
+// stubRoleResolver 是值类型、没有计数器，无法回答「解析器到底有没有被调用」——
+// 而这恰恰是缓存类逻辑唯一值得断言的东西。
+type countingRoleResolver struct {
+	codes []string
+	err   error
+	calls int
+}
+
+func (r *countingRoleResolver) RoleCodesOf(uint, uint) ([]string, error) {
+	r.calls++
+	return r.codes, r.err
 }

@@ -21,6 +21,10 @@
 | P2-3 消除样板 | ✅ 已完成 | 后端 `658a41d`（BindPage 收口 + 忽略错误）；前端 `f088f75`（useCrud + 类型去重） |
 | P2-4 前端工程 | ✅ 已完成 | `4950839` ESLint/Prettier/vitest 接入 CI；lint 基线 1794 → 0 |
 | P2-5 覆盖率门槛 | ✅ 已完成 | `scripts/check-coverage.sh` 接入 CI 与 `make check-backend`；阈值 74.0%（实测 75.5%） |
+| P2-1b system 两包 | ✅ 已完成 | `f84dea1` system/service 39.6%→79.4%、controller 35.0%→84.8%；包均 70.5%→75.5% |
+| P2-1c middleware/member | ✅ 已完成 | middleware 61.8%→93.3%、member/service 44.2%→88.5%；包均 75.5%→**79.7%**；顺带修 CORS 启动 panic |
+| P3-2 路由收尾 | ✅ 已完成 | `60e472d` pathMatch 404 兜底 + 6 个用例；`else { next() }` 复核后结案 |
+| P0-5 会员编号冲突 | ⏸ 待决策 | **新发现**：`uk_member_no` 全局唯一 vs 按租户发号 → 第二租户建会员必失败；两方案见 P2-1d |
 | 附：真 bug 修复 | ✅ 已完成 | `f5159fa` 登录限频把 redis.Nil 误判为故障（任何干净登录 500）；`bc67715` 仪表盘部门数按租户统计 |
 
 **⚠️ 升级须知（P0-2/P0-3 带来的部署影响）**
@@ -251,8 +255,8 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   不为覆盖率数字去 mock 掉整个网络层。
   需要真实 MySQL 的用例（`internal/database`）用 `TEST_MYSQL_*` 环境变量开启，
   未设置则跳过，CI 上不设置即不受影响。
-- **仍偏低**（下一轮可选）：`member/service` 44.2%、`payment/service` 47.5%、
-  `cmd/migrate` 49.5%、`pkg/upload` 52.1%。
+- **仍偏低**（下一轮可选）：`payment/service` 47.5%、`cmd/migrate` 49.5%、
+  `pkg/upload` 52.1%。~~`member/service` 44.2%~~ 已由 P2-1c 补上。
 
 ### P2-1b `system` 两包深挖 ✅ 已完成
 - 起点：`system/service` 39.6%、`system/controller` 35.0%（P2-1 第一轮留下的两处洼地）。
@@ -274,6 +278,85 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   `if tenantID == 0` 整段删掉后用例**仍然转绿**，等于没测。改为断言错误来自
   仓库层显式护栏（`strings.Contains(err, "租户上下文")`）后才真正转红。
 - 有意不测的部分与 P2-1 相同（云存储后端、真实出网网关方法）。
+
+### P2-1c `middleware` 与 `member/service` 深挖 ✅ 已完成
+- 起点：`middleware` 61.8%、`member/service` 44.2%（P2-1/P2-1b 之后剩下的两处洼地）。
+- **结果**：`middleware` 61.8% → **93.3%**、`member/service` 44.2% → **88.5%**；
+  全仓包均覆盖率 75.5% → **79.7%**（同为 18 个包、同口径）。新增 4 个测试文件。
+- **`middleware` 补齐的是「真正挂在路由上的那一层」**：此前用例全集中在辅助函数上
+  （`sanitizeRequestBody`、`resolveTitle`、Casbin 内部判定），而
+  `Auth` 23.4%、`Recovery`/`OperationLog`/`UploadSecurity`/`Tenant`/`Cors`/`Logger`
+  全是 0%。新增用例一律走 gin 引擎的真实 `ServeHTTP` 而不是直接调函数 ——
+  中间件的行为有一半在「`c.Abort()` 之后下游还跑不跑」上，只有走引擎才测得到。
+- **顺带修掉一个启动即崩的真 bug**：`middleware/cors.go` 在生产模式（或开了
+  `allow_credentials`）且未配 `cors.allow_origins` 时，只打日志就把空的
+  `AllowOrigins` 传给 `cors.New`，而 `gin-contrib/cors` 的 `Config.Validate()`
+  在「不允许所有来源 + 无 `AllowOriginFunc` + 白名单为空」时会 **panic**。
+  `Cors()` 是在 `router.Setup` 里调用的，所以后果是**服务启动直接崩**，
+  而不是「跨域不生效」。修法是显式用恒 false 的 `AllowOriginFunc` 表达
+  「明确拒绝全部来源」。
+- **修掉两处测试自身的缺陷**（比新增用例更值钱）：
+  1. **覆盖率在 92.2% / 92.7% 之间摆动**。根因是 `TestSetRoleResolverAndClearRoleCache`
+     直接调 `RoleCodesFor(1, 7)`，而 Redis 里可能残留着上一次运行写入的
+     `rbac:roles:1:7`（TTL 60 秒）—— 命中缓存时角色解析器根本不被调用，
+     用例照样通过，却悄悄失去了区分力。改法是显式固定 Redis 状态
+     （未命中走 `WithNilRedis`、命中单独造键），并断言解析器**被调用的次数**。
+  2. **`SetRoleResolver` 一直是 0%**，而那条用例的名字恰好宣称覆盖了它 ——
+     它实际用的是直接给包级变量赋值的 `withRoleResolver`。
+     这正是「用例名比用例本身乐观」的典型：只有把 `go tool cover -func`
+     的输出逐行看一遍才会发现。
+- **`member/service` 沿用 P2-1b 的「真实仓储 + 内存库」**：`member_level_service.go`、
+  `member_tag_service.go`、`points_log_service.go` 三个文件此前整体 0%
+  （老用例一律 `&xxxService{repo: stub}` 直接构造，绕开了 `NewXxxService`）。
+  这类薄封装的**全部价值**就在「把 tenantID / operatorID 原样透传」上，
+  用桩替换仓储等于把要验证的东西一起换掉。
+- 断言落点一律是「另一个租户能不能看到 / 改到」，而不是「返回了 nil error」：
+  等级/标签的跨租户可见性、跨租户删除不生效（GORM 0 行受影响**不报错**，
+  只能靠「记录还在不在」判定）、创建时 `TenantID`/`CreateBy` 真的落库、
+  删标签要连带清理 `pay_member_tag_rel`（否则会员列表里标签神秘消失）。
+- 新增的 Redis 门控（`WithNilRedis`/`WithTestRedis`）下沉到 `internal/testsupport`，
+  中间件与 member 两处共用一份 —— 两处各写一份的实现会各自漂移，
+  而这类脚手架的漂移表现是「某些用例在某些机器上静默换了分支」，很难发现。
+- **默认把 Redis 置空**（`newMemberDB` 内）：会员编号生成有「Redis 计数器」与
+  「按库内最大值推导」两条分支，不固定 Redis 状态的话同一批用例会走不同分支，
+  覆盖率摆动、断言也不可复现。需要真实 Redis 的用例自己覆盖。
+- **变异验证 9 项全数转红**（逐项 sed 改回缺陷写法 → 跑对应用例 → 还原；
+  每次都用 grep 确认变异**真的应用了**，避免 sed 静默不匹配导致「以为验过了」）：
+  编号计数器 off-by-one、标签查询失败仍返回列表、`status` 缺省不过滤、
+  软删除释放唯一键、等级部分更新不清字段、等级创建写入 TenantID、
+  删标签清理关联、积分 `type=0` 视为不过滤、命中缓存不查解析器。
+  脚本是一次性的，放在 gitignore 的 `runtime/cov/mutate.sh`（随批次变化，
+  不适合入库；验证方法本身见本节说明）。
+- 有意不测的部分：剩余未覆盖项集中在「仓储返回错误时逐层上抛」的单行分支，
+  以及需要伪造 Redis 故障才能触达的 `cache.Set`/`cache.Del` 失败分支。
+  前者只是错误透传、后者需要注入假的 Redis 客户端，投入产出比低，暂不补。
+
+### P2-1d 【P0】会员编号全局唯一索引与「按租户发号」冲突 ✅ 已确认，待决策
+- **补 `member/service` 测试时发现，不是既有清单里的项。**
+- 现象：租户 A 建第一个会员成功后，**租户 B 建第一个会员直接失败**：
+  `Error 1062: Duplicate entry '100001' for key 'uk_member_no'`。
+- 根因是两处语义不一致：
+  - 发号是**按租户**的 —— Redis 键 `member:no:<tenantID>`，
+    且 `FindMaxMemberNo(tenantID)` 也按租户取最大值；
+  - `pay_member` 上的唯一索引是**全局**的 ——
+    `sql/init.sql:402` 是 `UNIQUE KEY uk_member_no (member_no)`，
+    模型侧是裸 `uniqueIndex`，都不含 `tenant_id`。
+  - 于是两个租户在各自空库上都会推出起始值 `100001`，第二个租户必然撞唯一索引。
+- 影响：**多租户部署下除第一个租户外，其余租户完全无法创建会员**（功能性中断）。
+  单租户部署不受影响，所以一直没暴露。
+- 两种改法，需要产品侧先定语义（**未执行**）：
+  1. **发号改全局**：Redis 键去掉 tenantID、`FindMaxMemberNo` 不再按租户过滤。
+     与 `uk_phone` 全局唯一的既定取舍一致（一个手机号全平台只能注册一次，
+     说明「会员」本身被当作平台级实体）；无需迁移。代价是 Repository 方法
+     不再接收 tenantID，需要在接口上写明这是**有意**的例外
+     （参照 `CountByUsername` 的既有做法）。
+  2. **索引改复合**：`uk_member_no` → `uk_tenant_member_no (tenant_id, member_no)`。
+     与「按租户发号」的现有实现一致，且 `sys_tenant` 已有
+     `uk_tenant_code (tenant_id, code)` 的同类先例。代价是要改模型、
+     `init.sql` 与新增迁移脚本（并同步 `deleted_at` 软删除下的唯一性行为）。
+- 建议：倾向方案 1 —— 它不改表结构，且与同表 `uk_phone` 的全局语义自洽。
+- 回归用例：`TestMemberServiceFindList` 里原本就靠「两个租户各建一个会员」
+  触发，现已在注释中标注原因并绕开，避免用例本身被这个缺陷带红。
 
 ### P2-2 golangci-lint 转阻断 ✅ 已完成
 - **先发现了一个被掩盖的问题**：CI 用 `golangci-lint-action@v6` + `version: latest`，
@@ -413,6 +496,8 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
 - **新增（2026-09-24 实测）**：前端产物未做代码分割 —— `vite build` 产出
   `index-*.js` 1.27 MB（gzip 412 KB）、`agreement-*.js` 820 KB，
   vite 已给出 chunk > 500 KB 的警告。可考虑 `manualChunks` 或路由级动态 import。
+  （**可选小项，未执行**：与 P3-2 的 httpOnly cookie 一并作为「记录但不在本轮做」
+  的两项。两者都属于改动面大于收益的类型，需要单独排期与验证。）
 - **教训**：这份待办清单与 AGENTS.md 规则 7 的表清单犯的是同一个错 ——
   **文档里的事实陈述会随时间失真，且不会报错**。P2-3 改造完成后没有回头
   更新 P3 清单，导致三条待办在做之前就已经不成立。动手前先复核一遍现状。
@@ -420,6 +505,20 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
 ---
 
 ## 里程碑与预期分数
+
+**覆盖率进度**（口径：`go test -cover ./...` 各包覆盖率求平均，18 个包）
+
+| 节点 | 包均覆盖率 | 说明 |
+|---|---|---|
+| P2-1 后 | 70.5% | 超出 60% 目标 |
+| P2-1b 后 | 75.5% | system 两包 |
+| P2-1c 后 | **79.7%** | middleware + member/service |
+| CI 门槛 | 74.0% | 留 1.5 点缓冲（CI ubuntu 与本地 Windows 的差异） |
+
+**为什么门槛不设 100%**：覆盖率会骗人 —— P2-1b 的变异验证里就有一条
+`ClearOperationLogs(0)` 用例报表上「有覆盖」却不转红（GORM 自带
+`WHERE conditions required` 兜底吃掉了区分力）。凑到 100% 必然逼出这类
+坏测试。替代标准是：关键路径接近 100% + 逐条变异验证 + CI 卡防倒退阈值。
 
 | 节点 | 完成项 | 预期分数 |
 |---|---|---|
