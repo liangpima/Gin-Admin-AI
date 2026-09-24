@@ -333,8 +333,10 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
 - Prettier 配置实测与仓库现有风格**零差异**（`trailingComma: none` 时有 58 个文件差异）。
 - vitest 覆盖 `useDict`、`api` 拦截器、`permission.generateRoutes`、
   `useCrud` 四个纯逻辑文件，共 **50 个用例**（不需要组件测试）。
-- `format:check` **暂未接入 CI**：历史约 50 个文件未格式化，直接阻断会让 CI 长期红。
-  先单独跑一次 `npm run format` 并提交，再接 `format:check`。
+- `format:check` 的接入顺序：历史约 50 个文件未格式化，直接阻断会让 CI 长期红。
+  因此先单独跑一次 `npm run format` 并提交（`6ca75a6`），再接 `format:check`
+  （`988f3fb`，已进 ci.yml 与 `make check-frontend`）。**顺序不能反**，
+  否则 CI 长期红，等于没有检查。
 
 ---
 
@@ -348,17 +350,35 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   每页在 375px 宽实测（用 CDP Emulation 方式，见工作日志）。
 
 ### P3-2 路由与鉴权收尾（前端）
-- `router/index.ts:51-53`：`roles` 非空即放行 → 补"目标 path 必须命中 accessRoutes
-  或白名单"的显式校验；补 `pathMatch(.*)` 404 catch-all（现在未匹配路由仅控制台告警）。
+- **补 `pathMatch(.*)` 404 catch-all**（实测全仓无 `pathMatch`）：现在访问未匹配的
+  路径只有控制台告警 + 一片空白，没有干净的 404 页。这条是真需求。
+- `router/index.ts:51-53` 的 `else { next() }`：**2026-09-24 复核后需要重新定性**。
+  它不是"roles 非空即放行"的鉴权绕过 —— 走到这条分支时 `addRoute` 已经完成，
+  没被注册的路径本来就渲染不出内容，所以不构成越权（后端 Casbin 另有兜底）。
+  实际影响是"未匹配路由落到空白页"这一体验问题，与上一条 catch-all 是同一件事。
+  **动手前先复核**：如果确认只是体验问题，就不必按安全项排期。
 - token 从 `js-cookie` 迁到 httpOnly cookie：需后端 `Set-Cookie` 配合 + CSRF 防护
   （SameSite=Strict 已够用，Bearer 头方案可并存过渡）。改造面较大，单独立项。
 
 ### P3-3 清理项
-- 6 个孤儿组件（SvgIcon/TableSkeleton/PageHeader/RightPanel/Upload，0 引用）
-  → 删除或接入使用；`DictTag`/`MobileAction` 各只 1 处用 → 推广或删。
-- `docs/docs.go`（2413 行生成物）入库 → 加 `.gitignore` + CI 里 `swag init --diff` 校验一致性。
-- `views/system/post/index.vue:105` handleDelete 无 try/catch → 补。
-- 11 处空 catch 吞错 → 至少 `console.warn` + 面向用户提示。
+- **5 个孤儿组件**（`SvgIcon`/`TableSkeleton`/`PageHeader`/`RightPanel`/`Upload`）：
+  实测 `<Tag>` 形式引用数均为 0 → 删除或接入使用。
+  `MobileAction` 只 1 处用（user 页）→ 推广到所有带操作列的表格，或删；
+  `DictTag` 3 处用，保留。
+- `docs/docs.go`（2413 行生成物）已入库、未 gitignore，CI 也无 `swag` 校验
+  → 加 `.gitignore` + CI 里 `swag init --diff` 校验一致性。
+- ~~`views/system/post/index.vue:105` handleDelete 无 try/catch~~
+  ~~11 处空 catch 吞错~~
+  —— **2026-09-24 复核后已失效，两条都不用做了**：post 页已改走 `useCrud`
+  （无自建 `handleDelete`，行号 105 现在指向解构出来的 `handleDelete`）；
+  全仓空 `catch {}` 实测只剩 1 处，且是 `useCrud.ts` 顶部注释里的示例文字。
+  同类问题在 P2-3 的 useCrud 改造中已一并修掉。
+- **新增（2026-09-24 实测）**：前端产物未做代码分割 —— `vite build` 产出
+  `index-*.js` 1.27 MB（gzip 412 KB）、`agreement-*.js` 820 KB，
+  vite 已给出 chunk > 500 KB 的警告。可考虑 `manualChunks` 或路由级动态 import。
+- **教训**：这份待办清单与 AGENTS.md 规则 7 的表清单犯的是同一个错 ——
+  **文档里的事实陈述会随时间失真，且不会报错**。P2-3 改造完成后没有回头
+  更新 P3 清单，导致三条待办在做之前就已经不成立。动手前先复核一遍现状。
 
 ---
 
