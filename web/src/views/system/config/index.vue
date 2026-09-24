@@ -4,7 +4,7 @@
       <template #header>
         <div class="card-header">
           <span>参数管理</span>
-          <el-button type="primary" @click="handleAdd">新增配置</el-button>
+          <el-button type="primary" @click="handleAdd()">新增配置</el-button>
         </div>
       </template>
       <el-table :data="tableData" v-loading="loading" border>
@@ -50,65 +50,58 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { getConfigList, createConfig, updateConfig, deleteConfig , type ConfigItem} from '@/api/config'
+import {
+  getConfigList,
+  createConfig,
+  updateConfig,
+  deleteConfig,
+  type ConfigItem,
+  type ConfigQuery,
+} from '@/api/config'
 import FormDialog from '@/components/FormDialog/index.vue'
 import { formatDateTime } from '@/utils/format'
+import { useCrud } from '@/hooks/useCrud'
 
-const loading = ref(false)
-const submitLoading = ref(false)
-const tableData = ref<ConfigItem[]>([])
-const total = ref(0)
-const page = ref(1)
-const pageSize = ref(10)
-const dialogVisible = ref(false)
-const dialogTitle = ref('')
-const formRef = ref<FormInstance>()
+interface ConfigForm {
+  id: number
+  name: string
+  key: string
+  value: string
+  type: number
+}
 
-const form = reactive({ id: 0, name: '', key: '', value: '', type: 1 })
+// 分页、loading、弹窗开关与增删改查的编排都交给 useCrud；
+// 这里只保留本页特有的东西：表单结构、校验规则。
+const {
+  loading,
+  submitLoading,
+  tableData,
+  total,
+  page,
+  pageSize,
+  dialogVisible,
+  dialogTitle,
+  form,
+  formRef,
+  loadData,
+  handleAdd,
+  handleEdit,
+  handleSubmit,
+  handleDelete,
+} = useCrud<ConfigItem, ConfigForm, ConfigQuery>({
+  list: (params) => getConfigList(params),
+  create: (payload) => createConfig(payload),
+  update: (payload) => updateConfig(payload),
+  remove: (id) => deleteConfig(id),
+  createForm: () => ({ id: 0, name: '', key: '', value: '', type: 1 }),
+  titles: { add: '新增配置', edit: '编辑配置' },
+  deleteConfirm: '确认删除？',
+})
+
 const formRules = {
   name: [{ required: true, message: '请输入参数名称', trigger: 'blur' }],
   key: [{ required: true, message: '请输入参数键名', trigger: 'blur' }],
 }
-
-async function loadData() {
-  loading.value = true
-  try {
-    const res = await getConfigList({ page: page.value, pageSize: pageSize.value })
-    tableData.value = res.data.list
-    total.value = res.data.total
-  } finally { loading.value = false }
-}
-
-function handleAdd() {
-  form.id = 0; form.name = ''; form.key = ''; form.value = ''; form.type = 1
-  dialogTitle.value = '新增配置'; dialogVisible.value = true
-}
-
-function handleEdit(row: ConfigItem) {
-  Object.assign(form, row)
-  dialogTitle.value = '编辑配置'; dialogVisible.value = true
-}
-
-async function handleSubmit() {
-  const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
-  submitLoading.value = true
-  try {
-    if (form.id) { await updateConfig(form) }
-    else { await createConfig(form) }
-    ElMessage.success('操作成功'); dialogVisible.value = false; loadData()
-  } finally { submitLoading.value = false }
-}
-
-async function handleDelete(row: ConfigItem) {
-  await ElMessageBox.confirm('确认删除？', '提示', { type: 'warning' })
-  await deleteConfig(row.id)
-  ElMessage.success('删除成功'); loadData()
-}
-
-onMounted(() => { loadData() })
 </script>
 
 <style lang="scss" scoped>

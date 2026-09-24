@@ -22,7 +22,7 @@
         </el-table-column>
         <el-table-column label="操作" width="180">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleAdd(row.id)">新增</el-button>
+            <el-button type="primary" link size="small" @click="handleAdd({ parentId: row.id })">新增</el-button>
             <el-button type="primary" link size="small" @click="handleEdit(row as DeptItem)">编辑</el-button>
             <el-button type="danger" link size="small" @click="handleDelete(row as DeptItem)">删除</el-button>
           </template>
@@ -62,17 +62,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { getDeptTree, createDept, updateDept, deleteDept , type DeptItem} from '@/api/dept'
+import { ref } from 'vue'
+import { getDeptTree, createDept, updateDept, deleteDept, type DeptItem } from '@/api/dept'
 import FormDialog from '@/components/FormDialog/index.vue'
+import { useCrud } from '@/hooks/useCrud'
 
-const loading = ref(false)
-const submitLoading = ref(false)
-const tableData = ref<DeptItem[]>([])
-const dialogVisible = ref(false)
-const dialogTitle = ref('')
-const formRef = ref<FormInstance>()
+interface DeptForm {
+  id: number
+  parentId: number
+  name: string
+  leader: string
+  phone: string
+  email: string
+  sort: number
+  status: number
+}
+
 // 树选择器的选项只需要 id + 显示名 + children。
 // 单独定义而不是复用 DeptItem：合成出来的「根部门」节点没有
 // parentId/sort/leader 等字段，为了凑类型给它编造无意义的值是自欺欺人。
@@ -80,82 +85,47 @@ type DeptOption = Pick<DeptItem, 'id' | 'name' | 'children'>
 
 const deptOptions = ref<DeptOption[]>([])
 
-const form = reactive({
-  id: 0,
-  parentId: 0,
-  name: '',
-  leader: '',
-  phone: '',
-  email: '',
-  sort: 0,
-  status: 1,
+const {
+  loading,
+  submitLoading,
+  tableData,
+  dialogVisible,
+  dialogTitle,
+  form,
+  formRef,
+  handleAdd,
+  handleEdit,
+  handleSubmit,
+  handleDelete,
+} = useCrud<DeptItem, DeptForm, Record<string, unknown>>({
+  // 部门是整棵树，不分页
+  list: () => getDeptTree(),
+  create: (payload) => createDept(payload),
+  update: (payload) => updateDept(payload),
+  remove: (id) => deleteDept(id),
+  createForm: () => ({
+    id: 0,
+    parentId: 0,
+    name: '',
+    leader: '',
+    phone: '',
+    email: '',
+    sort: 0,
+    status: 1,
+  }),
+  pagination: false,
+  // 树选择器的选项由同一棵树派生，放在 afterLoad 里才能保证
+  // 新增/删除部门后下拉同步刷新
+  afterLoad: (rows) => {
+    deptOptions.value = [{ id: 0, name: '根部门', children: rows }]
+  },
+  titles: { add: '新增部门', edit: '编辑部门' },
+  deleteConfirm: '确认删除该部门？',
 })
 
 const formRules = {
   name: [{ required: true, message: '请输入部门名称', trigger: 'blur' }],
 }
-
-async function loadData() {
-  loading.value = true
-  try {
-    const res = await getDeptTree()
-    tableData.value = res.data
-    deptOptions.value = [{ id: 0, name: '根部门', children: res.data }]
-  } finally {
-    loading.value = false
-  }
-}
-
-function resetForm(parentId = 0) {
-  form.id = 0
-  form.parentId = parentId
-  form.name = ''
-  form.leader = ''
-  form.phone = ''
-  form.email = ''
-  form.sort = 0
-  form.status = 1
-}
-
-function handleAdd(parentId = 0) {
-  resetForm(parentId)
-  dialogTitle.value = '新增部门'
-  dialogVisible.value = true
-}
-
-function handleEdit(row: DeptItem) {
-  resetForm()
-  Object.assign(form, row)
-  dialogTitle.value = '编辑部门'
-  dialogVisible.value = true
-}
-
-async function handleSubmit() {
-  const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
-  submitLoading.value = true
-  try {
-    if (form.id) {
-      await updateDept(form)
-    } else {
-      await createDept(form)
-    }
-    ElMessage.success('操作成功')
-    dialogVisible.value = false
-    loadData()
-  } finally {
-    submitLoading.value = false
-  }
-}
-
-async function handleDelete(row: DeptItem) {
-  await ElMessageBox.confirm('确认删除该部门？', '提示', { type: 'warning' })
-  await deleteDept(row.id)
-  ElMessage.success('删除成功')
-  loadData()
-}
-
-onMounted(() => { loadData() })
 </script>
 
 <style lang="scss" scoped>

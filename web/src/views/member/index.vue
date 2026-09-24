@@ -42,7 +42,7 @@
       <template #header>
         <div class="card-header">
           <span>会员列表</span>
-          <el-button type="primary" @click="handleAdd">新增会员</el-button>
+          <el-button type="primary" @click="handleAdd()">新增会员</el-button>
         </div>
       </template>
 
@@ -107,8 +107,8 @@
       </el-table>
 
       <Pagination
-        v-model:page="queryParams.page"
-        v-model:limit="queryParams.pageSize"
+        v-model:page="page"
+        v-model:limit="pageSize"
         :page-sizes="[10, 20, 50]"
         :total="total"
         layout="total, sizes, prev, pager, next"
@@ -181,70 +181,139 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
+import { onMounted, reactive, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { getMemberList, createMember, updateMember, deleteMember, updateMemberStatus, updateMemberTags, getAllMemberLevels, getAllMemberTags, type MemberItem, type MemberLevelItem, type MemberTagItem } from '@/api/member'
+import {
+  getMemberList,
+  createMember,
+  updateMember,
+  deleteMember,
+  updateMemberStatus,
+  updateMemberTags,
+  getAllMemberLevels,
+  getAllMemberTags,
+  type MemberItem,
+  type MemberLevelItem,
+  type MemberTagItem,
+} from '@/api/member'
 import ImagePicker from '@/components/ImagePicker/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
 import { formatDateTime } from '@/utils/format'
+import { useCrud } from '@/hooks/useCrud'
 
-const loading = ref(false)
-const submitLoading = ref(false)
 // 列表行 = 接口返回的 MemberItem + 前端映射出来的 tagIds。
 // 接口给的是 tags（对象数组），表格里要按 id 做多选回显，所以映射时补 tagIds。
 type MemberRow = MemberItem & { tagIds: number[] }
 
-const tableData = ref<MemberRow[]>([])
-const total = ref(0)
-const dialogVisible = ref(false)
-const dialogTitle = ref('')
-const formRef = ref<FormInstance>()
-const levelList = ref<MemberLevelItem[]>([])
-const tagList = ref<MemberTagItem[]>([])
-const avatarPickerVisible = ref(false)
+interface MemberForm {
+  id: number
+  username: string
+  nickname: string
+  avatar: string
+  phone: string
+  gender: number
+  birthday: string
+  levelId: number
+  tagIds: number[]
+  status: number
+  remark: string
+  wechatOpenid: string
+  lastVisitTime: string
+}
 
+type MemberQuery = {
+  phone?: string
+  nickname?: string
+  levelId?: number
+  status?: number
+  page: number
+  pageSize: number
+}
+
+// 搜索条件只放本页自己的字段；page/pageSize 由 useCrud 管理
 const queryParams = reactive({
   phone: '',
   nickname: '',
   levelId: undefined as number | undefined,
   status: undefined as number | undefined,
-  page: 1,
-  pageSize: 10,
 })
 
-const form = reactive({
-  id: 0,
-  username: '',
-  nickname: '',
-  avatar: '',
-  phone: '',
-  gender: 0,
-  birthday: '',
-  levelId: 0,
-  tagIds: [] as number[],
-  status: 1,
-  remark: '',
-  wechatOpenid: '',
-  lastVisitTime: '',
+const levelList = ref<MemberLevelItem[]>([])
+const tagList = ref<MemberTagItem[]>([])
+const avatarPickerVisible = ref(false)
+
+const {
+  loading,
+  submitLoading,
+  tableData,
+  total,
+  page,
+  pageSize,
+  dialogVisible,
+  dialogTitle,
+  form,
+  formRef,
+  loadData,
+  handleSearch,
+  handleAdd,
+  handleEdit,
+  handleSubmit,
+  handleDelete,
+} = useCrud<MemberRow, MemberForm, MemberQuery, MemberItem>({
+  list: (params) => getMemberList(params),
+  create: (payload) => createMember(payload),
+  update: (payload) => updateMember(payload),
+  remove: (id) => deleteMember(id),
+  createForm: () => ({
+    id: 0,
+    username: '',
+    nickname: '',
+    avatar: '',
+    phone: '',
+    gender: 0,
+    birthday: '',
+    levelId: 0,
+    tagIds: [],
+    status: 1,
+    remark: '',
+    wechatOpenid: '',
+    lastVisitTime: '',
+  }),
+  // 列表行要补 tagIds 供表格多选回显
+  mapRow: (item) => ({ ...item, tagIds: item.tags?.map((t) => t.id) || [] }),
+  // 生日在接口里是 ISO 时间串，而日期选择器只认 yyyy-MM-dd，必须截断
+  rowToForm: (row) => ({
+    id: row.id,
+    username: row.username,
+    nickname: row.nickname,
+    avatar: row.avatar,
+    phone: row.phone,
+    gender: row.gender,
+    birthday: row.birthday?.split('T')[0] || '',
+    levelId: row.levelId,
+    tagIds: row.tagIds || [],
+    status: row.status,
+    remark: row.remark || '',
+    wechatOpenid: row.wechatOpenid || '',
+    lastVisitTime: row.lastVisitTime || '',
+  }),
+  query: () => ({
+    phone: queryParams.phone,
+    nickname: queryParams.nickname,
+    levelId: queryParams.levelId,
+    status: queryParams.status,
+  }),
+  titles: { add: '新增会员', edit: '编辑会员' },
+  deleteConfirm: '确认删除该会员？',
 })
 
-const formRules = {
-  phone: [{ required: true, message: '请输入手机号', trigger: 'blur' }],
-}
-
-async function loadData() {
-  loading.value = true
-  try {
-    const res = await getMemberList(queryParams)
-    tableData.value = res.data.list.map((item) => ({
-      ...item,
-      tagIds: item.tags?.map((t) => t.id) || [],
-    }))
-    total.value = res.data.total
-  } finally {
-    loading.value = false
-  }
+function handleReset() {
+  queryParams.phone = ''
+  queryParams.nickname = ''
+  queryParams.levelId = undefined
+  queryParams.status = undefined
+  handleSearch()
 }
 
 async function loadLevels() {
@@ -265,19 +334,6 @@ async function loadTags() {
     // 标签只用于筛选与下拉选择，加载失败不阻断列表本身
     console.warn('[member] 会员标签加载失败，标签筛选与选择将为空', err)
   }
-}
-
-function handleSearch() {
-  queryParams.page = 1
-  loadData()
-}
-
-function handleReset() {
-  queryParams.phone = ''
-  queryParams.nickname = ''
-  queryParams.levelId = undefined
-  queryParams.status = undefined
-  handleSearch()
 }
 
 async function handleStatusChange(row: MemberRow) {
@@ -307,81 +363,16 @@ async function handleLevelChange(row: MemberRow, levelId: number) {
   }
 }
 
-function resetForm() {
-  form.id = 0
-  form.username = ''
-  form.nickname = ''
-  form.avatar = ''
-  form.phone = ''
-  form.gender = 0
-  form.birthday = ''
-  form.levelId = 0
-  form.tagIds = []
-  form.status = 1
-  form.remark = ''
-  form.wechatOpenid = ''
-  form.lastVisitTime = ''
-}
-
-function handleAdd() {
-  resetForm()
-  dialogTitle.value = '新增会员'
-  dialogVisible.value = true
-}
-
-function handleEdit(row: MemberRow) {
-  resetForm()
-  Object.assign(form, {
-    id: row.id,
-    username: row.username,
-    nickname: row.nickname,
-    avatar: row.avatar,
-    phone: row.phone,
-    gender: row.gender,
-    birthday: row.birthday?.split('T')[0] || '',
-    levelId: row.levelId,
-    tagIds: row.tagIds || [],
-    status: row.status,
-    remark: row.remark,
-    wechatOpenid: row.wechatOpenid || '',
-    lastVisitTime: row.lastVisitTime || '',
-  })
-  dialogTitle.value = '编辑会员'
-  dialogVisible.value = true
-}
-
-async function handleSubmit() {
-  const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
-
-  submitLoading.value = true
-  try {
-    if (form.id) {
-      await updateMember(form)
-    } else {
-      await createMember(form)
-    }
-    ElMessage.success('操作成功')
-    dialogVisible.value = false
-    loadData()
-  } finally {
-    submitLoading.value = false
-  }
-}
-
-async function handleDelete(row: MemberRow) {
-  await ElMessageBox.confirm('确认删除该会员？', '提示', { type: 'warning' })
-  await deleteMember(row.id)
-  ElMessage.success('删除成功')
-  loadData()
-}
-
 function handleAvatarPick(url: string | string[]) {
   form.avatar = url as string
 }
 
+const formRules = {
+  phone: [{ required: true, message: '请输入手机号', trigger: 'blur' }],
+}
+
+// 列表由 useCrud 的 immediate 自动加载，这里只补本页的下拉数据
 onMounted(() => {
-  loadData()
   loadLevels()
   loadTags()
 })

@@ -22,7 +22,7 @@
       <template #header>
         <div class="card-header">
           <span>会员标签</span>
-          <el-button type="primary" @click="handleAdd">新增标签</el-button>
+          <el-button type="primary" @click="handleAdd()">新增标签</el-button>
         </div>
       </template>
 
@@ -49,8 +49,8 @@
       </el-table>
 
       <Pagination
-        v-model:page="queryParams.page"
-        v-model:limit="queryParams.pageSize"
+        v-model:page="page"
+        v-model:limit="pageSize"
         :total="total"
         layout="total, prev, pager, next"
         :background="false"
@@ -79,108 +79,65 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { getMemberTagList, createMemberTag, updateMemberTag, deleteMemberTag , type MemberTagItem} from '@/api/member'
+import { reactive } from 'vue'
+import {
+  getMemberTagList,
+  createMemberTag,
+  updateMemberTag,
+  deleteMemberTag,
+  type MemberTagItem,
+} from '@/api/member'
 import FormDialog from '@/components/FormDialog/index.vue'
+import { useCrud } from '@/hooks/useCrud'
 
-const loading = ref(false)
-const submitLoading = ref(false)
-const tableData = ref<MemberTagItem[]>([])
-const total = ref(0)
-const dialogVisible = ref(false)
-const dialogTitle = ref('')
-const formRef = ref<FormInstance>()
+interface TagForm {
+  id: number
+  name: string
+  color: string
+  sort: number
+  status: number
+}
 
-const queryParams = reactive({ name: '', page: 1, pageSize: 10 })
+// 搜索条件只放本页自己的字段。page/pageSize 由 useCrud 管理 ——
+// 原先它们混在同一个 queryParams 里，重置时要记得一并复位，很容易漏。
+const queryParams = reactive({ name: '' })
 
-const form = reactive({
-  id: 0,
-  name: '',
-  color: '#409eff',
-  sort: 0,
-  status: 1,
+const {
+  loading,
+  submitLoading,
+  tableData,
+  total,
+  page,
+  pageSize,
+  dialogVisible,
+  dialogTitle,
+  form,
+  formRef,
+  loadData,
+  handleSearch,
+  handleAdd,
+  handleEdit,
+  handleSubmit,
+  handleDelete,
+} = useCrud<MemberTagItem, TagForm, { name?: string; page: number; pageSize: number }>({
+  list: (params) => getMemberTagList(params),
+  create: (payload) => createMemberTag(payload),
+  update: (payload) => updateMemberTag(payload),
+  remove: (id) => deleteMemberTag(id),
+  createForm: () => ({ id: 0, name: '', color: '#409eff', sort: 0, status: 1 }),
+  query: () => ({ name: queryParams.name }),
+  titles: { add: '新增标签', edit: '编辑标签' },
+  deleteConfirm: '确认删除该标签？',
 })
-
-const formRules = {
-  name: [{ required: true, message: '请输入标签名称', trigger: 'blur' }],
-}
-
-async function loadData() {
-  loading.value = true
-  try {
-    const res = await getMemberTagList(queryParams)
-    tableData.value = res.data.list
-    total.value = res.data.total
-  } finally {
-    loading.value = false
-  }
-}
-
-function handleSearch() {
-  queryParams.page = 1
-  loadData()
-}
 
 function handleReset() {
   queryParams.name = ''
   handleSearch()
 }
 
-function resetForm() {
-  form.id = 0
-  form.name = ''
-  form.color = '#409eff'
-  form.sort = 0
-  form.status = 1
+const formRules = {
+  name: [{ required: true, message: '请输入标签名称', trigger: 'blur' }],
 }
-
-function handleAdd() {
-  resetForm()
-  dialogTitle.value = '新增标签'
-  dialogVisible.value = true
-}
-
-function handleEdit(row: MemberTagItem) {
-  resetForm()
-  Object.assign(form, {
-    id: row.id,
-    name: row.name,
-    color: row.color,
-    sort: row.sort,
-    status: row.status,
-  })
-  dialogTitle.value = '编辑标签'
-  dialogVisible.value = true
-}
-
-async function handleSubmit() {
-  const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
-
-  submitLoading.value = true
-  try {
-    if (form.id) {
-      await updateMemberTag(form)
-    } else {
-      await createMemberTag(form)
-    }
-    ElMessage.success('操作成功')
-    dialogVisible.value = false
-    loadData()
-  } finally {
-    submitLoading.value = false
-  }
-}
-
-async function handleDelete(row: MemberTagItem) {
-  await ElMessageBox.confirm('确认删除该标签？', '提示', { type: 'warning' })
-  await deleteMemberTag(row.id)
-  ElMessage.success('删除成功')
-  loadData()
-}
-
-onMounted(() => loadData())
 </script>
 
 <style lang="scss" scoped>

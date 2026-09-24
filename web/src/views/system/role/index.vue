@@ -27,7 +27,7 @@
       <template #header>
         <div class="card-header">
           <span>角色列表</span>
-          <el-button type="primary" @click="handleAdd">新增角色</el-button>
+          <el-button type="primary" @click="handleAdd()">新增角色</el-button>
         </div>
       </template>
 
@@ -55,8 +55,8 @@
       </el-table>
 
       <Pagination
-        v-model:page="queryParams.page"
-        v-model:limit="queryParams.pageSize"
+        v-model:page="page"
+        v-model:limit="pageSize"
         :page-sizes="[10, 20, 50]"
         :total="total"
         layout="total, sizes, prev, pager, next"
@@ -102,20 +102,25 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox, ElTree, type FormInstance } from 'element-plus'
-import { getRoleList, createRole, updateRole, deleteRole, type RoleItem } from '@/api/role'
+import { reactive, ref } from 'vue'
+import { ElMessage, ElTree } from 'element-plus'
+import { getRoleList, createRole, updateRole, deleteRole, type RoleItem, type RoleQuery } from '@/api/role'
 import FormDialog from '@/components/FormDialog/index.vue'
 import { formatDateTime } from '@/utils/format'
 import { getMenuTree, type MenuItem } from '@/api/menu'
+import { useCrud } from '@/hooks/useCrud'
 
-const loading = ref(false)
-const submitLoading = ref(false)
-const tableData = ref<RoleItem[]>([])
-const total = ref(0)
-const dialogVisible = ref(false)
-const dialogTitle = ref('')
-const formRef = ref<FormInstance>()
+interface RoleForm {
+  id: number
+  name: string
+  code: string
+  sort: number
+  status: number
+  remark: string
+}
+
+// 搜索条件只放本页自己的字段；page/pageSize 由 useCrud 管理
+const queryParams = reactive({ name: '', code: '' })
 
 const permDialogVisible = ref(false)
 const permLoading = ref(false)
@@ -125,42 +130,33 @@ const currentRoleId = ref(0)
 // el-tree 实例类型：直接用 InstanceType 取，避免手写一份不完整的接口
 const menuTreeRef = ref<InstanceType<typeof ElTree>>()
 
-const queryParams = reactive({
-  name: '',
-  code: '',
-  page: 1,
-  pageSize: 10,
+const {
+  loading,
+  submitLoading,
+  tableData,
+  total,
+  page,
+  pageSize,
+  dialogVisible,
+  dialogTitle,
+  form,
+  formRef,
+  loadData,
+  handleSearch,
+  handleAdd,
+  handleEdit,
+  handleSubmit,
+  handleDelete,
+} = useCrud<RoleItem, RoleForm, RoleQuery>({
+  list: (params) => getRoleList(params),
+  create: (payload) => createRole(payload),
+  update: (payload) => updateRole(payload),
+  remove: (id) => deleteRole(id),
+  createForm: () => ({ id: 0, name: '', code: '', sort: 0, status: 1, remark: '' }),
+  query: () => ({ name: queryParams.name, code: queryParams.code }),
+  titles: { add: '新增角色', edit: '编辑角色' },
+  deleteConfirm: '确认删除该角色？',
 })
-
-const form = reactive({
-  id: 0,
-  name: '',
-  code: '',
-  sort: 0,
-  status: 1,
-  remark: '',
-})
-
-const formRules = {
-  name: [{ required: true, message: '请输入角色名称', trigger: 'blur' }],
-  code: [{ required: true, message: '请输入角色编码', trigger: 'blur' }],
-}
-
-async function loadData() {
-  loading.value = true
-  try {
-    const res = await getRoleList(queryParams)
-    tableData.value = res.data.list
-    total.value = res.data.total
-  } finally {
-    loading.value = false
-  }
-}
-
-function handleSearch() {
-  queryParams.page = 1
-  loadData()
-}
 
 function handleReset() {
   queryParams.name = ''
@@ -168,51 +164,9 @@ function handleReset() {
   handleSearch()
 }
 
-function resetForm() {
-  form.id = 0
-  form.name = ''
-  form.code = ''
-  form.sort = 0
-  form.status = 1
-  form.remark = ''
-}
-
-function handleAdd() {
-  resetForm()
-  dialogTitle.value = '新增角色'
-  dialogVisible.value = true
-}
-
-function handleEdit(row: RoleItem) {
-  resetForm()
-  Object.assign(form, row)
-  dialogTitle.value = '编辑角色'
-  dialogVisible.value = true
-}
-
-async function handleSubmit() {
-  const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
-  submitLoading.value = true
-  try {
-    if (form.id) {
-      await updateRole(form)
-    } else {
-      await createRole(form)
-    }
-    ElMessage.success('操作成功')
-    dialogVisible.value = false
-    loadData()
-  } finally {
-    submitLoading.value = false
-  }
-}
-
-async function handleDelete(row: RoleItem) {
-  await ElMessageBox.confirm('确认删除该角色？', '提示', { type: 'warning' })
-  await deleteRole(row.id)
-  ElMessage.success('删除成功')
-  loadData()
+const formRules = {
+  name: [{ required: true, message: '请输入角色名称', trigger: 'blur' }],
+  code: [{ required: true, message: '请输入角色编码', trigger: 'blur' }],
 }
 
 async function handlePermission(row: RoleItem) {
@@ -245,8 +199,6 @@ async function handlePermSubmit() {
     permLoading.value = false
   }
 }
-
-onMounted(() => { loadData() })
 </script>
 
 <style lang="scss" scoped>

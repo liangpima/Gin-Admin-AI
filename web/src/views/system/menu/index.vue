@@ -35,7 +35,7 @@
         </el-table-column>
         <el-table-column label="操作" width="180">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleAdd(row.id)">新增</el-button>
+            <el-button type="primary" link size="small" @click="handleAdd({ parentId: row.id })">新增</el-button>
             <el-button type="primary" link size="small" @click="handleEdit(row as MenuItem)">编辑</el-button>
             <el-button type="danger" link size="small" @click="handleDelete(row as MenuItem)">删除</el-button>
           </template>
@@ -91,108 +91,80 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { getMenuTree, createMenu, updateMenu, deleteMenu , type MenuItem} from '@/api/menu'
+import { ref } from 'vue'
+import { getMenuTree, createMenu, updateMenu, deleteMenu, type MenuItem } from '@/api/menu'
 import FormDialog from '@/components/FormDialog/index.vue'
+import { useCrud } from '@/hooks/useCrud'
 
-const loading = ref(false)
-const submitLoading = ref(false)
-const tableData = ref<MenuItem[]>([])
-const dialogVisible = ref(false)
-const dialogTitle = ref('')
-const formRef = ref<FormInstance>()
+interface MenuForm {
+  id: number
+  parentId: number
+  title: string
+  name: string
+  path: string
+  component: string
+  icon: string
+  type: number
+  permission: string
+  sort: number
+  visible: number
+  status: number
+  isCache: number
+  isExternal: number
+}
+
 // 同 dept：树选择器的合成根节点只带 id/title/children
 type MenuOption = Pick<MenuItem, 'id' | 'title' | 'children'>
 
 const menuOptions = ref<MenuOption[]>([])
 
-const form = reactive({
-  id: 0,
-  parentId: 0,
-  title: '',
-  name: '',
-  path: '',
-  component: '',
-  icon: '',
-  type: 1,
-  permission: '',
-  sort: 0,
-  visible: 1,
-  status: 1,
-  isCache: 1,
-  isExternal: 0,
+const {
+  loading,
+  submitLoading,
+  tableData,
+  dialogVisible,
+  dialogTitle,
+  form,
+  formRef,
+  handleAdd,
+  handleEdit,
+  handleSubmit,
+  handleDelete,
+} = useCrud<MenuItem, MenuForm, Record<string, unknown>>({
+  // 菜单是整棵树，不分页
+  list: () => getMenuTree(),
+  create: (payload) => createMenu(payload),
+  update: (payload) => updateMenu(payload),
+  remove: (id) => deleteMenu(id),
+  createForm: () => ({
+    id: 0,
+    parentId: 0,
+    title: '',
+    name: '',
+    path: '',
+    component: '',
+    icon: '',
+    type: 1,
+    permission: '',
+    sort: 0,
+    visible: 1,
+    status: 1,
+    isCache: 1,
+    isExternal: 0,
+  }),
+  pagination: false,
+  // 树选择器的选项由同一棵树派生，放在 afterLoad 里才能保证
+  // 新增/删除菜单后下拉同步刷新
+  afterLoad: (rows) => {
+    menuOptions.value = [{ id: 0, title: '根目录', children: rows }]
+  },
+  titles: { add: '新增菜单', edit: '编辑菜单' },
+  deleteConfirm: '确认删除该菜单？',
 })
 
 const formRules = {
   title: [{ required: true, message: '请输入菜单名称', trigger: 'blur' }],
 }
-
-async function loadData() {
-  loading.value = true
-  try {
-    const res = await getMenuTree()
-    tableData.value = res.data
-    menuOptions.value = [{ id: 0, title: '根目录', children: res.data }]
-  } finally {
-    loading.value = false
-  }
-}
-
-function resetForm(parentId = 0) {
-  form.id = 0
-  form.parentId = parentId
-  form.title = ''
-  form.name = ''
-  form.path = ''
-  form.component = ''
-  form.icon = ''
-  form.type = 1
-  form.permission = ''
-  form.sort = 0
-  form.visible = 1
-  form.status = 1
-}
-
-function handleAdd(parentId = 0) {
-  resetForm(parentId)
-  dialogTitle.value = '新增菜单'
-  dialogVisible.value = true
-}
-
-function handleEdit(row: MenuItem) {
-  resetForm()
-  Object.assign(form, row)
-  dialogTitle.value = '编辑菜单'
-  dialogVisible.value = true
-}
-
-async function handleSubmit() {
-  const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
-  submitLoading.value = true
-  try {
-    if (form.id) {
-      await updateMenu(form)
-    } else {
-      await createMenu(form)
-    }
-    ElMessage.success('操作成功')
-    dialogVisible.value = false
-    loadData()
-  } finally {
-    submitLoading.value = false
-  }
-}
-
-async function handleDelete(row: MenuItem) {
-  await ElMessageBox.confirm('确认删除该菜单？', '提示', { type: 'warning' })
-  await deleteMenu(row.id)
-  ElMessage.success('删除成功')
-  loadData()
-}
-
-onMounted(() => { loadData() })
 </script>
 
 <style lang="scss" scoped>

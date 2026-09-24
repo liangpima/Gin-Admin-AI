@@ -22,7 +22,7 @@
       <template #header>
         <div class="card-header">
           <span>会员等级</span>
-          <el-button type="primary" @click="handleAdd">新增等级</el-button>
+          <el-button type="primary" @click="handleAdd()">新增等级</el-button>
         </div>
       </template>
 
@@ -54,8 +54,8 @@
       </el-table>
 
       <Pagination
-        v-model:page="queryParams.page"
-        v-model:limit="queryParams.pageSize"
+        v-model:page="page"
+        v-model:limit="pageSize"
         :total="total"
         layout="total, prev, pager, next"
         :background="false"
@@ -101,121 +101,74 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
+import { reactive, ref } from 'vue'
 import { Plus } from '@element-plus/icons-vue'
-import { getMemberLevelList, createMemberLevel, updateMemberLevel, deleteMemberLevel , type MemberLevelItem} from '@/api/member'
+import {
+  getMemberLevelList,
+  createMemberLevel,
+  updateMemberLevel,
+  deleteMemberLevel,
+  type MemberLevelItem,
+} from '@/api/member'
 import ImagePicker from '@/components/ImagePicker/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
+import { useCrud } from '@/hooks/useCrud'
 
-const loading = ref(false)
-const submitLoading = ref(false)
-const tableData = ref<MemberLevelItem[]>([])
-const total = ref(0)
-const dialogVisible = ref(false)
-const dialogTitle = ref('')
-const formRef = ref<FormInstance>()
+interface LevelForm {
+  id: number
+  name: string
+  minPoints: number
+  discount: number
+  icon: string
+  sort: number
+  status: number
+}
 
-const queryParams = reactive({ name: '', page: 1, pageSize: 10 })
+// 搜索条件只放本页自己的字段。page/pageSize 由 useCrud 管理 ——
+// 原先它们混在同一个 queryParams 里，重置时要记得一并复位，很容易漏。
+const queryParams = reactive({ name: '' })
 const iconPickerVisible = ref(false)
 
-const form = reactive({
-  id: 0,
-  name: '',
-  minPoints: 0,
-  discount: 10,
-  icon: '',
-  sort: 0,
-  status: 1,
+const {
+  loading,
+  submitLoading,
+  tableData,
+  total,
+  page,
+  pageSize,
+  dialogVisible,
+  dialogTitle,
+  form,
+  formRef,
+  loadData,
+  handleSearch,
+  handleAdd,
+  handleEdit,
+  handleSubmit,
+  handleDelete,
+} = useCrud<MemberLevelItem, LevelForm, { name?: string; page: number; pageSize: number }>({
+  list: (params) => getMemberLevelList(params),
+  create: (payload) => createMemberLevel(payload),
+  update: (payload) => updateMemberLevel(payload),
+  remove: (id) => deleteMemberLevel(id),
+  createForm: () => ({ id: 0, name: '', minPoints: 0, discount: 10, icon: '', sort: 0, status: 1 }),
+  query: () => ({ name: queryParams.name }),
+  titles: { add: '新增等级', edit: '编辑等级' },
+  deleteConfirm: '确认删除该等级？',
 })
-
-const formRules = {
-  name: [{ required: true, message: '请输入等级名称', trigger: 'blur' }],
-}
-
-async function loadData() {
-  loading.value = true
-  try {
-    const res = await getMemberLevelList(queryParams)
-    tableData.value = res.data.list
-    total.value = res.data.total
-  } finally {
-    loading.value = false
-  }
-}
-
-function handleSearch() {
-  queryParams.page = 1
-  loadData()
-}
 
 function handleReset() {
   queryParams.name = ''
   handleSearch()
 }
 
-function resetForm() {
-  form.id = 0
-  form.name = ''
-  form.minPoints = 0
-  form.discount = 10
-  form.icon = ''
-  form.sort = 0
-  form.status = 1
-}
-
-function handleAdd() {
-  resetForm()
-  dialogTitle.value = '新增等级'
-  dialogVisible.value = true
-}
-
-function handleEdit(row: MemberLevelItem) {
-  resetForm()
-  Object.assign(form, {
-    id: row.id,
-    name: row.name,
-    minPoints: row.minPoints,
-    discount: row.discount,
-    icon: row.icon,
-    sort: row.sort,
-    status: row.status,
-  })
-  dialogTitle.value = '编辑等级'
-  dialogVisible.value = true
-}
-
-async function handleSubmit() {
-  const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
-
-  submitLoading.value = true
-  try {
-    if (form.id) {
-      await updateMemberLevel(form)
-    } else {
-      await createMemberLevel(form)
-    }
-    ElMessage.success('操作成功')
-    dialogVisible.value = false
-    loadData()
-  } finally {
-    submitLoading.value = false
-  }
-}
-
-async function handleDelete(row: MemberLevelItem) {
-  await ElMessageBox.confirm('确认删除该等级？', '提示', { type: 'warning' })
-  await deleteMemberLevel(row.id)
-  ElMessage.success('删除成功')
-  loadData()
-}
-
 function handleIconPick(url: string | string[]) {
   form.icon = url as string
 }
 
-onMounted(() => loadData())
+const formRules = {
+  name: [{ required: true, message: '请输入等级名称', trigger: 'blur' }],
+}
 </script>
 
 <style lang="scss" scoped>

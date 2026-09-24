@@ -36,7 +36,7 @@
           <span>管理员列表</span>
           <div class="card-header__actions">
             <el-button :loading="exporting" @click="handleExport">导出</el-button>
-            <el-button type="primary" @click="handleAdd">新增管理员</el-button>
+            <el-button type="primary" @click="handleAdd()">新增管理员</el-button>
           </div>
         </div>
       </template>
@@ -61,7 +61,7 @@
               collapse-tags-tooltip
               placeholder="请选择角色"
               style="width: 100%"
-              @change="(val: number[]) => handleRoleChange(row as UserItem, val)"
+              @change="(val: number[]) => handleRoleChange(row as UserRow, val)"
             >
               <el-option v-for="role in roleList" :key="role.id" :label="role.name" :value="role.id" />
             </el-select>
@@ -76,13 +76,13 @@
               placeholder="选择部门"
               check-strictly
               style="width: 100%"
-              @change="(val: number) => handleDeptChange(row as UserItem, val)"
+              @change="(val: number) => handleDeptChange(row as UserRow, val)"
             />
           </template>
         </el-table-column>
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
-            <el-switch v-model="row.status" :active-value="1" :inactive-value="0" @change="handleStatusChange(row as UserItem)" />
+            <el-switch v-model="row.status" :active-value="1" :inactive-value="0" @change="handleStatusChange(row as UserRow)" />
           </template>
         </el-table-column>
         <el-table-column label="创建时间" width="170">
@@ -103,8 +103,8 @@
       </el-table>
 
       <Pagination
-        v-model:page="queryParams.page"
-        v-model:limit="queryParams.pageSize"
+        v-model:page="page"
+        v-model:limit="pageSize"
         :page-sizes="[10, 20, 50]"
         :total="total"
         layout="total, sizes, prev, pager, next"
@@ -164,10 +164,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { getUserList, createUser, updateUser, deleteUser, resetPassword, updateUserStatus, updateUserRoles, updateUserDept, exportUsers, type UserItem } from '@/api/user'
+import {
+  getUserList,
+  createUser,
+  updateUser,
+  deleteUser,
+  resetPassword,
+  updateUserStatus,
+  updateUserRoles,
+  updateUserDept,
+  exportUsers,
+  type UserItem,
+  type UserListParams,
+} from '@/api/user'
 import ImagePicker from '@/components/ImagePicker/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
 import MobileAction from '@/components/MobileAction/index.vue'
@@ -175,25 +187,36 @@ import { formatDateTime } from '@/utils/format'
 import { getAllRoles, type RoleItem } from '@/api/role'
 import { getDeptTree, type DeptItem } from '@/api/dept'
 import { useDict, type DictOption } from '@/hooks/useDict'
+import { useCrud } from '@/hooks/useCrud'
 
-const loading = ref(false)
-const submitLoading = ref(false)
-const tableData = ref<UserItem[]>([])
-const total = ref(0)
-const dialogVisible = ref(false)
-const dialogTitle = ref('')
-const formRef = ref<FormInstance>()
-const roleList = ref<RoleItem[]>([])
-const deptTree = ref<DeptItem[]>([])
-const avatarPickerVisible = ref(false)
+// 列表行 = 接口返回的 UserItem + 前端映射出来的 roleIds
+type UserRow = UserItem & { roleIds: number[] }
 
+interface UserForm {
+  id: number
+  username: string
+  password: string
+  nickname: string
+  avatar: string
+  phone: string
+  email: string
+  deptId: number
+  roleIds: number[]
+  status: number
+  remark: string
+}
+
+// 搜索条件只放本页自己的字段；page/pageSize 由 useCrud 管理
 const queryParams = reactive({
   username: '',
   phone: '',
   status: undefined as number | undefined,
-  page: 1,
-  pageSize: 10,
 })
+
+const roleList = ref<RoleItem[]>([])
+const deptTree = ref<DeptItem[]>([])
+const avatarPickerVisible = ref(false)
+const exporting = ref(false)
 
 // 状态选项由数据字典 sys_user_status 驱动：新增状态（如「锁定」）时
 // 只需在「系统管理 → 数据字典」里加一条，不用改这个页面。
@@ -215,38 +238,63 @@ const statusOptions = computed(() =>
   })),
 )
 
-const form = reactive({
-  id: 0,
-  username: '',
-  password: '',
-  nickname: '',
-  avatar: '',
-  phone: '',
-  email: '',
-  deptId: 0,
-  roleIds: [] as number[],
-  status: 1,
-  remark: '',
+const {
+  loading,
+  submitLoading,
+  tableData,
+  total,
+  page,
+  pageSize,
+  dialogVisible,
+  dialogTitle,
+  form,
+  formRef,
+  loadData,
+  handleSearch,
+  handleAdd,
+  handleEdit,
+  handleSubmit,
+  handleDelete,
+} = useCrud<UserRow, UserForm, UserListParams, UserItem>({
+  list: (params) => getUserList(params),
+  create: (payload) => createUser(payload),
+  update: (payload) => updateUser(payload),
+  remove: (id) => deleteUser(id),
+  createForm: () => ({
+    id: 0,
+    username: '',
+    password: '',
+    nickname: '',
+    avatar: '',
+    phone: '',
+    email: '',
+    deptId: 0,
+    roleIds: [],
+    status: 1,
+    remark: '',
+  }),
+  // 列表行要补 roleIds 供表格多选回显
+  mapRow: (item) => ({ ...item, roleIds: item.roles?.map((r) => r.id) || [] }),
+  query: () => ({
+    username: queryParams.username,
+    phone: queryParams.phone,
+    status: queryParams.status,
+  }),
+  titles: { add: '新增管理员', edit: '编辑管理员' },
+  deleteConfirm: '确认删除该管理员？',
 })
+
+function handleReset() {
+  queryParams.username = ''
+  queryParams.phone = ''
+  queryParams.status = undefined
+  handleSearch()
+}
 
 const formRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
   deptId: [{ required: true, message: '请选择部门', trigger: 'change' }],
-}
-
-async function loadData() {
-  loading.value = true
-  try {
-    const res = await getUserList(queryParams)
-    tableData.value = res.data.list.map((item) => ({
-      ...item,
-      roleIds: item.roles?.map((r) => r.id) || [],
-    }))
-    total.value = res.data.total
-  } finally {
-    loading.value = false
-  }
 }
 
 async function loadRoles() {
@@ -269,19 +317,7 @@ async function loadDepts() {
   }
 }
 
-function handleSearch() {
-  queryParams.page = 1
-  loadData()
-}
-
-function handleReset() {
-  queryParams.username = ''
-  queryParams.phone = ''
-  queryParams.status = undefined
-  handleSearch()
-}
-
-async function handleStatusChange(row: UserItem) {
+async function handleStatusChange(row: UserRow) {
   try {
     await updateUserStatus({ id: row.id, status: row.status })
     ElMessage.success('状态修改成功')
@@ -290,7 +326,7 @@ async function handleStatusChange(row: UserItem) {
   }
 }
 
-async function handleRoleChange(row: UserItem, roleIds: number[]) {
+async function handleRoleChange(row: UserRow, roleIds: number[]) {
   try {
     await updateUserRoles({ id: row.id, roleIds })
     ElMessage.success('角色修改成功')
@@ -299,7 +335,7 @@ async function handleRoleChange(row: UserItem, roleIds: number[]) {
   }
 }
 
-async function handleDeptChange(row: UserItem, deptId: number) {
+async function handleDeptChange(row: UserRow, deptId: number) {
   try {
     await updateUserDept({ id: row.id, deptId })
     ElMessage.success('部门修改成功')
@@ -307,22 +343,6 @@ async function handleDeptChange(row: UserItem, deptId: number) {
     loadData()
   }
 }
-
-function resetForm() {
-  form.id = 0
-  form.username = ''
-  form.password = ''
-  form.nickname = ''
-  form.avatar = ''
-  form.phone = ''
-  form.email = ''
-  form.deptId = 0
-  form.roleIds = []
-  form.status = 1
-  form.remark = ''
-}
-
-const exporting = ref(false)
 
 /**
  * 导出当前筛选条件下的管理员列表。
@@ -360,61 +380,18 @@ async function handleExport() {
   }
 }
 
-function handleAdd() {
-  resetForm()
-  dialogTitle.value = '新增管理员'
-  dialogVisible.value = true
-}
-
-function handleEdit(row: UserItem) {
-  resetForm()
-  Object.assign(form, {
-    id: row.id,
-    username: row.username,
-    nickname: row.nickname,
-    avatar: row.avatar,
-    phone: row.phone,
-    email: row.email,
-    deptId: row.deptId,
-    roleIds: row.roles?.map((r) => r.id) || [],
-    status: row.status,
-    remark: row.remark,
-  })
-  dialogTitle.value = '编辑管理员'
-  dialogVisible.value = true
-}
-
-async function handleSubmit() {
-  const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
-
-  submitLoading.value = true
-  try {
-    if (form.id) {
-      await updateUser(form)
-    } else {
-      await createUser(form)
-    }
-    ElMessage.success('操作成功')
-    dialogVisible.value = false
-    loadData()
-  } finally {
-    submitLoading.value = false
-  }
-}
-
-async function handleDelete(row: UserItem) {
-  await ElMessageBox.confirm('确认删除该管理员？', '提示', { type: 'warning' })
-  await deleteUser(row.id)
-  ElMessage.success('删除成功')
-  loadData()
-}
-
 async function handleResetPwd(row: UserItem) {
-  const { value } = await ElMessageBox.prompt('请输入新密码', '重置密码', {
-    inputPattern: /.{6,}/,
-    inputErrorMessage: '密码长度不能少于6位',
-  })
+  let value: string
+  try {
+    ;({ value } = await ElMessageBox.prompt('请输入新密码', '重置密码', {
+      inputPattern: /.{6,}/,
+      inputErrorMessage: '密码长度不能少于6位',
+    }))
+  } catch {
+    // 用户点了取消/关闭：ElMessageBox 会 reject，属正常操作。
+    // 原先没有这层 try/catch，取消会变成 unhandled promise rejection。
+    return
+  }
   await resetPassword({ id: row.id, password: value })
   ElMessage.success('密码已重置')
 }
@@ -426,19 +403,19 @@ function handleAvatarPick(url: string | string[]) {
 function handleAction(cmd: string, row: UserItem) {
   switch (cmd) {
     case '编辑':
-      handleEdit(row)
+      handleEdit(row as UserRow)
       break
     case '重置密码':
       handleResetPwd(row)
       break
     case '删除':
-      handleDelete(row)
+      handleDelete(row as UserRow)
       break
   }
 }
 
+// 列表由 useCrud 的 immediate 自动加载，这里只补本页的下拉数据
 onMounted(() => {
-  loadData()
   loadRoles()
   loadDepts()
 })

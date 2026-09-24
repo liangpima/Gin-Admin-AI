@@ -4,7 +4,7 @@
       <template #header>
         <div class="card-header">
           <span>岗位管理</span>
-          <el-button type="primary" @click="handleAdd">新增岗位</el-button>
+          <el-button type="primary" @click="handleAdd()">新增岗位</el-button>
         </div>
       </template>
       <el-table :data="tableData" v-loading="loading" border>
@@ -50,63 +50,49 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { getPostList, createPost, updatePost, deletePost , type PostItem} from '@/api/post'
+import { getPostList, createPost, updatePost, deletePost, type PostItem, type PostQuery } from '@/api/post'
 import { formatDateTime } from '@/utils/format'
 import FormDialog from '@/components/FormDialog/index.vue'
+import { useCrud } from '@/hooks/useCrud'
 
-const loading = ref(false)
-const submitLoading = ref(false)
-const tableData = ref<PostItem[]>([])
-const total = ref(0)
-const page = ref(1)
-const pageSize = ref(10)
-const dialogVisible = ref(false)
-const dialogTitle = ref('')
-const formRef = ref<FormInstance>()
+interface PostForm {
+  id: number
+  code: string
+  name: string
+  sort: number
+  status: number
+}
 
-const form = reactive({ id: 0, code: '', name: '', sort: 0, status: 1 })
+// 分页、loading、弹窗开关与增删改查的编排都交给 useCrud；
+// 这里只保留本页特有的东西：表单结构、校验规则、提交载荷。
+const {
+  loading,
+  submitLoading,
+  tableData,
+  total,
+  page,
+  pageSize,
+  dialogVisible,
+  dialogTitle,
+  form,
+  formRef,
+  loadData,
+  handleAdd,
+  handleEdit,
+  handleSubmit,
+  handleDelete,
+} = useCrud<PostItem, PostForm, PostQuery>({
+  list: (params) => getPostList(params),
+  create: (payload) => createPost(payload),
+  update: (payload) => updatePost(payload),
+  remove: (id) => deletePost(id),
+  createForm: () => ({ id: 0, code: '', name: '', sort: 0, status: 1 }),
+  titles: { add: '新增岗位', edit: '编辑岗位' },
+  deleteConfirm: '确定删除该岗位？',
+})
+
 const formRules = {
   code: [{ required: true, message: '请输入岗位编码', trigger: 'blur' }],
   name: [{ required: true, message: '请输入岗位名称', trigger: 'blur' }],
 }
-
-async function loadData() {
-  loading.value = true
-  try {
-    const res = await getPostList({ page: page.value, pageSize: pageSize.value })
-    tableData.value = res.data.list
-    total.value = res.data.total
-  } finally { loading.value = false }
-}
-
-function handleAdd() {
-  form.id = 0; form.code = ''; form.name = ''; form.sort = 0; form.status = 1
-  dialogTitle.value = '新增岗位'; dialogVisible.value = true
-}
-
-function handleEdit(row: PostItem) {
-  Object.assign(form, row)
-  dialogTitle.value = '编辑岗位'; dialogVisible.value = true
-}
-
-async function handleSubmit() {
-  const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
-  submitLoading.value = true
-  try {
-    if (form.id) { await updatePost(form) }
-    else { await createPost(form) }
-    ElMessage.success('操作成功'); dialogVisible.value = false; loadData()
-  } finally { submitLoading.value = false }
-}
-
-async function handleDelete(row: PostItem) {
-  await ElMessageBox.confirm('确定删除该岗位？', '提示', { type: 'warning' })
-  await deletePost(row.id)
-  ElMessage.success('删除成功'); loadData()
-}
-
-onMounted(() => loadData())
 </script>

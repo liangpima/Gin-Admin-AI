@@ -37,7 +37,7 @@
       <template #header>
         <div class="card-header">
           <span>协议管理</span>
-          <el-button type="primary" @click="handleAdd">新增协议</el-button>
+          <el-button type="primary" @click="handleAdd()">新增协议</el-button>
         </div>
       </template>
 
@@ -67,8 +67,8 @@
       </el-table>
 
       <Pagination
-        v-model:page="queryParams.page"
-        v-model:limit="queryParams.pageSize"
+        v-model:page="page"
+        v-model:limit="pageSize"
         :page-sizes="[10, 20, 50]"
         :total="total"
         layout="total, sizes, prev, pager, next"
@@ -105,12 +105,29 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance } from 'element-plus'
-import { getAgreementList, createAgreement, updateAgreement, deleteAgreement , type AgreementItem } from '@/api/agreement'
+import { reactive } from 'vue'
+import { ElMessage } from 'element-plus'
+import {
+  getAgreementList,
+  createAgreement,
+  updateAgreement,
+  deleteAgreement,
+  type AgreementItem,
+  type AgreementQuery,
+} from '@/api/agreement'
 import WangEditor from '@/components/WangEditor/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
 import { formatDateTime } from '@/utils/format'
+import { useCrud } from '@/hooks/useCrud'
+
+interface AgreementForm {
+  id: number
+  title: string
+  content: string
+  type: string
+  sort: number
+  status: number
+}
 
 const typeOptions = [
   { label: '用户协议', value: 'terms' },
@@ -126,51 +143,50 @@ const typeMap: Record<string, string> = {
   contact: '联系方式',
 }
 
-const loading = ref(false)
-const submitLoading = ref(false)
-const tableData = ref<AgreementItem[]>([])
-const total = ref(0)
-const dialogVisible = ref(false)
-const dialogTitle = ref('')
-const formRef = ref<FormInstance>()
-
+// 搜索条件只放本页自己的字段；page/pageSize 由 useCrud 管理
 const queryParams = reactive({
   name: '',
   type: '',
   status: undefined as number | undefined,
-  page: 1,
-  pageSize: 10,
 })
 
-const form = reactive({
-  id: 0,
-  title: '',
-  content: '',
-  type: '',
-  sort: 0,
-  status: 1,
+const {
+  loading,
+  submitLoading,
+  tableData,
+  total,
+  page,
+  pageSize,
+  dialogVisible,
+  dialogTitle,
+  form,
+  formRef,
+  loadData,
+  handleSearch,
+  handleAdd,
+  handleEdit,
+  handleSubmit,
+  handleDelete,
+} = useCrud<AgreementItem, AgreementForm, AgreementQuery>({
+  list: (params) => getAgreementList(params),
+  create: (payload) => createAgreement(payload),
+  update: (payload) => updateAgreement(payload),
+  remove: (id) => deleteAgreement(id),
+  createForm: () => ({ id: 0, title: '', content: '', type: '', sort: 0, status: 1 }),
+  // content 兜底成空串：接口可能给 null，而 WangEditor 的 v-model 拿到 null
+  // 会让编辑器初始化异常（原实现就是 `row.content || ''`，这里保留该防御）
+  rowToForm: (row) => ({
+    id: row.id,
+    title: row.title,
+    content: row.content || '',
+    type: row.type,
+    sort: row.sort,
+    status: row.status,
+  }),
+  query: () => ({ name: queryParams.name, type: queryParams.type, status: queryParams.status }),
+  titles: { add: '新增协议', edit: '编辑协议' },
+  deleteConfirm: '确认删除该协议？',
 })
-
-const formRules = {
-  title: [{ required: true, message: '请输入标题', trigger: 'blur' }],
-  type: [{ required: true, message: '请选择类型', trigger: 'change' }],
-}
-
-async function loadData() {
-  loading.value = true
-  try {
-    const res = await getAgreementList(queryParams)
-    tableData.value = res.data.list
-    total.value = res.data.total
-  } finally {
-    loading.value = false
-  }
-}
-
-function handleSearch() {
-  queryParams.page = 1
-  loadData()
-}
 
 function handleReset() {
   queryParams.name = ''
@@ -188,57 +204,10 @@ async function handleStatusChange(row: AgreementItem) {
   }
 }
 
-function handleAdd() {
-  form.id = 0
-  form.title = ''
-  form.content = ''
-  form.type = ''
-  form.sort = 0
-  form.status = 1
-  dialogTitle.value = '新增协议'
-  dialogVisible.value = true
+const formRules = {
+  title: [{ required: true, message: '请输入标题', trigger: 'blur' }],
+  type: [{ required: true, message: '请选择类型', trigger: 'change' }],
 }
-
-function handleEdit(row: AgreementItem) {
-  form.id = row.id
-  form.title = row.title
-  form.content = row.content || ''
-  form.type = row.type
-  form.sort = row.sort
-  form.status = row.status
-  dialogTitle.value = '编辑协议'
-  dialogVisible.value = true
-}
-
-async function handleSubmit() {
-  const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
-
-  submitLoading.value = true
-  try {
-    if (form.id) {
-      await updateAgreement(form)
-    } else {
-      await createAgreement(form)
-    }
-    ElMessage.success('操作成功')
-    dialogVisible.value = false
-    loadData()
-  } finally {
-    submitLoading.value = false
-  }
-}
-
-async function handleDelete(row: AgreementItem) {
-  await ElMessageBox.confirm('确认删除该协议？', '提示', { type: 'warning' })
-  await deleteAgreement(row.id)
-  ElMessage.success('删除成功')
-  loadData()
-}
-
-onMounted(() => {
-  loadData()
-})
 </script>
 
 <style lang="scss" scoped>
