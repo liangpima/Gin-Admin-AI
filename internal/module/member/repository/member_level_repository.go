@@ -59,7 +59,7 @@ func (r *memberLevelRepository) FindList(tenantID uint, name string, page, pageS
 
 	query := common.TenantScope(database.DB, tenantID).Model(&model.MemberLevel{})
 	if name != "" {
-		query = query.Where("name LIKE ?", "%"+name+"%")
+		query = query.Where("name LIKE ?", "%"+common.EscapeLike(name)+"%")
 	}
 
 	if err := query.Count(&total).Error; err != nil {

@@ -76,7 +76,7 @@ func (r *postRepository) FindList(tenantID uint, name string, status *int8, page
 
 	query := common.TenantScope(r.db.Model(&model.SysPost{}), tenantID)
 	if name != "" {
-		query = query.Where("name LIKE ?", "%"+name+"%")
+		query = query.Where("name LIKE ?", "%"+common.EscapeLike(name)+"%")
 	}
 	if status != nil {
 		query = query.Where("status = ?", *status)

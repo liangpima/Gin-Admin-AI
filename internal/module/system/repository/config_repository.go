@@ -58,7 +58,7 @@ func (r *configRepository) FindList(name string, page, pageSize int) ([]model.Sy
 
 	query := r.db.Model(&model.SysConfig{})
 	if name != "" {
-		query = query.Where("name LIKE ?", "%"+name+"%")
+		query = query.Where("name LIKE ?", "%"+common.EscapeLike(name)+"%")
 	}
 
 	if err := query.Count(&total).Error; err != nil {
@@ -92,7 +92,7 @@ func (r *configRepository) Delete(id uint) error {
 
 func (r *configRepository) FindByKeyPrefix(prefix string) ([]model.SysConfig, error) {
 	var configs []model.SysConfig
-	err := r.db.Where("config_key LIKE ?", prefix+"%").Order("id ASC").Find(&configs).Error
+	err := r.db.Where("config_key LIKE ?", common.EscapeLike(prefix)+"%").Order("id ASC").Find(&configs).Error
 	return configs, err
 }
 

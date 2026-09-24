@@ -93,10 +93,10 @@ func (r *memberRepository) FindList(tenantID uint, phone, nickname string, level
 	query := common.TenantScope(database.DB.Model(&model.Member{}), tenantID)
 
 	if phone != "" {
-		query = query.Where("phone LIKE ?", "%"+phone+"%")
+		query = query.Where("phone LIKE ?", "%"+common.EscapeLike(phone)+"%")
 	}
 	if nickname != "" {
-		query = query.Where("nickname LIKE ?", "%"+nickname+"%")
+		query = query.Where("nickname LIKE ?", "%"+common.EscapeLike(nickname)+"%")
 	}
 	if levelID > 0 {
 		query = query.Where("level_id = ?", levelID)

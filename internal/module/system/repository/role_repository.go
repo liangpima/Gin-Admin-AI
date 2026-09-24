@@ -69,10 +69,10 @@ func (r *roleRepository) FindList(tenantID uint, name, code string, status *int8
 	query := common.TenantScope(r.db, tenantID).Model(&model.SysRole{})
 
 	if name != "" {
-		query = query.Where("name LIKE ?", "%"+name+"%")
+		query = query.Where("name LIKE ?", "%"+common.EscapeLike(name)+"%")
 	}
 	if code != "" {
-		query = query.Where("code LIKE ?", "%"+code+"%")
+		query = query.Where("code LIKE ?", "%"+common.EscapeLike(code)+"%")
 	}
 	if status != nil {
 		query = query.Where("status = ?", *status)

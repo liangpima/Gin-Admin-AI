@@ -75,10 +75,10 @@ func (r *userRepository) FindList(tenantID uint, username, phone string, status 
 	query := common.TenantScope(r.db.Model(&model.SysUser{}), tenantID)
 
 	if username != "" {
-		query = query.Where("username LIKE ?", "%"+username+"%")
+		query = query.Where("username LIKE ?", "%"+common.EscapeLike(username)+"%")
 	}
 	if phone != "" {
-		query = query.Where("phone LIKE ?", "%"+phone+"%")
+		query = query.Where("phone LIKE ?", "%"+common.EscapeLike(phone)+"%")
 	}
 	if status != nil {
 		query = query.Where("status = ?", *status)

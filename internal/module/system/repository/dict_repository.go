@@ -67,7 +67,7 @@ func (r *dictRepository) FindTypeList(name string, page, pageSize int) ([]model.
 
 	query := r.db.Model(&model.SysDictType{})
 	if name != "" {
-		query = query.Where("name LIKE ?", "%"+name+"%")
+		query = query.Where("name LIKE ?", "%"+common.EscapeLike(name)+"%")
 	}
 
 	if err := query.Count(&total).Error; err != nil {

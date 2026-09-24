@@ -40,10 +40,10 @@ func (r *fileRepository) FindList(tenantID uint, name, mimeType, sortOrder strin
 
 	query := common.TenantScope(r.db, tenantID).Model(&model.SysFile{})
 	if name != "" {
-		query = query.Where("name LIKE ?", "%"+name+"%")
+		query = query.Where("name LIKE ?", "%"+common.EscapeLike(name)+"%")
 	}
 	if mimeType != "" {
-		query = query.Where("mime_type LIKE ?", mimeType+"%")
+		query = query.Where("mime_type LIKE ?", common.EscapeLike(mimeType)+"%")
 	}
 
 	if err := query.Count(&total).Error; err != nil {

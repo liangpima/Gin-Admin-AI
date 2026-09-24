@@ -92,7 +92,7 @@ func (r *payOrderRepository) FindList(tenantID uint, subject string, status int8
 	query := common.TenantScope(database.DB.Model(&model.PayOrder{}), tenantID)
 
 	if subject != "" {
-		query = query.Where("subject LIKE ?", "%"+subject+"%")
+		query = query.Where("subject LIKE ?", "%"+common.EscapeLike(subject)+"%")
 	}
 	if status >= 0 {
 		query = query.Where("status = ?", status)

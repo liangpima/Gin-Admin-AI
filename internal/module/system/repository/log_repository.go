@@ -50,7 +50,7 @@ func (r *logRepository) FindOperationLogList(tenantID uint, title string, status
 
 	query := common.TenantScope(r.db, tenantID).Model(&model.SysOperationLog{})
 	if title != "" {
-		query = query.Where("title LIKE ?", "%"+title+"%")
+		query = query.Where("title LIKE ?", "%"+common.EscapeLike(title)+"%")
 	}
 	if status != nil {
 		query = query.Where("status = ?", *status)
@@ -71,7 +71,7 @@ func (r *logRepository) FindLoginLogList(tenantID uint, username string, status 
 
 	query := common.TenantScope(r.db, tenantID).Model(&model.SysLoginLog{})
 	if username != "" {
-		query = query.Where("username LIKE ?", "%"+username+"%")
+		query = query.Where("username LIKE ?", "%"+common.EscapeLike(username)+"%")
 	}
 	if status != nil {
 		query = query.Where("status = ?", *status)

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"go-admin/internal/common"
 	"go-admin/internal/database"
 	"go-admin/internal/module/system/model"
 
@@ -46,7 +47,7 @@ func (r *agreementRepository) FindList(name, typ string, status *int8, page, pag
 
 	query := r.db.Model(&model.SysAgreement{})
 	if name != "" {
-		query = query.Where("title LIKE ?", "%"+name+"%")
+		query = query.Where("title LIKE ?", "%"+common.EscapeLike(name)+"%")
 	}
 	if typ != "" {
 		query = query.Where("type = ?", typ)
