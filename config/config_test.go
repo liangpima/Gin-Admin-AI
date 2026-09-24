@@ -125,9 +125,14 @@ func TestConfigTemplatesParse(t *testing.T) {
 	cases := []struct {
 		name string
 		path string
+		// wantTrustedProxies 该模板应解析出的可信代理列表。
+		// 断言取值而不只是「能解析」：mapstructure 的字段名写错、键名拼错时
+		// YAML 依然能解析成功，只是字段静默为空 —— 那正是最危险的失败方式
+		// （docker 部署会因此退化成全站共用 IP 额度，且没有任何报错）。
+		wantTrustedProxies []string
 	}{
-		{"本地开发配置", "../config/config.yaml"},
-		{"容器部署配置", "../deploy/config.docker.yaml"},
+		{"本地开发配置", "../config/config.yaml", []string{}},
+		{"容器部署配置", "../deploy/config.docker.yaml", []string{"172.16.0.0/12"}},
 	}
 
 	for _, tc := range cases {
@@ -146,6 +151,17 @@ func TestConfigTemplatesParse(t *testing.T) {
 			}
 			if err := ValidateSecurity(); err != nil {
 				t.Fatalf("注入环境变量后生产安全检查应通过: %v", err)
+			}
+
+			got := Cfg.Server.TrustedProxies
+			if len(got) != len(tc.wantTrustedProxies) {
+				t.Fatalf("server.trusted_proxies 应为 %v，实际 %v", tc.wantTrustedProxies, got)
+			}
+			for i := range got {
+				if got[i] != tc.wantTrustedProxies[i] {
+					t.Errorf("server.trusted_proxies[%d] 应为 %q，实际 %q",
+						i, tc.wantTrustedProxies[i], got[i])
+				}
 			}
 		})
 	}
