@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS `sys_menu` (
 -- 部门表
 CREATE TABLE IF NOT EXISTS `sys_dept` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint unsigned DEFAULT 0 COMMENT '租户ID',
   `parent_id` bigint unsigned DEFAULT 0 COMMENT '父部门ID',
   `name` varchar(64) NOT NULL COMMENT '部门名称',
   `sort` int DEFAULT 0 COMMENT '排序',
@@ -106,8 +107,9 @@ CREATE TABLE IF NOT EXISTS `sys_dept` (
   `remark` varchar(500) DEFAULT '' COMMENT '备注',
   PRIMARY KEY (`id`),
   KEY `idx_parent_id` (`parent_id`),
+  KEY `idx_tenant_id` (`tenant_id`),
   KEY `idx_deleted_at` (`deleted_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='部门表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='部门表（租户内数据）';
 
 -- 岗位表
 CREATE TABLE IF NOT EXISTS `sys_post` (

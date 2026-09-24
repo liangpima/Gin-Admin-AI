@@ -49,6 +49,7 @@ type userService struct {
 	userRepo    repository.UserRepository
 	roleService RoleService
 	postService PostService
+	deptService DeptService
 }
 
 func NewUserService() UserService {
@@ -56,7 +57,32 @@ func NewUserService() UserService {
 		userRepo:    repository.NewUserRepository(),
 		roleService: NewRoleService(),
 		postService: NewPostService(),
+		deptService: NewDeptService(),
 	}
+}
+
+// normalizeDeptID 校验部门属于当前租户。
+//
+// sys_user.dept_id 是指向租户内表 sys_dept 的引用，与角色/岗位同理：
+// 不校验时租户 A 可以把用户的部门指向租户 B 的部门 ID（ID 可枚举）。
+// 后果不像跨租户角色那样直接提权，但同样是数据越界 —— 而且更隐蔽：
+// 用户列表按租户过滤、部门树也按租户过滤，指向别租户的部门时该用户
+// 在界面上会表现为「没有部门」，不报任何错。
+//
+// deptID 为 0 表示不设部门，直接放行。
+func (s *userService) normalizeDeptID(tenantID, deptID uint) (uint, error) {
+	if deptID == 0 {
+		return 0, nil
+	}
+	if _, err := s.deptService.FindByID(tenantID, deptID); err != nil {
+		// 部门不存在 / 不属于本租户 → 业务错误（400）。
+		// 不点名是「不存在」还是「不属于你」：否则可用来探测其他租户的部门 ID。
+		if common.IsBizError(err) {
+			return 0, common.NewBizError("部门不存在或不属于当前租户，请刷新后重试")
+		}
+		return 0, err
+	}
+	return deptID, nil
 }
 
 // dedupeNonZeroIDs 去重并剔除 0，保持原有顺序；无有效项时返回 nil。
@@ -151,6 +177,10 @@ func (s *userService) Create(tenantID uint, req *dto.CreateUserRequest, operator
 	if err != nil {
 		return err
 	}
+	deptID, err := s.normalizeDeptID(tenantID, req.DeptID)
+	if err != nil {
+		return err
+	}
 
 	if err := validatePasswordStrength(req.Password); err != nil {
 		return err
@@ -175,7 +205,7 @@ func (s *userService) Create(tenantID uint, req *dto.CreateUserRequest, operator
 		Email:    req.Email,
 		Phone:    req.Phone,
 		Status:   req.Status,
-		DeptID:   req.DeptID,
+		DeptID:   deptID,
 	}
 	user.Remark = req.Remark
 
@@ -227,7 +257,11 @@ func (s *userService) Update(tenantID uint, req *dto.UpdateUserRequest, operator
 		user.Status = *req.Status
 	}
 	if req.DeptID != nil {
-		user.DeptID = *req.DeptID
+		deptID, err := s.normalizeDeptID(tenantID, *req.DeptID)
+		if err != nil {
+			return err
+		}
+		user.DeptID = deptID
 	}
 	if req.Remark != nil {
 		user.Remark = *req.Remark
@@ -418,7 +452,14 @@ func (s *userService) UpdateDept(tenantID uint, req *dto.UpdateUserDeptRequest) 
 	if err != nil {
 		return common.NewNotFoundError("用户不存在")
 	}
-	user.DeptID = req.DeptID
+
+	// 与 Update 里的 deptId 校验同源：sys_user.dept_id 指向租户内表，
+	// 不校验就能把用户挂到别租户的部门上（界面上表现为「没有部门」）
+	deptID, err := s.normalizeDeptID(tenantID, req.DeptID)
+	if err != nil {
+		return err
+	}
+	user.DeptID = deptID
 	return s.userRepo.Update(user)
 }
 

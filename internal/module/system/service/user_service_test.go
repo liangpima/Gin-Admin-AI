@@ -513,3 +513,96 @@ func TestUserUpdateEmptyRoleIdsClears(t *testing.T) {
 }
 
 func stringp2(v string) *string { return &v }
+
+// TestUserServiceRejectsForeignDept 用户的 deptId 必须校验租户归属（P1-1）。
+//
+// sys_user.dept_id 是指向租户内表 sys_dept 的引用。不校验时租户 A 可以把
+// 用户的部门指向租户 B 的部门 ID（ID 可枚举）。后果比跨租户角色更隐蔽：
+// 用户列表按租户过滤、部门树也按租户过滤，指向别租户的部门时该用户在界面上
+// 表现为「没有部门」，不报任何错，只能靠人工比对数据才能发现。
+//
+// 对调用方刻意不区分「不存在」与「属于其他租户」—— 否则可以拿它枚举
+// 其他租户的部门 ID。
+func TestUserServiceRejectsForeignDept(t *testing.T) {
+	// 只有部门 1 属于本租户；99 视为「不存在或属于其他租户」
+	newSvc := func(repo *mockUserRepo) *userService {
+		return &userService{
+			userRepo:    repo,
+			deptService: &stubDeptService{existingDeptIDs: map[uint]bool{1: true}},
+		}
+	}
+	existingUser := func(*mockUserRepo) *mockUserRepo {
+		return &mockUserRepo{findByIDFn: func(uint, uint) (*model.SysUser, error) {
+			return &model.SysUser{}, nil
+		}}
+	}
+
+	t.Run("创建用户时拒绝", func(t *testing.T) {
+		repo := &mockUserRepo{}
+		err := newSvc(repo).Create(testTenantID, &dto.CreateUserRequest{
+			Username: "newbie", Password: "Abc12345",
+			DeptID: 99, Status: common.StatusEnabled,
+		}, 1)
+
+		assertBizError(t, err, common.CodeBadRequest)
+		if len(repo.createdUsers) != 0 {
+			t.Error("校验失败不应落库")
+		}
+	})
+
+	t.Run("更新用户时拒绝", func(t *testing.T) {
+		dept := uint(99)
+		repo := existingUser(nil)
+		err := newSvc(repo).Update(testTenantID, &dto.UpdateUserRequest{ID: 1, DeptID: &dept}, 1)
+
+		assertBizError(t, err, common.CodeBadRequest)
+		if len(repo.updatedUsers) != 0 {
+			t.Error("校验失败不应落库")
+		}
+	})
+
+	t.Run("调整部门接口同样拒绝", func(t *testing.T) {
+		repo := existingUser(nil)
+		err := newSvc(repo).UpdateDept(testTenantID, &dto.UpdateUserDeptRequest{ID: 1, DeptID: 99})
+
+		assertBizError(t, err, common.CodeBadRequest)
+		if len(repo.updatedUsers) != 0 {
+			t.Error("校验失败不应落库")
+		}
+	})
+
+	t.Run("本租户部门放行", func(t *testing.T) {
+		dept := uint(1)
+		repo := existingUser(nil)
+		if err := newSvc(repo).Update(testTenantID, &dto.UpdateUserRequest{ID: 1, DeptID: &dept}, 1); err != nil {
+			t.Fatalf("本租户部门应放行: %v", err)
+		}
+		if len(repo.updatedUsers) != 1 {
+			t.Error("应落库一次")
+		}
+	})
+
+	t.Run("deptId=0 表示不设部门，直接放行", func(t *testing.T) {
+		repo := existingUser(nil)
+		zero := uint(0)
+		if err := newSvc(repo).Update(testTenantID, &dto.UpdateUserRequest{ID: 1, DeptID: &zero}, 1); err != nil {
+			t.Fatalf("清空部门应放行: %v", err)
+		}
+	})
+
+	t.Run("查询部门失败属系统错误，原样上抛", func(t *testing.T) {
+		dept := uint(1)
+		repo := existingUser(nil)
+		svc := &userService{
+			userRepo:    repo,
+			deptService: &stubDeptService{err: errors.New("db down")},
+		}
+		err := svc.Update(testTenantID, &dto.UpdateUserRequest{ID: 1, DeptID: &dept}, 1)
+		if err == nil {
+			t.Fatal("系统错误必须上抛")
+		}
+		if common.IsBizError(err) {
+			t.Error("DB 故障不应被包装成业务错误（400），否则「数据库挂了」会显示成「参数不合法」")
+		}
+	})
+}

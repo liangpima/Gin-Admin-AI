@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"go-admin/internal/common"
+	"go-admin/internal/module/system/dto"
 	"go-admin/internal/module/system/model"
 
 	"gorm.io/gorm"
@@ -116,8 +117,39 @@ func (m *mockUserRepo) CountByUsername(username string, excludeID uint) (int64, 
 	return 0, nil
 }
 
+// stubDeptService 只实现 normalizeDeptID 会触达的 FindByID，
+// 其余方法返回零值（这些用例不涉及部门增删改）。
+//
+// existingDeptIDs 模拟「属于当前租户的部门」；不在表里的 ID 一律返回 404，
+// 用来验证「部门不存在」与「部门属于其他租户」都会被拒绝 ——
+// 对调用方而言两者不可区分（刻意如此，否则可用来探测其他租户的部门 ID）。
+type stubDeptService struct {
+	existingDeptIDs map[uint]bool
+	err             error
+}
+
+func (s *stubDeptService) FindByID(tenantID, id uint) (interface{}, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.existingDeptIDs[id] {
+		return &model.SysDept{}, nil
+	}
+	return nil, common.NewNotFoundError("部门不存在")
+}
+
+func (s *stubDeptService) Create(*dto.CreateDeptRequest, uint, uint) error { return nil }
+func (s *stubDeptService) Update(*dto.UpdateDeptRequest, uint, uint) error { return nil }
+func (s *stubDeptService) Delete(uint, uint) error                         { return nil }
+func (s *stubDeptService) FindTree(uint) ([]model.SysDept, error)          { return nil, nil }
+
 func newTestUserService(repo *mockUserRepo) *userService {
-	return &userService{userRepo: repo}
+	// 默认「租户下存在部门 1」：历史用例里 DeptID: 1 表示有效部门。
+	// 需要验证拒绝路径的用例自行替换 deptService。
+	return &userService{
+		userRepo:    repo,
+		deptService: &stubDeptService{existingDeptIDs: map[uint]bool{1: true}},
+	}
 }
 
 // errNotFound 用于模拟 GORM 的「记录不存在」，验证它被转成 404 业务错误

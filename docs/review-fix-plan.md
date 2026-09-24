@@ -12,7 +12,10 @@
 | P0-2 限频绕过 | ✅ 已完成 | `bc0676a` trusted_proxies + fail-closed，router 包从 0 测试到 3 个 |
 | P0-3 验证码 | ✅ 已完成 | `9b00513` 生成限流 + 凭证绑定来源；2 条原计划项经核实已存在或改法 |
 | P0-4 密钥护栏 | ✅ 已完成 | 开发模式启动告警逐条打印 + `server.host` + 部署配置补白名单 |
-| P1 多租户补全 | ⏳ 未开始 | 需迁移脚本，按计划单独开分支 |
+| P1-4 LIKE 转义 | ✅ 已完成 | `8c45aa4` 18 处统一转义 |
+| P1-3 租户 0 旁路 | ✅ 已完成 | `0e7d72d` 平台级身份需持有 admin 角色 |
+| P1-1 dept 租户隔离 | ✅ 已完成 | 模型/仓储/服务/控制器 + 迁移（两步回填）+ BuildTreeForest |
+| P1-2 全局表语义 | ⏳ 未开始 | |
 | P2 工程质量 | ⏳ 未开始 | |
 | P3 体验与长期 | ⏳ 未开始 | |
 
@@ -128,16 +131,41 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
 
 ## 阶段 P1 · 多租户补全（3–4 人天，需要迁移脚本）
 
-### P1-1 `sys_dept` 租户隔离 [Medium]
+### P1-1 `sys_dept` 租户隔离 [Medium] ✅ 已完成
 - **问题**：`model/dept.go` 用 `common.BaseModel`（无 `tenant_id`），
   `dept_repository.go:42` 全表查询 → 跨租户部门可枚举/改名/删除。
-- **修法**：
-  1. `SysDept` 换成 `common.TenantBaseModel`；迁移脚本
-     `sql/migrations/2026-09-25-dept-tenant.sql`：`ALTER TABLE sys_dept ADD COLUMN tenant_id ...`
-     + 回填（按 `sys_user.dept_id` 归属推断，推断不出的归平台租户 0，脚本里输出待人工确认清单）。
-  2. `dept_repository` 所有查询包 `common.TenantScope`；`dept_service` 传入 tenantID。
-  3. 加唯一索引 `(tenant_id, name)` 需先确认业务是否允许同名部门 —— 不允许则加，允许则跳过。
-- **验收**：租户 A token 查 `/dept/tree` 只见本租户部门。
+- **实施结果**：
+  1. `SysDept` 改继承 `common.TenantBaseModel`；`DeptRepository` 全部方法加
+     `tenantID` 参数并施加 `TenantScope`；`DeptService` / `DeptController` 逐层透传。
+     `Update`/`Delete` 用条件更新（`RowsAffected == 0` → `ErrRecordNotFound`），
+     仓储层不再假设调用方一定先查过。
+  2. 迁移 `sql/migrations/2026-09-25-dept-tenant.sql`：加列 + 加索引 + **两步回填**。
+     回填分两步是必需的，不是保险起见：
+     · 第一步按用户归属推断（该部门下的在职用户全部属于同一个非 0 租户才推断，
+       多租户混用或只有平台账号的部门不推断）；
+     · 第二步沿部门树**向下**传播（父部门已定租户的，子部门一并归入）。
+     只做第一步会让子部门的父节点不在本租户结果集里 —— 整棵子树不可达。
+     刻意不向上推断：父部门若仍是平台级，说明它可能是多租户共用的上级，不该划给某个租户。
+  3. `init.sql` 同步加 `tenant_id` 与 `idx_tenant_id`（否则新装库与迁移库结构不一致）。
+  4. **计划外补充 A**：新增 `common.BuildTreeForest`，部门树改用它。
+     按租户过滤后「父节点不在结果集里」是**合法状态**（历史父部门仍留在平台级），
+     沿用 `BuildTree` 会返回**空数组** → 部门管理页一片空白、新建用户选不到部门，
+     而数据完好。把这类节点提升为顶层节点，层级关系不丢。菜单仍用 `BuildTree`
+     （全局表，不存在这种合法孤儿）。
+  5. **计划外补充 B**：`sys_user.dept_id` 的租户归属校验（`userService.normalizeDeptID`），
+     覆盖「建用户 / 改用户 / 调整部门」三条路径。不校验时租户 A 可把用户的部门指向
+     租户 B 的部门 ID，而后果比跨租户角色更隐蔽：用户列表按租户过滤、部门树也按租户过滤，
+     该用户在界面上表现为「没有部门」，不报任何错。
+  6. **未做（有意）**：不加 `(tenant_id, name)` 唯一索引。`sys_dept` 原本在 `name` 上
+     就没有唯一约束，业务允许同名部门（集团下多个子公司都有「市场部」）；
+     加约束会让现有数据的插入突然失败，属于超出本次修复范围的行为变更。
+- **验收**：迁移在全新空库上跑通 `init.sql` + 全部 migrations，并**重复执行 3 次**
+  确认幂等；用双租户数据验证回填（dept2→租户1、dept3→租户2、无用户的子部门跟随父部门→租户1、
+  只有平台账号的 dept1 保持 0），各租户视角互不可见。
+  开发库已备份 `runtime/backup-sys_dept-before-p1.sql` 后执行迁移，admin 部门树正常（3 个、层级完整）。
+  测试：仓储层 5 组跨租户用例、Service 层租户透传 + 部门树集成用例、
+  Controller 层 4 个 httptest 用例（含「新建部门落在操作者租户下」）。
+  三处均已做「移除修复即转红」的验证。
 
 ### P1-2 全局表语义显式化 [Medium]
 - **现状**：`config`（含 OSS 密钥）、`dict`、`agreement` 三表无 `tenant_id`，

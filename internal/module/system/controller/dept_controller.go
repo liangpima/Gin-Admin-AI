@@ -26,7 +26,8 @@ func (ctl *DeptController) Create(c *gin.Context) {
 	}
 
 	operatorID := common.GetCurrentUserID(c)
-	if err := ctl.deptService.Create(&req, operatorID); err != nil {
+	tenantID := common.GetTenantID(c)
+	if err := ctl.deptService.Create(&req, operatorID, tenantID); err != nil {
 		common.FailWith(c, err)
 		return
 	}
@@ -42,7 +43,8 @@ func (ctl *DeptController) Update(c *gin.Context) {
 	}
 
 	operatorID := common.GetCurrentUserID(c)
-	if err := ctl.deptService.Update(&req, operatorID); err != nil {
+	tenantID := common.GetTenantID(c)
+	if err := ctl.deptService.Update(&req, operatorID, tenantID); err != nil {
 		common.FailWith(c, err)
 		return
 	}
@@ -59,7 +61,7 @@ func (ctl *DeptController) Delete(c *gin.Context) {
 
 	// service 已用 BizError 标记「存在下级部门」，FailWith 会自动给出 400；
 	// 其余（删除失败等）为系统错误，返回 500
-	if err := ctl.deptService.Delete(id); err != nil {
+	if err := ctl.deptService.Delete(common.GetTenantID(c), id); err != nil {
 		common.FailWith(c, err)
 		return
 	}
@@ -74,7 +76,7 @@ func (ctl *DeptController) FindByID(c *gin.Context) {
 		return
 	}
 
-	dept, err := ctl.deptService.FindByID(id)
+	dept, err := ctl.deptService.FindByID(common.GetTenantID(c), id)
 	if err != nil {
 		common.FailWith(c, err)
 		return
@@ -84,7 +86,7 @@ func (ctl *DeptController) FindByID(c *gin.Context) {
 }
 
 func (ctl *DeptController) FindTree(c *gin.Context) {
-	depts, err := ctl.deptService.FindTree()
+	depts, err := ctl.deptService.FindTree(common.GetTenantID(c))
 	if err != nil {
 		common.FailWith(c, err)
 		return

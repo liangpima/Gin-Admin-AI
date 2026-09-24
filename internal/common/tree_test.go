@@ -112,3 +112,83 @@ func TestBuildTreeOrphanDropped(t *testing.T) {
 		t.Fatalf("孤儿节点不应出现在树里，got %d 个根节点", len(tree))
 	}
 }
+
+// ---- BuildTreeForest：父节点缺失时提升为根（P1-1）----
+
+// TestBuildTreeForestPromotesOrphans 父节点不在结果集里的节点必须仍然可见。
+//
+// 这是部门改为租户内数据后的必需行为：历史数据的父部门可能仍留在平台级
+// （tenant_id=0），租户账号查自己的部门时父节点被过滤掉了。
+// 若沿用 BuildTree，返回的会是**空树** —— 部门管理页一片空白，数据却完好。
+func TestBuildTreeForestPromotesOrphans(t *testing.T) {
+	type node struct {
+		ID       uint
+		ParentID uint
+		Children []node
+	}
+	idOf := func(n node) uint { return n.ID }
+	parentOf := func(n node) uint { return n.ParentID }
+	setChildren := func(n *node, c []node) { n.Children = c }
+
+	// 只加载了 id=2、3 两个部门，它们的父节点 1 不在结果集里（被租户过滤掉）
+	nodes := []node{{ID: 2, ParentID: 1}, {ID: 3, ParentID: 1}}
+
+	got := BuildTreeForest(nodes, 0, idOf, parentOf, setChildren)
+	if len(got) != 2 {
+		t.Fatalf("父节点缺失的节点应被提升为根，期望 2 个顶层节点，实际 %d", len(got))
+	}
+
+	// 对照：BuildTree 会返回空树，这正是要避免的
+	if plain := BuildTree(nodes, 0, idOf, parentOf, setChildren); len(plain) != 0 {
+		t.Errorf("前置条件不成立：BuildTree 本应返回空树，实际 %d 个", len(plain))
+	}
+}
+
+// TestBuildTreeForestKeepsNesting 正常层级关系不受影响。
+func TestBuildTreeForestKeepsNesting(t *testing.T) {
+	type node struct {
+		ID       uint
+		ParentID uint
+		Children []node
+	}
+	idOf := func(n node) uint { return n.ID }
+	parentOf := func(n node) uint { return n.ParentID }
+	setChildren := func(n *node, c []node) { n.Children = c }
+
+	// 1(根) → 2 → 3
+	nodes := []node{{ID: 1}, {ID: 2, ParentID: 1}, {ID: 3, ParentID: 2}}
+
+	got := BuildTreeForest(nodes, 0, idOf, parentOf, setChildren)
+	if len(got) != 1 {
+		t.Fatalf("应只有 1 个顶层节点，实际 %d", len(got))
+	}
+	if len(got[0].Children) != 1 || got[0].Children[0].ID != 2 {
+		t.Fatalf("层级结构不对: %+v", got[0].Children)
+	}
+	if len(got[0].Children[0].Children) != 1 || got[0].Children[0].Children[0].ID != 3 {
+		t.Errorf("第三层不对: %+v", got[0].Children[0].Children)
+	}
+}
+
+// TestBuildTreeForestStillIgnoresCycle 环仍然只是不可达，不会爆栈。
+//
+// 「提升为根」的规则不能把环上的节点也提升成根 —— 否则递归会绕进环里。
+// 环上的节点父指针都在集合内，因此不会命中提升分支。
+func TestBuildTreeForestStillIgnoresCycle(t *testing.T) {
+	type node struct {
+		ID       uint
+		ParentID uint
+		Children []node
+	}
+	idOf := func(n node) uint { return n.ID }
+	parentOf := func(n node) uint { return n.ParentID }
+	setChildren := func(n *node, c []node) { n.Children = c }
+
+	// 1 是正常根；4 ↔ 5 互相引用成环；6 自引用
+	nodes := []node{{ID: 1}, {ID: 4, ParentID: 5}, {ID: 5, ParentID: 4}, {ID: 6, ParentID: 6}}
+
+	got := BuildTreeForest(nodes, 0, idOf, parentOf, setChildren)
+	if len(got) != 1 || got[0].ID != 1 {
+		t.Fatalf("只有 id=1 应可达（环上节点与自引用节点都不可达），实际 %+v", got)
+	}
+}

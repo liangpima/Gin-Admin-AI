@@ -17,12 +17,17 @@ import (
 // 而不是笼统地返回 500 —— 这是调用方的用法问题，不是服务端故障。
 var ErrDeptHasChildren = common.NewBizError("存在下级部门，请先删除下级部门")
 
+// DeptService 部门业务。
+//
+// 部门是租户内数据，因此每个方法都必须接收 tenantID 并透传到 Repository
+// （见 AGENTS.md 规则 7）。tenantID 为 0 表示平台级账号（不过滤），
+// 这一语义由 middleware.Auth 在入口按身份把住（只有 admin 角色能拿到 0）。
 type DeptService interface {
-	Create(req *dto.CreateDeptRequest, operatorID uint) error
-	Update(req *dto.UpdateDeptRequest, operatorID uint) error
-	Delete(id uint) error
-	FindByID(id uint) (interface{}, error)
-	FindTree() ([]model.SysDept, error)
+	Create(req *dto.CreateDeptRequest, operatorID, tenantID uint) error
+	Update(req *dto.UpdateDeptRequest, operatorID, tenantID uint) error
+	Delete(tenantID, id uint) error
+	FindByID(tenantID, id uint) (interface{}, error)
+	FindTree(tenantID uint) ([]model.SysDept, error)
 }
 
 type deptService struct {
@@ -35,15 +40,20 @@ func NewDeptService() DeptService {
 	}
 }
 
-func (s *deptService) Create(req *dto.CreateDeptRequest, operatorID uint) error {
-	if err := s.ensureParentExists(req.ParentID); err != nil {
+func (s *deptService) Create(req *dto.CreateDeptRequest, operatorID, tenantID uint) error {
+	if err := s.ensureParentExists(tenantID, req.ParentID); err != nil {
 		return err
 	}
 
 	dept := &model.SysDept{
-		BaseModel: common.BaseModel{
-			CreateBy: operatorID,
-			UpdateBy: operatorID,
+		TenantBaseModel: common.TenantBaseModel{
+			BaseModel: common.BaseModel{
+				CreateBy: operatorID,
+				UpdateBy: operatorID,
+			},
+			// 租户取自操作者的登录上下文，**不能**由请求体指定 ——
+			// 否则租户 A 可以把部门建到租户 B 名下
+			TenantID: tenantID,
 		},
 		ParentID: req.ParentID,
 		Name:     req.Name,
@@ -63,11 +73,16 @@ func (s *deptService) Create(req *dto.CreateDeptRequest, operatorID uint) error 
 // INSERT 本身会成功，但 FindTree 是从 parent_id=0 出发构建的，
 // 这个节点永远不可达 —— 表现为「提示创建成功，列表里却找不到」，
 // 数据却真实留在库里，既看不见也删不掉。
-func (s *deptService) ensureParentExists(parentID uint) error {
+//
+// 查询必须带租户：挂到**其他租户**的部门之下，后果与上面完全相同
+// （FindTree 只加载本租户的部门，父节点不在结果里 → 该节点不可达），
+// 而且它还会把本租户的部门结构信息挂到别人的树上。带上租户过滤后，
+// 跨租户的父节点会直接表现为「上级部门不存在」。
+func (s *deptService) ensureParentExists(tenantID, parentID uint) error {
 	if parentID == 0 {
 		return nil
 	}
-	if _, err := s.deptRepo.FindByID(parentID); err != nil {
+	if _, err := s.deptRepo.FindByID(tenantID, parentID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return common.NewBizError("上级部门不存在")
 		}
@@ -76,8 +91,8 @@ func (s *deptService) ensureParentExists(parentID uint) error {
 	return nil
 }
 
-func (s *deptService) Update(req *dto.UpdateDeptRequest, operatorID uint) error {
-	dept, err := s.deptRepo.FindByID(req.ID)
+func (s *deptService) Update(req *dto.UpdateDeptRequest, operatorID, tenantID uint) error {
+	dept, err := s.deptRepo.FindByID(tenantID, req.ID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return common.NewNotFoundError("部门不存在")
@@ -87,12 +102,13 @@ func (s *deptService) Update(req *dto.UpdateDeptRequest, operatorID uint) error 
 
 	// ParentID 为 nil 表示本次不移动部门，父级相关校验一并跳过
 	if req.ParentID != nil {
-		if err := s.ensureParentExists(*req.ParentID); err != nil {
+		if err := s.ensureParentExists(tenantID, *req.ParentID); err != nil {
 			return err
 		}
 
 		// 同菜单：禁止把部门挂到自己或自己的下级之下，避免产生遍历不到的孤儿子树
-		if cycle, err := hasCycleInHierarchy(req.ID, *req.ParentID, s.deptRepo.FindParentID); err != nil {
+		if cycle, err := hasCycleInHierarchy(req.ID, *req.ParentID,
+			func(id uint) (uint, bool, error) { return s.deptRepo.FindParentID(tenantID, id) }); err != nil {
 			return err
 		} else if cycle {
 			return common.NewBizError("不能将部门移动到它自己或它的下级之下")
@@ -120,7 +136,7 @@ func (s *deptService) Update(req *dto.UpdateDeptRequest, operatorID uint) error 
 	}
 	dept.UpdateBy = operatorID
 
-	return s.deptRepo.Update(dept)
+	return s.deptRepo.Update(tenantID, dept)
 }
 
 // Delete 删除部门。
@@ -128,27 +144,27 @@ func (s *deptService) Update(req *dto.UpdateDeptRequest, operatorID uint) error 
 // 存在子部门时拒绝删除：直接删父节点会让子部门的 parent_id 悬空，
 // 而 FindTree 从 parent_id=0 递归构建，这棵子树会「从界面上消失」，
 // 数据却还在库里，既看不见也删不掉，成为孤儿数据。
-func (s *deptService) Delete(id uint) error {
-	children, err := s.deptRepo.CountByParentID(id)
+func (s *deptService) Delete(tenantID, id uint) error {
+	children, err := s.deptRepo.CountByParentID(tenantID, id)
 	if err != nil {
 		return err
 	}
 	if children > 0 {
 		return ErrDeptHasChildren
 	}
-	return s.deptRepo.Delete(id)
+	return s.deptRepo.Delete(tenantID, id)
 }
 
-func (s *deptService) FindByID(id uint) (interface{}, error) {
-	dept, err := s.deptRepo.FindByID(id)
+func (s *deptService) FindByID(tenantID, id uint) (interface{}, error) {
+	dept, err := s.deptRepo.FindByID(tenantID, id)
 	if err != nil {
 		return nil, common.NotFoundOrErr(err, "部门不存在")
 	}
 	return dept, nil
 }
 
-func (s *deptService) FindTree() ([]model.SysDept, error) {
-	depts, err := s.deptRepo.FindAll()
+func (s *deptService) FindTree(tenantID uint) ([]model.SysDept, error) {
+	depts, err := s.deptRepo.FindAll(tenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -157,10 +173,12 @@ func (s *deptService) FindTree() ([]model.SysDept, error) {
 
 // buildDeptTree 把扁平部门列表组装成树。
 //
-// 实现已抽到 common.BuildTree（O(n) 的 map 索引版本），
-// 与菜单共用同一份逻辑，避免两处各修一遍。
+// 用 BuildTreeForest 而不是 BuildTree：按租户过滤后，父节点**合法地**可能
+// 不在结果集里（历史数据的父部门仍留在平台级 tenant_id=0，见该函数注释），
+// 此时 BuildTree 会返回空树，表现为「部门管理页一片空白」。
+// 把这类节点提升为根，层级关系不丢，只是多出几个顶层节点。
 func buildDeptTree(depts []model.SysDept, parentID uint) []model.SysDept {
-	return common.BuildTree(depts, parentID,
+	return common.BuildTreeForest(depts, parentID,
 		func(d model.SysDept) uint { return d.ID },
 		func(d model.SysDept) uint { return d.ParentID },
 		func(d *model.SysDept, children []model.SysDept) { d.Children = children },
