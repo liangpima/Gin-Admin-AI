@@ -58,7 +58,9 @@ function filterAsyncRoutes(menus: MenuItem[]): AppRoute[] {
     const visibleChildren = (menu.children || []).filter((c) => c.type !== 2)
     const componentPath = menu.component
       ? viewModules[`/src/views/${menu.component}.vue`]
-      : (visibleChildren.length > 0 ? Layout : undefined)
+      : visibleChildren.length > 0
+        ? Layout
+        : undefined
 
     if (!componentPath) return
 

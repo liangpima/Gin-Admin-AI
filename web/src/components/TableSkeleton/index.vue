@@ -5,11 +5,14 @@
 </template>
 
 <script setup lang="ts">
-withDefaults(defineProps<{
-  rows?: number
-}>(), {
-  rows: 5,
-})
+withDefaults(
+  defineProps<{
+    rows?: number
+  }>(),
+  {
+    rows: 5,
+  },
+)
 </script>
 
 <style lang="scss" scoped>

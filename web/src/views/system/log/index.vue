@@ -8,7 +8,12 @@
               <el-row :gutter="16">
                 <el-col :xs="24" :sm="12" :md="8">
                   <el-form-item label="模块标题">
-                    <el-input v-model="opQuery.title" placeholder="请输入" clearable @keyup.enter="loadOpLogs" />
+                    <el-input
+                      v-model="opQuery.title"
+                      placeholder="请输入"
+                      clearable
+                      @keyup.enter="loadOpLogs"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :sm="12" :md="8">
@@ -24,10 +29,17 @@
             <el-table-column prop="title" label="模块标题" width="100" />
             <el-table-column prop="operatorName" label="操作人" width="90" />
             <el-table-column prop="requestMethod" label="请求方法" width="100" />
-            <el-table-column prop="requestUrl" label="请求URL" min-width="150" show-overflow-tooltip />
+            <el-table-column
+              prop="requestUrl"
+              label="请求URL"
+              min-width="150"
+              show-overflow-tooltip
+            />
             <el-table-column prop="status" label="状态" width="70">
               <template #default="{ row }">
-                <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{ row.status === 1 ? '成功' : '失败' }}</el-tag>
+                <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{
+                  row.status === 1 ? '成功' : '失败'
+                }}</el-tag>
               </template>
             </el-table-column>
             <el-table-column prop="ip" label="IP" width="120" />
@@ -37,12 +49,12 @@
             </el-table-column>
           </el-table>
           <Pagination
-        v-model:page="opQuery.page"
-        :total="opTotal"
-        layout="total, prev, pager, next"
-        :background="false"
-        @pagination="loadOpLogs"
-      />
+            v-model:page="opQuery.page"
+            :total="opTotal"
+            layout="total, prev, pager, next"
+            :background="false"
+            @pagination="loadOpLogs"
+          />
         </el-tab-pane>
 
         <el-tab-pane label="登录日志" name="login">
@@ -51,7 +63,12 @@
               <el-row :gutter="16">
                 <el-col :xs="24" :sm="12" :md="8">
                   <el-form-item label="用户名">
-                    <el-input v-model="loginQuery.username" placeholder="请输入" clearable @keyup.enter="loadLoginLogs" />
+                    <el-input
+                      v-model="loginQuery.username"
+                      placeholder="请输入"
+                      clearable
+                      @keyup.enter="loadLoginLogs"
+                    />
                   </el-form-item>
                 </el-col>
                 <el-col :xs="24" :sm="12" :md="8">
@@ -70,7 +87,9 @@
             <el-table-column prop="os" label="操作系统" width="120" />
             <el-table-column prop="status" label="状态" width="70">
               <template #default="{ row }">
-                <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{ row.status === 1 ? '成功' : '失败' }}</el-tag>
+                <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{
+                  row.status === 1 ? '成功' : '失败'
+                }}</el-tag>
               </template>
             </el-table-column>
             <el-table-column prop="msg" label="消息" min-width="100" show-overflow-tooltip />
@@ -79,12 +98,12 @@
             </el-table-column>
           </el-table>
           <Pagination
-        v-model:page="loginQuery.page"
-        :total="loginTotal"
-        layout="total, prev, pager, next"
-        :background="false"
-        @pagination="loadLoginLogs"
-      />
+            v-model:page="loginQuery.page"
+            :total="loginTotal"
+            layout="total, prev, pager, next"
+            :background="false"
+            @pagination="loadLoginLogs"
+          />
         </el-tab-pane>
       </el-tabs>
     </el-card>
@@ -93,7 +112,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { getOperationLogs, getLoginLogs , type OperationLogItem, LoginLogItem} from '@/api/log'
+import { getOperationLogs, getLoginLogs, type OperationLogItem, LoginLogItem } from '@/api/log'
 import { formatDateTime } from '@/utils/format'
 
 const activeTab = ref('operation')
@@ -114,7 +133,9 @@ async function loadOpLogs() {
     const res = await getOperationLogs(opQuery)
     opLogs.value = res.data.list
     opTotal.value = res.data.total
-  } finally { opLoading.value = false }
+  } finally {
+    opLoading.value = false
+  }
 }
 
 async function loadLoginLogs() {
@@ -123,7 +144,9 @@ async function loadLoginLogs() {
     const res = await getLoginLogs(loginQuery)
     loginLogs.value = res.data.list
     loginTotal.value = res.data.total
-  } finally { loginLoading.value = false }
+  } finally {
+    loginLoading.value = false
+  }
 }
 
 function handleTabChange() {
@@ -131,7 +154,9 @@ function handleTabChange() {
   else loadLoginLogs()
 }
 
-onMounted(() => { loadOpLogs() })
+onMounted(() => {
+  loadOpLogs()
+})
 </script>
 
 <style lang="scss" scoped>

@@ -27,7 +27,12 @@
           </div>
         </el-form-item>
         <el-form-item label="网站描述" prop="description">
-          <el-input v-model="form.description" type="textarea" :rows="3" placeholder="请输入网站描述" />
+          <el-input
+            v-model="form.description"
+            type="textarea"
+            :rows="3"
+            placeholder="请输入网站描述"
+          />
         </el-form-item>
         <el-form-item label="版权信息" prop="copyright">
           <el-input v-model="form.copyright" placeholder="请输入版权信息" />
@@ -62,7 +67,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, type FormInstance } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { getConfigByPrefix, batchSaveConfig , type ConfigItem } from '@/api/config'
+import { getConfigByPrefix, batchSaveConfig, type ConfigItem } from '@/api/config'
 import ImagePicker from '@/components/ImagePicker/index.vue'
 
 const PREFIX = 'site.'
@@ -116,7 +121,7 @@ async function loadData() {
         if (field === 'memberIdDigits') {
           val = parseInt(val, 10) || 6
         }
-        ;formValues[field] = val
+        formValues[field] = val
       }
     })
   } finally {

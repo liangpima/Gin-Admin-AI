@@ -49,7 +49,14 @@ export interface PointsLogItem {
   createdAt: string
 }
 
-export function getMemberList(params: { phone?: string; nickname?: string; levelId?: number; status?: number; page: number; pageSize: number }) {
+export function getMemberList(params: {
+  phone?: string
+  nickname?: string
+  levelId?: number
+  status?: number
+  page: number
+  pageSize: number
+}) {
   return http.get<Result<PageResult<MemberItem>>>('/member/list', { params })
 }
 
@@ -171,6 +178,11 @@ export function deleteMemberTag(id: number) {
   return http.delete<Result>(`/member/tag/${id}`)
 }
 
-export function getPointsLogList(params: { memberId?: number; type?: number; page: number; pageSize: number }) {
+export function getPointsLogList(params: {
+  memberId?: number
+  type?: number
+  page: number
+  pageSize: number
+}) {
   return http.get<Result<PageResult<PointsLogItem>>>('/member/points/list', { params })
 }

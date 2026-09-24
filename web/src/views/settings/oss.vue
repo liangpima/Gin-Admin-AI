@@ -18,9 +18,15 @@
         </el-form-item>
         <el-form-item label="Endpoint" prop="endpoint">
           <el-input v-model="form.endpoint" placeholder="请输入Endpoint" />
-          <div class="form-tip" v-if="form.type === 'aliyun'">阿里云：如 oss-cn-hangzhou.aliyuncs.com</div>
-          <div class="form-tip" v-else-if="form.type === 'tencent'">腾讯云：填写 Region，如 ap-guangzhou</div>
-          <div class="form-tip" v-else-if="form.type === 'minio'">MinIO：如 localhost:9000 或 minio.example.com:9000</div>
+          <div class="form-tip" v-if="form.type === 'aliyun'">
+            阿里云：如 oss-cn-hangzhou.aliyuncs.com
+          </div>
+          <div class="form-tip" v-else-if="form.type === 'tencent'">
+            腾讯云：填写 Region，如 ap-guangzhou
+          </div>
+          <div class="form-tip" v-else-if="form.type === 'minio'">
+            MinIO：如 localhost:9000 或 minio.example.com:9000
+          </div>
           <div class="form-tip" v-else>请输入 Endpoint</div>
         </el-form-item>
         <el-form-item label="Bucket" prop="bucket">
@@ -48,7 +54,9 @@
             active-text="开启"
             inactive-text="关闭"
           />
-          <div class="form-tip">开启后所有上传文件均在本地备份一份；关闭后上传完成自动删除本地文件</div>
+          <div class="form-tip">
+            开启后所有上传文件均在本地备份一份；关闭后上传完成自动删除本地文件
+          </div>
         </el-form-item>
       </el-form>
     </el-card>
@@ -58,7 +66,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, type FormInstance } from 'element-plus'
-import { getConfigByPrefix, batchSaveConfig , type ConfigItem } from '@/api/config'
+import { getConfigByPrefix, batchSaveConfig, type ConfigItem } from '@/api/config'
 
 const PREFIX = 'oss.'
 const loading = ref(false)
@@ -98,7 +106,7 @@ async function loadData() {
     list.forEach((item) => {
       const field = fieldMap[item.key?.replace(PREFIX, '')]
       if (field) {
-        ;formValues[field] = item.value || ''
+        formValues[field] = item.value || ''
       }
     })
   } finally {

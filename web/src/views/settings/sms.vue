@@ -7,7 +7,12 @@
       </el-tabs>
 
       <template v-if="activeTab === 'config'">
-        <el-form ref="formRef" :model="form" label-width="120px" style="max-width: 600px; padding-bottom: 10px">
+        <el-form
+          ref="formRef"
+          :model="form"
+          label-width="120px"
+          style="max-width: 600px; padding-bottom: 10px"
+        >
           <el-form-item label="短信状态">
             <el-radio-group v-model="form.status">
               <el-radio value="1">开启</el-radio>
@@ -25,7 +30,11 @@
             <el-input v-model="form.access_key" placeholder="请输入AccessKey ID" show-password />
           </el-form-item>
           <el-form-item label="AccessKey Secret">
-            <el-input v-model="form.secret_key" placeholder="请输入AccessKey Secret" show-password />
+            <el-input
+              v-model="form.secret_key"
+              placeholder="请输入AccessKey Secret"
+              show-password
+            />
           </el-form-item>
           <el-form-item label="短信签名">
             <el-input v-model="form.sign_name" placeholder="请输入短信签名" />
@@ -35,18 +44,14 @@
         <el-divider content-position="left">短信模板设置</el-divider>
 
         <div class="template-list">
-            <div v-for="tpl in templates.filter(t => !t.hidden)" :key="tpl.key" class="template-item">
+          <div
+            v-for="tpl in templates.filter((t) => !t.hidden)"
+            :key="tpl.key"
+            class="template-item"
+          >
             <span class="template-label">{{ tpl.label }}</span>
-            <el-input
-              v-model="tpl.value"
-              :placeholder="tpl.placeholder"
-              class="template-input"
-            />
-            <el-switch
-              v-model="tpl.enabled"
-              active-text="开启"
-              inactive-text="关闭"
-            />
+            <el-input v-model="tpl.value" :placeholder="tpl.placeholder" class="template-input" />
+            <el-switch v-model="tpl.enabled" active-text="开启" inactive-text="关闭" />
             <span class="template-hint">{{ tpl.hint }}</span>
           </div>
         </div>
@@ -64,7 +69,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, type FormInstance } from 'element-plus'
-import { getConfigByPrefix, batchSaveConfig , type ConfigItem } from '@/api/config'
+import { getConfigByPrefix, batchSaveConfig, type ConfigItem } from '@/api/config'
 
 const PREFIX = 'sms.'
 const activeTab = ref('config')
@@ -97,58 +102,93 @@ interface TemplateItem {
 
 const templates = reactive<TemplateItem[]>([
   {
-    key: 'tpl_verify_code', label: '短信验证码', value: '',
-    enabled: false, placeholder: '请填写模板编号',
+    key: 'tpl_verify_code',
+    label: '短信验证码',
+    value: '',
+    enabled: false,
+    placeholder: '请填写模板编号',
     hint: '模板内容示例：您的验证码：${code}，该验证码5分钟内有效，请勿泄露于他人！',
   },
   {
-    key: 'tpl_order_paid', label: '订单支付成功', value: '',
-    enabled: false, placeholder: '请填写模板编号',
+    key: 'tpl_order_paid',
+    label: '订单支付成功',
+    value: '',
+    enabled: false,
+    placeholder: '请填写模板编号',
     hint: '模板内容示例：订单支付成功，订单号：${ordernum}，我们会尽快为您发货。',
   },
   {
-    key: 'tpl_order_shipped', label: '订单发货通知', value: '',
-    enabled: false, placeholder: '请填写模板编号',
+    key: 'tpl_order_shipped',
+    label: '订单发货通知',
+    value: '',
+    enabled: false,
+    placeholder: '请填写模板编号',
     hint: '模板内容示例：您的订单${ordernum}已发货，快递公司：${express_com}，快递单号：${express_no}，请留意查收。',
   },
   {
-    key: 'tpl_group_success', label: '拼团成功通知', value: '',
-    enabled: false, placeholder: '请填写模板编号',
+    key: 'tpl_group_success',
+    label: '拼团成功通知',
+    value: '',
+    enabled: false,
+    placeholder: '请填写模板编号',
     hint: '模板内容示例：订单${ordernum}拼团成功，我们会尽快为您发货。',
   },
   {
-    key: 'tpl_refund_success', label: '退款成功通知', value: '',
-    enabled: false, placeholder: '请填写模板编号',
+    key: 'tpl_refund_success',
+    label: '退款成功通知',
+    value: '',
+    enabled: false,
+    placeholder: '请填写模板编号',
     hint: '模板内容示例：您的订单${ordernum}退款成功，退款金额：${money}元，请留意查收。',
   },
   {
-    key: 'tpl_refund_reject', label: '退款驳回通知', value: '',
-    enabled: false, placeholder: '请填写模板编号',
+    key: 'tpl_refund_reject',
+    label: '退款驳回通知',
+    value: '',
+    enabled: false,
+    placeholder: '请填写模板编号',
     hint: '模板内容示例：抱歉您的订单${ordernum}退款申请失败，原因：${reason}。',
   },
   {
-    key: 'tpl_withdraw_success', label: '提现成功通知', value: '',
-    enabled: false, placeholder: '请填写模板编号',
+    key: 'tpl_withdraw_success',
+    label: '提现成功通知',
+    value: '',
+    enabled: false,
+    placeholder: '请填写模板编号',
     hint: '模板内容示例：提现成功，打款金额：${money}，请留意查收。',
   },
   {
-    key: 'tpl_withdraw_fail', label: '提现失败通知', value: '',
-    enabled: false, placeholder: '请填写模板编号',
+    key: 'tpl_withdraw_fail',
+    label: '提现失败通知',
+    value: '',
+    enabled: false,
+    placeholder: '请填写模板编号',
     hint: '模板内容示例：抱歉您的提现申请失败，原因：${reason}。',
   },
   {
-    key: 'tpl_commission', label: '分销成功提醒', value: '',
-    enabled: false, placeholder: '请填写模板编号',
+    key: 'tpl_commission',
+    label: '分销成功提醒',
+    value: '',
+    enabled: false,
+    placeholder: '请填写模板编号',
     hint: '模板内容示例：成功获得佣金：${money}元，请留意查收。',
   },
   {
-    key: 'tpl_dining_success', label: '餐饮预定成功提醒', value: '',
-    enabled: false, placeholder: '请填写模板编号', hidden: true,
+    key: 'tpl_dining_success',
+    label: '餐饮预定成功提醒',
+    value: '',
+    enabled: false,
+    placeholder: '请填写模板编号',
+    hidden: true,
     hint: '模板内容示例：预定成功，餐厅名称：${restaurant_name}，订位信息：${table}，预定时间：${time_range}，请准时到达。',
   },
   {
-    key: 'tpl_dining_fail', label: '餐饮预定失败提醒', value: '',
-    enabled: false, placeholder: '请填写模板编号', hidden: true,
+    key: 'tpl_dining_fail',
+    label: '餐饮预定失败提醒',
+    value: '',
+    enabled: false,
+    placeholder: '请填写模板编号',
+    hidden: true,
     hint: '模板内容示例：抱歉您的预定申请失败，餐厅名称：${restaurant_name}，请重新预定。',
   },
 ])
@@ -169,7 +209,7 @@ async function loadData() {
     list.forEach((item) => {
       const rawKey = item.key?.replace(PREFIX, '')
       if (configFields[rawKey]) {
-        ;formValues[configFields[rawKey]] = item.value || ''
+        formValues[configFields[rawKey]] = item.value || ''
       }
       const tpl = templates.find((t) => t.key === rawKey)
       if (tpl) {

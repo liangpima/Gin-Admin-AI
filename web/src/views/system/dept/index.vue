@@ -8,7 +8,14 @@
         </div>
       </template>
 
-      <el-table :data="tableData" v-loading="loading" border row-key="id" :tree-props="{ children: 'children' }" default-expand-all>
+      <el-table
+        :data="tableData"
+        v-loading="loading"
+        border
+        row-key="id"
+        :tree-props="{ children: 'children' }"
+        default-expand-all
+      >
         <el-table-column prop="name" label="部门名称" min-width="120" />
         <el-table-column prop="leader" label="负责人" min-width="80" />
         <el-table-column prop="phone" label="联系电话" min-width="100" />
@@ -22,18 +29,36 @@
         </el-table-column>
         <el-table-column label="操作" width="180">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleAdd({ parentId: row.id })">新增</el-button>
-            <el-button type="primary" link size="small" @click="handleEdit(row as DeptItem)">编辑</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row as DeptItem)">删除</el-button>
+            <el-button type="primary" link size="small" @click="handleAdd({ parentId: row.id })"
+              >新增</el-button
+            >
+            <el-button type="primary" link size="small" @click="handleEdit(row as DeptItem)"
+              >编辑</el-button
+            >
+            <el-button type="danger" link size="small" @click="handleDelete(row as DeptItem)"
+              >删除</el-button
+            >
           </template>
         </el-table-column>
       </el-table>
     </el-card>
 
-    <FormDialog v-model="dialogVisible" :title="dialogTitle" :loading="submitLoading" @submit="handleSubmit">
+    <FormDialog
+      v-model="dialogVisible"
+      :title="dialogTitle"
+      :loading="submitLoading"
+      @submit="handleSubmit"
+    >
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="80px">
         <el-form-item label="上级部门">
-          <el-tree-select v-model="form.parentId" :data="deptOptions" :props="{ label: 'name', value: 'id' } as any" placeholder="请选择上级部门" check-strictly clearable />
+          <el-tree-select
+            v-model="form.parentId"
+            :data="deptOptions"
+            :props="{ label: 'name', value: 'id' } as any"
+            placeholder="请选择上级部门"
+            check-strictly
+            clearable
+          />
         </el-form-item>
         <el-form-item label="部门名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入部门名称" />

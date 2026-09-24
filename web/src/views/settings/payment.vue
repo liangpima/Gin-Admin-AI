@@ -36,7 +36,12 @@
               <div class="el-upload__tip">支持 .pem / .crt / .cer 格式，大小不超过 2MB</div>
             </template>
           </el-upload>
-          <el-input v-if="form.wechat_cert_pem" v-model="form.wechat_cert_pem" disabled style="margin-top: 8px" />
+          <el-input
+            v-if="form.wechat_cert_pem"
+            v-model="form.wechat_cert_pem"
+            disabled
+            style="margin-top: 8px"
+          />
         </el-form-item>
         <el-form-item label="证书密钥" prop="wechat_key_pem">
           <el-upload
@@ -51,23 +56,42 @@
               <div class="el-upload__tip">支持 .pem / .key 格式，大小不超过 2MB</div>
             </template>
           </el-upload>
-          <el-input v-if="form.wechat_key_pem" v-model="form.wechat_key_pem" disabled style="margin-top: 8px" />
+          <el-input
+            v-if="form.wechat_key_pem"
+            v-model="form.wechat_key_pem"
+            disabled
+            style="margin-top: 8px"
+          />
         </el-form-item>
         <el-divider content-position="left">支付宝</el-divider>
         <el-form-item label="支付宝AppID" prop="alipay_app_id">
           <el-input v-model="form.alipay_app_id" placeholder="请输入支付宝AppID" />
         </el-form-item>
         <el-form-item label="应用私钥" prop="alipay_key">
-          <el-input v-model="form.alipay_key" type="textarea" :rows="3" placeholder="请输入支付宝应用私钥" show-password />
+          <el-input
+            v-model="form.alipay_key"
+            type="textarea"
+            :rows="3"
+            placeholder="请输入支付宝应用私钥"
+            show-password
+          />
           <div class="form-tip">在开放平台「应用详情」>「接口加签方式」中获取</div>
         </el-form-item>
         <el-form-item label="支付宝公钥" prop="alipay_public_key">
-          <el-input v-model="form.alipay_public_key" type="textarea" :rows="3" placeholder="请输入支付宝公钥" />
+          <el-input
+            v-model="form.alipay_public_key"
+            type="textarea"
+            :rows="3"
+            placeholder="请输入支付宝公钥"
+          />
           <div class="form-tip">用于验证支付宝回调签名，非应用公钥</div>
         </el-form-item>
         <el-divider content-position="left">通用设置</el-divider>
         <el-form-item label="支付回调地址" prop="notify_url">
-          <el-input v-model="form.notify_url" placeholder="https://your-domain.com/api/v1/pay/notify/wechat" />
+          <el-input
+            v-model="form.notify_url"
+            placeholder="https://your-domain.com/api/v1/pay/notify/wechat"
+          />
           <div class="form-tip">微信和支付宝回调统一地址，需公网可访问</div>
         </el-form-item>
         <el-form-item label="支付完成跳转" prop="return_url">
@@ -83,7 +107,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, type UploadFile, type FormInstance } from 'element-plus'
 import { Upload } from '@element-plus/icons-vue'
-import { getConfigByPrefix, batchSaveConfig, uploadCert , type ConfigItem } from '@/api/config'
+import { getConfigByPrefix, batchSaveConfig, uploadCert, type ConfigItem } from '@/api/config'
 
 const PREFIX = 'pay.'
 const loading = ref(false)
@@ -131,7 +155,7 @@ async function loadData() {
     list.forEach((item) => {
       const field = fieldMap[item.key?.replace(PREFIX, '')]
       if (field) {
-        ;formValues[field] = item.value || ''
+        formValues[field] = item.value || ''
       }
     })
   } finally {
@@ -149,7 +173,7 @@ async function handleCertUpload(file: UploadFile, field: string) {
   }
   try {
     const res = await uploadCert(rawFile)
-    ;formValues[field] = res.data.path
+    formValues[field] = res.data.path
     ElMessage.success('证书上传成功')
   } catch {
     ElMessage.error('证书上传失败')
@@ -157,7 +181,7 @@ async function handleCertUpload(file: UploadFile, field: string) {
 }
 
 function handleCertRemove(field: string) {
-  ;formValues[field] = ''
+  formValues[field] = ''
 }
 
 async function handleSave() {

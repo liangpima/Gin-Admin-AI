@@ -13,12 +13,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-const props = withDefaults(defineProps<{
-  iconClass: string
-  className?: string
-}>(), {
-  className: '',
-})
+const props = withDefaults(
+  defineProps<{
+    iconClass: string
+    className?: string
+  }>(),
+  {
+    className: '',
+  },
+)
 
 const isExternal = computed(() => isExternalPath(props.iconClass))
 

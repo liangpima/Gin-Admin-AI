@@ -17,24 +17,27 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-const props = withDefaults(defineProps<{
-  total: number
-  page?: number
-  limit?: number
-  pageSizes?: number[]
-  pagerCount?: number
-  layout?: string
-  background?: boolean
-  hidden?: boolean
-}>(), {
-  page: 1,
-  limit: 10,
-  pageSizes: () => [10, 20, 50, 100],
-  pagerCount: window.innerWidth < 992 ? 5 : 7,
-  layout: 'total, sizes, prev, pager, next, jumper',
-  background: true,
-  hidden: false,
-})
+const props = withDefaults(
+  defineProps<{
+    total: number
+    page?: number
+    limit?: number
+    pageSizes?: number[]
+    pagerCount?: number
+    layout?: string
+    background?: boolean
+    hidden?: boolean
+  }>(),
+  {
+    page: 1,
+    limit: 10,
+    pageSizes: () => [10, 20, 50, 100],
+    pagerCount: window.innerWidth < 992 ? 5 : 7,
+    layout: 'total, sizes, prev, pager, next, jumper',
+    background: true,
+    hidden: false,
+  },
+)
 
 const emit = defineEmits<{
   'update:page': [val: number]

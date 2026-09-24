@@ -13,7 +13,9 @@
         <el-table-column prop="value" label="参数键值" min-width="100" show-overflow-tooltip />
         <el-table-column prop="type" label="系统内置" width="90">
           <template #default="{ row }">
-            <el-tag :type="row.type === 0 ? 'danger' : 'info'" size="small">{{ row.type === 0 ? '是' : '否' }}</el-tag>
+            <el-tag :type="row.type === 0 ? 'danger' : 'info'" size="small">{{
+              row.type === 0 ? '是' : '否'
+            }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="创建时间" width="170">
@@ -21,8 +23,12 @@
         </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row as ConfigItem)">编辑</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row as ConfigItem)">删除</el-button>
+            <el-button type="primary" link size="small" @click="handleEdit(row as ConfigItem)"
+              >编辑</el-button
+            >
+            <el-button type="danger" link size="small" @click="handleDelete(row as ConfigItem)"
+              >删除</el-button
+            >
           </template>
         </el-table-column>
       </el-table>
@@ -36,13 +42,26 @@
       />
     </el-card>
 
-    <FormDialog v-model="dialogVisible" :title="dialogTitle" :loading="submitLoading" @submit="handleSubmit">
+    <FormDialog
+      v-model="dialogVisible"
+      :title="dialogTitle"
+      :loading="submitLoading"
+      @submit="handleSubmit"
+    >
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="80px">
-        <el-form-item label="参数名称" prop="name"><el-input v-model="form.name" placeholder="请输入参数名称" /></el-form-item>
-        <el-form-item label="参数键名" prop="key"><el-input v-model="form.key" :disabled="!!form.id" placeholder="请输入参数键名" /></el-form-item>
-        <el-form-item label="参数键值" prop="value"><el-input v-model="form.value" type="textarea" placeholder="请输入参数键值" /></el-form-item>
+        <el-form-item label="参数名称" prop="name"
+          ><el-input v-model="form.name" placeholder="请输入参数名称"
+        /></el-form-item>
+        <el-form-item label="参数键名" prop="key"
+          ><el-input v-model="form.key" :disabled="!!form.id" placeholder="请输入参数键名"
+        /></el-form-item>
+        <el-form-item label="参数键值" prop="value"
+          ><el-input v-model="form.value" type="textarea" placeholder="请输入参数键值"
+        /></el-form-item>
         <el-form-item label="系统内置">
-          <el-radio-group v-model="form.type"><el-radio :value="0">是</el-radio><el-radio :value="1">否</el-radio></el-radio-group>
+          <el-radio-group v-model="form.type"
+            ><el-radio :value="0">是</el-radio><el-radio :value="1">否</el-radio></el-radio-group
+          >
         </el-form-item>
       </el-form>
     </FormDialog>

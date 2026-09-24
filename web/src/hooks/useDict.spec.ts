@@ -62,7 +62,8 @@ describe('loadDict 加载与缓存', () => {
     // 表格里几十个 DictTag 同时挂载就是这个场景：
     // 不去重的话一次列表渲染会打出几十个请求
     getDictDataByType.mockImplementation(
-      () => new Promise((resolve) => setTimeout(() => resolve({ data: [dictItem('正常', 1)] }), 10)),
+      () =>
+        new Promise((resolve) => setTimeout(() => resolve({ data: [dictItem('正常', 1)] }), 10)),
     )
 
     const [a, b, c] = await Promise.all([
@@ -84,10 +85,7 @@ describe('loadDict 加载与缓存', () => {
 
     const failed = await loadDict('sys_user_status')
     expect(failed).toEqual([])
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('sys_user_status'),
-      expect.anything(),
-    )
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('sys_user_status'), expect.anything())
     warn.mockRestore()
 
     // 关键：失败不能进缓存。进了缓存意味着字典故障会被「记住」，

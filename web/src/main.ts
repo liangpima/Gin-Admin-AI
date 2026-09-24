@@ -28,15 +28,19 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 
 app.mount('#app')
 
-getSiteInfo().then((res) => {
-  const logo = res.data?.['site.logo']
-  if (logo) {
-    const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement || document.createElement('link')
-    link.rel = 'shortcut icon'
-    link.type = 'image/x-icon'
-    link.href = logo
-    if (!link.parentNode) {
-      document.head.appendChild(link)
+getSiteInfo()
+  .then((res) => {
+    const logo = res.data?.['site.logo']
+    if (logo) {
+      const link =
+        (document.querySelector("link[rel~='icon']") as HTMLLinkElement) ||
+        document.createElement('link')
+      link.rel = 'shortcut icon'
+      link.type = 'image/x-icon'
+      link.href = logo
+      if (!link.parentNode) {
+        document.head.appendChild(link)
+      }
     }
-  }
-}).catch(() => {})
+  })
+  .catch(() => {})

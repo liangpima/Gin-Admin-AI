@@ -8,11 +8,7 @@
         <el-icon class="action-trigger"><MoreFilled /></el-icon>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item
-              v-for="action in actions"
-              :key="action.label"
-              :command="action.label"
-            >
+            <el-dropdown-item v-for="action in actions" :key="action.label" :command="action.label">
               <el-icon :style="{ color: action.color }"><component :is="action.icon" /></el-icon>
               <span>{{ action.label }}</span>
             </el-dropdown-item>

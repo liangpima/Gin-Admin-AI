@@ -15,7 +15,9 @@
     <span class="click-captcha__trigger-text">
       {{ verified ? '已完成人机验证' : '点击进行人机验证' }}
     </span>
-    <el-button v-if="verified" link type="primary" size="small" @click.stop="reset">重新验证</el-button>
+    <el-button v-if="verified" link type="primary" size="small" @click.stop="reset"
+      >重新验证</el-button
+    >
   </div>
 
   <!-- 刻意不设 close-on-click-modal="false"：点遮罩关闭符合弹窗的通用预期，
@@ -53,7 +55,10 @@
           <span>{{ idx + 1 }}</span>
         </div>
 
-        <div v-if="result === 'success'" class="click-captcha__overlay click-captcha__overlay--success">
+        <div
+          v-if="result === 'success'"
+          class="click-captcha__overlay click-captcha__overlay--success"
+        >
           <el-icon :size="34"><CircleCheck /></el-icon>
           <span class="click-captcha__overlay-msg">验证成功</span>
         </div>
@@ -74,7 +79,8 @@
             :key="idx"
             class="click-captcha__char"
             :class="{ 'is-clicked': idx < clickedPoints.length }"
-          >{{ ch }}</span>
+            >{{ ch }}</span
+          >
         </template>
       </div>
 
@@ -87,7 +93,9 @@
           :disabled="loading"
           title="换一张"
           @click="refresh"
-        >⟳</button>
+        >
+          ⟳
+        </button>
         <div class="click-captcha__refresh-line click-captcha__refresh-line--r"></div>
       </div>
     </div>

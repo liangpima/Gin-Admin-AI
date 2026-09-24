@@ -31,15 +31,18 @@ import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 import type { IDomEditor, IToolbarConfig } from '@wangeditor/editor'
 import ImagePicker from '@/components/ImagePicker/index.vue'
 
-const props = withDefaults(defineProps<{
-  modelValue?: string
-  mode?: 'default' | 'simple'
-  height?: number
-}>(), {
-  modelValue: '',
-  mode: 'default',
-  height: 350,
-})
+const props = withDefaults(
+  defineProps<{
+    modelValue?: string
+    mode?: 'default' | 'simple'
+    height?: number
+  }>(),
+  {
+    modelValue: '',
+    mode: 'default',
+    height: 350,
+  },
+)
 
 const emit = defineEmits<{
   (e: 'update:modelValue', value: string): void
@@ -94,7 +97,7 @@ watch(
     if (val !== valueHtml.value) {
       valueHtml.value = val || ''
     }
-  }
+  },
 )
 
 watch(valueHtml, (val) => {

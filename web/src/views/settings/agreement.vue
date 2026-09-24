@@ -5,19 +5,39 @@
         <el-row :gutter="16">
           <el-col :xs="24" :sm="12" :md="8" :lg="6">
             <el-form-item label="标题">
-              <el-input v-model="queryParams.name" placeholder="请输入标题" clearable @keyup.enter="handleSearch" />
+              <el-input
+                v-model="queryParams.name"
+                placeholder="请输入标题"
+                clearable
+                @keyup.enter="handleSearch"
+              />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="8" :lg="6">
             <el-form-item label="类型">
-              <el-select v-model="queryParams.type" placeholder="全部" clearable style="width: 100%">
-                <el-option v-for="item in typeOptions" :key="item.value" :label="item.label" :value="item.value" />
+              <el-select
+                v-model="queryParams.type"
+                placeholder="全部"
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in typeOptions"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
               </el-select>
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="8" :lg="6">
             <el-form-item label="状态">
-              <el-select v-model="queryParams.status" placeholder="全部" clearable style="width: 100%">
+              <el-select
+                v-model="queryParams.status"
+                placeholder="全部"
+                clearable
+                style="width: 100%"
+              >
                 <el-option label="正常" :value="1" />
                 <el-option label="停用" :value="0" />
               </el-select>
@@ -52,7 +72,12 @@
         <el-table-column prop="sort" label="排序" width="70" />
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
-            <el-switch v-model="row.status" :active-value="1" :inactive-value="0" @change="handleStatusChange(row as AgreementItem)" />
+            <el-switch
+              v-model="row.status"
+              :active-value="1"
+              :inactive-value="0"
+              @change="handleStatusChange(row as AgreementItem)"
+            />
           </template>
         </el-table-column>
         <el-table-column label="创建时间" width="170">
@@ -60,8 +85,12 @@
         </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row as AgreementItem)">编辑</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row as AgreementItem)">删除</el-button>
+            <el-button type="primary" link size="small" @click="handleEdit(row as AgreementItem)"
+              >编辑</el-button
+            >
+            <el-button type="danger" link size="small" @click="handleDelete(row as AgreementItem)"
+              >删除</el-button
+            >
           </template>
         </el-table-column>
       </el-table>
@@ -77,14 +106,26 @@
       />
     </el-card>
 
-    <FormDialog v-model="dialogVisible" :title="dialogTitle" width="800px" top="5vh" :loading="submitLoading" @submit="handleSubmit">
+    <FormDialog
+      v-model="dialogVisible"
+      :title="dialogTitle"
+      width="800px"
+      top="5vh"
+      :loading="submitLoading"
+      @submit="handleSubmit"
+    >
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="80px">
         <el-form-item label="标题" prop="title">
           <el-input v-model="form.title" placeholder="请输入标题" />
         </el-form-item>
         <el-form-item label="类型" prop="type">
           <el-select v-model="form.type" placeholder="请选择类型" style="width: 100%">
-            <el-option v-for="item in typeOptions" :key="item.value" :label="item.label" :value="item.value" />
+            <el-option
+              v-for="item in typeOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="排序">
@@ -235,7 +276,7 @@ const formRules = {
 
   .w-e-text video,
   .w-e-text iframe,
-  .w-e-text [data-w-e-type="video"],
+  .w-e-text [data-w-e-type='video'],
   .w-e-text .w-e-video-container,
   .w-e-text .w-e-video-mask,
   .w-e-text .w-e-video-wrapper {

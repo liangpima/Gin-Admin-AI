@@ -132,9 +132,13 @@ html.dark {
 
   // Box shadow
   --el-box-shadow: 0 6px 16px 0 rgba(0, 0, 0, 0.3);
-  --el-box-shadow-light: 0 3px 6px -4px rgba(0, 0, 0, 0.3), 0 6px 16px 0 rgba(0, 0, 0, 0.2), 0 9px 28px 8px rgba(0, 0, 0, 0.1);
+  --el-box-shadow-light:
+    0 3px 6px -4px rgba(0, 0, 0, 0.3), 0 6px 16px 0 rgba(0, 0, 0, 0.2),
+    0 9px 28px 8px rgba(0, 0, 0, 0.1);
   --el-box-shadow-lighter: 0 3px 6px -4px rgba(0, 0, 0, 0.3), 0 6px 16px 0 rgba(0, 0, 0, 0.2);
-  --el-box-shadow-dark: 0 3px 6px -4px rgba(0, 0, 0, 0.48), 0 6px 16px 0 rgba(0, 0, 0, 0.32), 0 9px 28px 8px rgba(0, 0, 0, 0.2);
+  --el-box-shadow-dark:
+    0 3px 6px -4px rgba(0, 0, 0, 0.48), 0 6px 16px 0 rgba(0, 0, 0, 0.32),
+    0 9px 28px 8px rgba(0, 0, 0, 0.2);
 
   // Disabled
   --el-disabled-bg-color: #1d1d1d;
@@ -187,7 +191,7 @@ html.dark {
   // Tabs
   --el-tabs__item-hover-color: #e5eaf3;
   --el-tabs__item-active-color: var(--el-color-primary);
-  --el-tabs__nav-wrap::after: #363637;
+  --el-tabs__nav-wrap: : after: #363637;
 
   // Breadcrumb
   --el-breadcrumb__inner-text-color: #a3a6ad;
@@ -212,9 +216,12 @@ html.dark {
   box-sizing: border-box;
 }
 
-html, body, #app {
+html,
+body,
+#app {
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 a {
@@ -290,7 +297,9 @@ a {
   }
 
   .peg {
-    box-shadow: 0 0 10px var(--el-color-primary), 0 0 5px var(--el-color-primary) !important;
+    box-shadow:
+      0 0 10px var(--el-color-primary),
+      0 0 5px var(--el-color-primary) !important;
   }
 }
 
@@ -413,7 +422,11 @@ a {
     overflow: hidden !important;
     word-break: break-word;
 
-    img, video, iframe, object, embed {
+    img,
+    video,
+    iframe,
+    object,
+    embed {
       max-width: 100% !important;
       height: auto !important;
     }
@@ -424,12 +437,13 @@ a {
 .w-e-video-container,
 .w-e-video-mask,
 .w-e-video-wrapper,
-[data-w-e-type="video"] {
+[data-w-e-type='video'] {
   max-width: 100% !important;
   width: 100% !important;
   display: block !important;
 
-  iframe, video {
+  iframe,
+  video {
     width: 100% !important;
     height: auto !important;
     aspect-ratio: 16 / 9;

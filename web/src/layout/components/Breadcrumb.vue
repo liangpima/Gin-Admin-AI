@@ -38,7 +38,11 @@ function handleLink(item: RouteLocationMatched) {
   }
 }
 
-watch(() => route.path, () => getBreadcrumbs(), { immediate: true })
+watch(
+  () => route.path,
+  () => getBreadcrumbs(),
+  { immediate: true },
+)
 </script>
 
 <style lang="scss" scoped>

@@ -5,24 +5,49 @@
         <el-row :gutter="16">
           <el-col :xs="24" :sm="12" :md="8" :lg="6">
             <el-form-item label="手机号">
-              <el-input v-model="queryParams.phone" placeholder="请输入手机号" clearable @keyup.enter="handleSearch" />
+              <el-input
+                v-model="queryParams.phone"
+                placeholder="请输入手机号"
+                clearable
+                @keyup.enter="handleSearch"
+              />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="8" :lg="6">
             <el-form-item label="昵称">
-              <el-input v-model="queryParams.nickname" placeholder="请输入昵称" clearable @keyup.enter="handleSearch" />
+              <el-input
+                v-model="queryParams.nickname"
+                placeholder="请输入昵称"
+                clearable
+                @keyup.enter="handleSearch"
+              />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="8" :lg="6">
             <el-form-item label="等级">
-              <el-select v-model="queryParams.levelId" placeholder="全部" clearable style="width: 100%">
-                <el-option v-for="level in levelList" :key="level.id" :label="level.name" :value="level.id" />
+              <el-select
+                v-model="queryParams.levelId"
+                placeholder="全部"
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="level in levelList"
+                  :key="level.id"
+                  :label="level.name"
+                  :value="level.id"
+                />
               </el-select>
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="8" :lg="6">
             <el-form-item label="状态">
-              <el-select v-model="queryParams.status" placeholder="全部" clearable style="width: 100%">
+              <el-select
+                v-model="queryParams.status"
+                placeholder="全部"
+                clearable
+                style="width: 100%"
+              >
                 <el-option label="正常" :value="1" />
                 <el-option label="停用" :value="0" />
               </el-select>
@@ -51,7 +76,9 @@
         <el-table-column prop="memberNo" label="会员编号" width="110" />
         <el-table-column label="头像" width="60">
           <template #default="{ row }">
-            <el-avatar :size="32" :src="row.avatar || undefined">{{ row.nickname?.charAt(0)?.toUpperCase() || row.username?.charAt(0)?.toUpperCase() }}</el-avatar>
+            <el-avatar :size="32" :src="row.avatar || undefined">{{
+              row.nickname?.charAt(0)?.toUpperCase() || row.username?.charAt(0)?.toUpperCase()
+            }}</el-avatar>
           </template>
         </el-table-column>
         <el-table-column prop="nickname" label="昵称" width="120" />
@@ -70,7 +97,12 @@
               @change="(val: number) => handleLevelChange(row as MemberRow, val)"
             >
               <el-option :label="'无等级'" :value="0" />
-              <el-option v-for="level in levelList" :key="level.id" :label="level.name" :value="level.id" />
+              <el-option
+                v-for="level in levelList"
+                :key="level.id"
+                :label="level.name"
+                :value="level.id"
+              />
             </el-select>
           </template>
         </el-table-column>
@@ -92,7 +124,12 @@
         <el-table-column prop="points" label="积分" width="80" align="right" />
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
-            <el-switch v-model="row.status" :active-value="1" :inactive-value="0" @change="handleStatusChange(row as MemberRow)" />
+            <el-switch
+              v-model="row.status"
+              :active-value="1"
+              :inactive-value="0"
+              @change="handleStatusChange(row as MemberRow)"
+            />
           </template>
         </el-table-column>
         <el-table-column label="注册时间" width="170">
@@ -100,8 +137,12 @@
         </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row as MemberRow)">编辑</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row as MemberRow)">删除</el-button>
+            <el-button type="primary" link size="small" @click="handleEdit(row as MemberRow)"
+              >编辑</el-button
+            >
+            <el-button type="danger" link size="small" @click="handleDelete(row as MemberRow)"
+              >删除</el-button
+            >
           </template>
         </el-table-column>
       </el-table>
@@ -117,7 +158,12 @@
       />
     </el-card>
 
-    <FormDialog v-model="dialogVisible" :title="dialogTitle" :loading="submitLoading" @submit="handleSubmit">
+    <FormDialog
+      v-model="dialogVisible"
+      :title="dialogTitle"
+      :loading="submitLoading"
+      @submit="handleSubmit"
+    >
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="80px">
         <el-form-item v-if="form.id && form.wechatOpenid" label="OpenID">
           <el-text type="info">{{ form.wechatOpenid }}</el-text>
@@ -151,16 +197,34 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item label="出生日期">
-          <el-date-picker v-model="form.birthday" type="date" value-format="YYYY-MM-DD" placeholder="请选择出生日期" style="width: 100%" />
+          <el-date-picker
+            v-model="form.birthday"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="请选择出生日期"
+            style="width: 100%"
+          />
         </el-form-item>
         <el-form-item label="等级">
           <el-select v-model="form.levelId" placeholder="请选择等级" style="width: 100%">
             <el-option :label="'无等级'" :value="0" />
-            <el-option v-for="level in levelList" :key="level.id" :label="level.name" :value="level.id" />
+            <el-option
+              v-for="level in levelList"
+              :key="level.id"
+              :label="level.name"
+              :value="level.id"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="标签">
-          <el-select v-model="form.tagIds" multiple collapse-tags collapse-tags-tooltip placeholder="请选择标签" style="width: 100%">
+          <el-select
+            v-model="form.tagIds"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="请选择标签"
+            style="width: 100%"
+          >
             <el-option v-for="tag in tagList" :key="tag.id" :label="tag.name" :value="tag.id" />
           </el-select>
         </el-form-item>

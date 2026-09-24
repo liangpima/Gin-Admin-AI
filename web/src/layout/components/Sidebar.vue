@@ -3,9 +3,16 @@
     <div class="logo">
       <div class="logo__icon">
         <img v-if="siteLogo" :src="siteLogo" class="logo__img" />
-        <svg v-else viewBox="0 0 32 32" width="24" height="24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect width="32" height="32" rx="8" fill="var(--el-color-primary)"/>
-          <path d="M8 16L16 8L24 16L16 24L8 16Z" fill="white" opacity="0.9"/>
+        <svg
+          v-else
+          viewBox="0 0 32 32"
+          width="24"
+          height="24"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <rect width="32" height="32" rx="8" fill="var(--el-color-primary)" />
+          <path d="M8 16L16 8L24 16L16 24L8 16Z" fill="white" opacity="0.9" />
         </svg>
       </div>
       <transition name="fade">
@@ -13,12 +20,7 @@
       </transition>
     </div>
     <el-scrollbar class="sidebar__menu-wrap">
-      <el-menu
-        :default-active="activeMenu"
-        :collapse="menuCollapse"
-        :unique-opened="true"
-        router
-      >
+      <el-menu :default-active="activeMenu" :collapse="menuCollapse" :unique-opened="true" router>
         <template v-if="menuRoutes.length > 0">
           <SidebarItem
             v-for="menuRoute in menuRoutes"

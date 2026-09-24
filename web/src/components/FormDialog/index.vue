@@ -14,7 +14,9 @@
     <slot></slot>
     <template #footer>
       <div class="form-dialog__footer">
-        <el-button @click="$emit('update:modelValue', false)" :disabled="loading">{{ cancelText }}</el-button>
+        <el-button @click="$emit('update:modelValue', false)" :disabled="loading">{{
+          cancelText
+        }}</el-button>
         <el-button type="primary" @click="$emit('submit')" :loading="loading">
           <el-icon v-if="!loading"><Check /></el-icon>
           {{ confirmText }}
@@ -27,21 +29,24 @@
 <script setup lang="ts">
 import { Check } from '@element-plus/icons-vue'
 
-withDefaults(defineProps<{
-  modelValue: boolean
-  title?: string
-  width?: string
-  top?: string
-  loading?: boolean
-  cancelText?: string
-  confirmText?: string
-}>(), {
-  title: '操作',
-  width: '600px',
-  loading: false,
-  cancelText: '取消',
-  confirmText: '确定',
-})
+withDefaults(
+  defineProps<{
+    modelValue: boolean
+    title?: string
+    width?: string
+    top?: string
+    loading?: boolean
+    cancelText?: string
+    confirmText?: string
+  }>(),
+  {
+    title: '操作',
+    width: '600px',
+    loading: false,
+    cancelText: '取消',
+    confirmText: '确定',
+  },
+)
 
 defineEmits<{
   'update:modelValue': [value: boolean]
@@ -109,7 +114,9 @@ defineEmits<{
   }
 
   &.is-focus {
-    box-shadow: 0 0 0 1px var(--el-color-primary) inset, 0 0 0 3px var(--el-color-primary-light-9);
+    box-shadow:
+      0 0 0 1px var(--el-color-primary) inset,
+      0 0 0 3px var(--el-color-primary-light-9);
   }
 }
 

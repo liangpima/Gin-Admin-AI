@@ -2,7 +2,11 @@
   <div class="dashboard">
     <el-row :gutter="16">
       <el-col :xs="24" :sm="12" :md="6" v-for="(item, index) in statCards" :key="item.label">
-        <div class="stat-card" :class="item.colorClass" :style="{ animationDelay: `${index * 0.1}s` }">
+        <div
+          class="stat-card"
+          :class="item.colorClass"
+          :style="{ animationDelay: `${index * 0.1}s` }"
+        >
           <div class="stat-card__icon">
             <el-icon :size="24"><component :is="item.icon" /></el-icon>
           </div>

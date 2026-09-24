@@ -23,7 +23,13 @@ export function uploadFile(file: File) {
   )
 }
 
-export function getFileList(params: { name?: string; mimeType?: string; sortOrder?: string; page: number; pageSize: number }) {
+export function getFileList(params: {
+  name?: string
+  mimeType?: string
+  sortOrder?: string
+  page: number
+  pageSize: number
+}) {
   return http.get<Result<PageResult<FileItem>>>('/system/file/list', { params })
 }
 

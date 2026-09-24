@@ -4,7 +4,13 @@
       <template #header>
         <div class="card-header">
           <span>附件管理</span>
-          <input ref="fileInputRef" type="file" multiple style="display: none" @change="onFileInputChange" />
+          <input
+            ref="fileInputRef"
+            type="file"
+            multiple
+            style="display: none"
+            @change="onFileInputChange"
+          />
           <el-button type="primary" :loading="uploading" @click="fileInputRef?.click()">
             {{ uploading ? '上传中...' : '上传附件' }}
           </el-button>
@@ -12,7 +18,14 @@
       </template>
 
       <div class="gallery-toolbar">
-        <el-input v-model="queryParams.name" placeholder="搜索文件名" clearable style="width: 200px" @keyup.enter="loadData" @clear="loadData" />
+        <el-input
+          v-model="queryParams.name"
+          placeholder="搜索文件名"
+          clearable
+          style="width: 200px"
+          @keyup.enter="loadData"
+          @clear="loadData"
+        />
         <el-select v-model="sortOrder" style="width: 160px" @change="loadData">
           <el-option label="上传时间倒序" value="desc" />
           <el-option label="上传时间正序" value="asc" />
@@ -22,11 +35,7 @@
       <div v-if="loading" class="loading-text">加载中...</div>
 
       <div v-else class="gallery-grid">
-        <div
-          v-for="item in tableData"
-          :key="item.id"
-          class="gallery-item"
-        >
+        <div v-for="item in tableData" :key="item.id" class="gallery-item">
           <div class="gallery-item__img" @click="openPreview(item)">
             <img
               v-if="item.mimeType?.startsWith('image/')"
@@ -68,9 +77,21 @@
     <Teleport to="body">
       <div v-if="showViewer" class="img-viewer-overlay" @click="closePreview">
         <div class="img-viewer-close" @click.stop="closePreview">&times;</div>
-        <div v-if="viewerIndex > 0" class="img-viewer-arrow img-viewer-arrow--left" @click.stop="goPrev">&#8249;</div>
+        <div
+          v-if="viewerIndex > 0"
+          class="img-viewer-arrow img-viewer-arrow--left"
+          @click.stop="goPrev"
+        >
+          &#8249;
+        </div>
         <img :src="viewerUrl" class="img-viewer-img" @click.stop />
-        <div v-if="viewerIndex < imageList.length - 1" class="img-viewer-arrow img-viewer-arrow--right" @click.stop="goNext">&#8250;</div>
+        <div
+          v-if="viewerIndex < imageList.length - 1"
+          class="img-viewer-arrow img-viewer-arrow--right"
+          @click.stop="goNext"
+        >
+          &#8250;
+        </div>
       </div>
     </Teleport>
   </div>
@@ -80,7 +101,7 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Document } from '@element-plus/icons-vue'
-import { getFileList, deleteFile, uploadFile , type FileItem} from '@/api/file'
+import { getFileList, deleteFile, uploadFile, type FileItem } from '@/api/file'
 
 const loading = ref(false)
 const tableData = ref<FileItem[]>([])
@@ -180,7 +201,11 @@ function formatSize(bytes: number) {
 async function loadData() {
   loading.value = true
   try {
-    const res = await getFileList({ name: queryParams.name, page: page.value, pageSize: pageSize.value })
+    const res = await getFileList({
+      name: queryParams.name,
+      page: page.value,
+      pageSize: pageSize.value,
+    })
     tableData.value = res.data.list
     total.value = res.data.total
   } finally {
@@ -190,7 +215,11 @@ async function loadData() {
 
 async function handleDelete(row: FileItem) {
   try {
-    await ElMessageBox.confirm(`确定要删除文件「${row.name}」吗？`, '提示', { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' })
+    await ElMessageBox.confirm(`确定要删除文件「${row.name}」吗？`, '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
     await deleteFile(row.id)
     ElMessage.success('删除成功')
     loadData()

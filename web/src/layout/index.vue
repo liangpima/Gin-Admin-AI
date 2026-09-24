@@ -1,6 +1,10 @@
 <template>
   <div class="app-wrapper" :class="{ 'sidebar-opened': appStore.sidebar.opened }">
-    <div v-if="isMobile && appStore.sidebar.opened" class="sidebar-overlay" @click="appStore.closeSidebar(true)" />
+    <div
+      v-if="isMobile && appStore.sidebar.opened"
+      class="sidebar-overlay"
+      @click="appStore.closeSidebar(true)"
+    />
     <Sidebar class="sidebar-container" />
     <div class="main-container">
       <Navbar />
@@ -45,8 +49,12 @@ const { isMobile } = useResponsive()
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .sidebar-container {

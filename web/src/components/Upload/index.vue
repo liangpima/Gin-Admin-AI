@@ -26,22 +26,25 @@ import { ref, computed } from 'vue'
 import { ElMessage, type UploadFile, type UploadUserFile } from 'element-plus'
 import { getToken } from '@/utils/auth'
 
-const props = withDefaults(defineProps<{
-  action: string
-  multiple?: boolean
-  limit?: number
-  accept?: string
-  tip?: string
-  maxSize?: number
-  fileList?: UploadUserFile[]
-}>(), {
-  multiple: false,
-  limit: 1,
-  accept: 'image/*',
-  tip: '',
-  maxSize: 5,
-  fileList: () => [],
-})
+const props = withDefaults(
+  defineProps<{
+    action: string
+    multiple?: boolean
+    limit?: number
+    accept?: string
+    tip?: string
+    maxSize?: number
+    fileList?: UploadUserFile[]
+  }>(),
+  {
+    multiple: false,
+    limit: 1,
+    accept: 'image/*',
+    tip: '',
+    maxSize: 5,
+    fileList: () => [],
+  },
+)
 
 // 直接用 Element Plus 自带的类型，不要自己写 any：
 // 这些回调的签名由 el-upload 决定，抄错一个字段就会在运行期才暴露。

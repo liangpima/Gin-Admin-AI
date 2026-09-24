@@ -5,7 +5,12 @@
         <el-row :gutter="16">
           <el-col :xs="24" :sm="12" :md="8" :lg="6">
             <el-form-item label="标签名称">
-              <el-input v-model="queryParams.name" placeholder="请输入标签名称" clearable @keyup.enter="handleSearch" />
+              <el-input
+                v-model="queryParams.name"
+                placeholder="请输入标签名称"
+                clearable
+                @keyup.enter="handleSearch"
+              />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="8" :lg="6">
@@ -37,13 +42,19 @@
         <el-table-column prop="sort" label="排序" width="70" align="center" />
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{ row.status === 1 ? '正常' : '停用' }}</el-tag>
+            <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{
+              row.status === 1 ? '正常' : '停用'
+            }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row as MemberTagItem)">编辑</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row as MemberTagItem)">删除</el-button>
+            <el-button type="primary" link size="small" @click="handleEdit(row as MemberTagItem)"
+              >编辑</el-button
+            >
+            <el-button type="danger" link size="small" @click="handleDelete(row as MemberTagItem)"
+              >删除</el-button
+            >
           </template>
         </el-table-column>
       </el-table>
@@ -58,7 +69,12 @@
       />
     </el-card>
 
-    <FormDialog v-model="dialogVisible" :title="dialogTitle" :loading="submitLoading" @submit="handleSubmit">
+    <FormDialog
+      v-model="dialogVisible"
+      :title="dialogTitle"
+      :loading="submitLoading"
+      @submit="handleSubmit"
+    >
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="80px">
         <el-form-item label="标签名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入标签名称" />

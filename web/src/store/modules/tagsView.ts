@@ -1,5 +1,10 @@
 import { defineStore } from 'pinia'
-import type { LocationQueryRaw, RouteLocationNormalized, RouteMeta, RouteParamsRaw } from 'vue-router'
+import type {
+  LocationQueryRaw,
+  RouteLocationNormalized,
+  RouteMeta,
+  RouteParamsRaw,
+} from 'vue-router'
 
 export interface TagView {
   path: string

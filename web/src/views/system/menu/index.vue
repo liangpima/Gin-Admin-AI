@@ -8,7 +8,14 @@
         </div>
       </template>
 
-      <el-table :data="tableData" v-loading="loading" border row-key="id" :tree-props="{ children: 'children' }" default-expand-all>
+      <el-table
+        :data="tableData"
+        v-loading="loading"
+        border
+        row-key="id"
+        :tree-props="{ children: 'children' }"
+        default-expand-all
+      >
         <el-table-column prop="title" label="菜单名称" min-width="150" />
         <el-table-column prop="icon" label="图标" width="80">
           <template #default="{ row }">
@@ -35,18 +42,36 @@
         </el-table-column>
         <el-table-column label="操作" width="180">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleAdd({ parentId: row.id })">新增</el-button>
-            <el-button type="primary" link size="small" @click="handleEdit(row as MenuItem)">编辑</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row as MenuItem)">删除</el-button>
+            <el-button type="primary" link size="small" @click="handleAdd({ parentId: row.id })"
+              >新增</el-button
+            >
+            <el-button type="primary" link size="small" @click="handleEdit(row as MenuItem)"
+              >编辑</el-button
+            >
+            <el-button type="danger" link size="small" @click="handleDelete(row as MenuItem)"
+              >删除</el-button
+            >
           </template>
         </el-table-column>
       </el-table>
     </el-card>
 
-    <FormDialog v-model="dialogVisible" :title="dialogTitle" :loading="submitLoading" @submit="handleSubmit">
+    <FormDialog
+      v-model="dialogVisible"
+      :title="dialogTitle"
+      :loading="submitLoading"
+      @submit="handleSubmit"
+    >
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="80px">
         <el-form-item label="上级菜单">
-          <el-tree-select v-model="form.parentId" :data="menuOptions" :props="{ label: 'title', value: 'id' } as any" placeholder="请选择上级菜单" check-strictly clearable />
+          <el-tree-select
+            v-model="form.parentId"
+            :data="menuOptions"
+            :props="{ label: 'title', value: 'id' } as any"
+            placeholder="请选择上级菜单"
+            check-strictly
+            clearable
+          />
         </el-form-item>
         <el-form-item label="菜单类型" prop="type">
           <el-radio-group v-model="form.type">

@@ -72,5 +72,5 @@ export default tseslint.config(
   },
 
   // 必须放在最后：它按「与 Prettier 冲突」的名单关规则，放前面会被上面的覆盖
-  prettierConfig
+  prettierConfig,
 )

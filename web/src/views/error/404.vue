@@ -5,39 +5,209 @@
         <svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" style="stop-color:var(--color-primary);stop-opacity:0.2" />
-              <stop offset="100%" style="stop-color:var(--color-primary);stop-opacity:0.05" />
+              <stop offset="0%" style="stop-color: var(--color-primary); stop-opacity: 0.2" />
+              <stop offset="100%" style="stop-color: var(--color-primary); stop-opacity: 0.05" />
             </linearGradient>
           </defs>
           <!-- Background -->
-          <rect width="400" height="300" fill="url(#grad1)" rx="16"/>
+          <rect width="400" height="300" fill="url(#grad1)" rx="16" />
           <!-- Buildings -->
-          <rect x="40" y="120" width="60" height="180" rx="4" fill="var(--color-border-base)" opacity="0.3"/>
-          <rect x="50" y="130" width="15" height="15" rx="2" fill="var(--color-primary)" opacity="0.3"/>
-          <rect x="75" y="130" width="15" height="15" rx="2" fill="var(--color-primary)" opacity="0.2"/>
-          <rect x="50" y="155" width="15" height="15" rx="2" fill="var(--color-primary)" opacity="0.2"/>
-          <rect x="75" y="155" width="15" height="15" rx="2" fill="var(--color-primary)" opacity="0.3"/>
+          <rect
+            x="40"
+            y="120"
+            width="60"
+            height="180"
+            rx="4"
+            fill="var(--color-border-base)"
+            opacity="0.3"
+          />
+          <rect
+            x="50"
+            y="130"
+            width="15"
+            height="15"
+            rx="2"
+            fill="var(--color-primary)"
+            opacity="0.3"
+          />
+          <rect
+            x="75"
+            y="130"
+            width="15"
+            height="15"
+            rx="2"
+            fill="var(--color-primary)"
+            opacity="0.2"
+          />
+          <rect
+            x="50"
+            y="155"
+            width="15"
+            height="15"
+            rx="2"
+            fill="var(--color-primary)"
+            opacity="0.2"
+          />
+          <rect
+            x="75"
+            y="155"
+            width="15"
+            height="15"
+            rx="2"
+            fill="var(--color-primary)"
+            opacity="0.3"
+          />
 
-          <rect x="120" y="80" width="80" height="220" rx="4" fill="var(--color-border-base)" opacity="0.4"/>
-          <rect x="130" y="90" width="18" height="18" rx="2" fill="var(--color-primary)" opacity="0.3"/>
-          <rect x="158" y="90" width="18" height="18" rx="2" fill="var(--color-primary)" opacity="0.2"/>
-          <rect x="130" y="118" width="18" height="18" rx="2" fill="var(--color-primary)" opacity="0.2"/>
-          <rect x="158" y="118" width="18" height="18" rx="2" fill="var(--color-primary)" opacity="0.3"/>
-          <rect x="130" y="146" width="18" height="18" rx="2" fill="var(--color-primary)" opacity="0.3"/>
-          <rect x="158" y="146" width="18" height="18" rx="2" fill="var(--color-primary)" opacity="0.2"/>
+          <rect
+            x="120"
+            y="80"
+            width="80"
+            height="220"
+            rx="4"
+            fill="var(--color-border-base)"
+            opacity="0.4"
+          />
+          <rect
+            x="130"
+            y="90"
+            width="18"
+            height="18"
+            rx="2"
+            fill="var(--color-primary)"
+            opacity="0.3"
+          />
+          <rect
+            x="158"
+            y="90"
+            width="18"
+            height="18"
+            rx="2"
+            fill="var(--color-primary)"
+            opacity="0.2"
+          />
+          <rect
+            x="130"
+            y="118"
+            width="18"
+            height="18"
+            rx="2"
+            fill="var(--color-primary)"
+            opacity="0.2"
+          />
+          <rect
+            x="158"
+            y="118"
+            width="18"
+            height="18"
+            rx="2"
+            fill="var(--color-primary)"
+            opacity="0.3"
+          />
+          <rect
+            x="130"
+            y="146"
+            width="18"
+            height="18"
+            rx="2"
+            fill="var(--color-primary)"
+            opacity="0.3"
+          />
+          <rect
+            x="158"
+            y="146"
+            width="18"
+            height="18"
+            rx="2"
+            fill="var(--color-primary)"
+            opacity="0.2"
+          />
 
-          <rect x="220" y="140" width="70" height="160" rx="4" fill="var(--color-border-base)" opacity="0.35"/>
-          <rect x="230" y="150" width="15" height="15" rx="2" fill="var(--color-primary)" opacity="0.2"/>
-          <rect x="255" y="150" width="15" height="15" rx="2" fill="var(--color-primary)" opacity="0.3"/>
-          <rect x="230" y="175" width="15" height="15" rx="2" fill="var(--color-primary)" opacity="0.3"/>
-          <rect x="255" y="175" width="15" height="15" rx="2" fill="var(--color-primary)" opacity="0.2"/>
+          <rect
+            x="220"
+            y="140"
+            width="70"
+            height="160"
+            rx="4"
+            fill="var(--color-border-base)"
+            opacity="0.35"
+          />
+          <rect
+            x="230"
+            y="150"
+            width="15"
+            height="15"
+            rx="2"
+            fill="var(--color-primary)"
+            opacity="0.2"
+          />
+          <rect
+            x="255"
+            y="150"
+            width="15"
+            height="15"
+            rx="2"
+            fill="var(--color-primary)"
+            opacity="0.3"
+          />
+          <rect
+            x="230"
+            y="175"
+            width="15"
+            height="15"
+            rx="2"
+            fill="var(--color-primary)"
+            opacity="0.3"
+          />
+          <rect
+            x="255"
+            y="175"
+            width="15"
+            height="15"
+            rx="2"
+            fill="var(--color-primary)"
+            opacity="0.2"
+          />
 
-          <rect x="310" y="160" width="50" height="140" rx="4" fill="var(--color-border-base)" opacity="0.25"/>
-          <rect x="318" y="168" width="12" height="12" rx="2" fill="var(--color-primary)" opacity="0.2"/>
-          <rect x="340" y="168" width="12" height="12" rx="2" fill="var(--color-primary)" opacity="0.3"/>
+          <rect
+            x="310"
+            y="160"
+            width="50"
+            height="140"
+            rx="4"
+            fill="var(--color-border-base)"
+            opacity="0.25"
+          />
+          <rect
+            x="318"
+            y="168"
+            width="12"
+            height="12"
+            rx="2"
+            fill="var(--color-primary)"
+            opacity="0.2"
+          />
+          <rect
+            x="340"
+            y="168"
+            width="12"
+            height="12"
+            rx="2"
+            fill="var(--color-primary)"
+            opacity="0.3"
+          />
 
           <!-- 404 text -->
-          <text x="200" y="170" text-anchor="middle" font-size="72" font-weight="700" fill="var(--color-primary)" opacity="0.9">404</text>
+          <text
+            x="200"
+            y="170"
+            text-anchor="middle"
+            font-size="72"
+            font-weight="700"
+            fill="var(--color-primary)"
+            opacity="0.9"
+          >
+            404
+          </text>
         </svg>
       </div>
 

@@ -43,8 +43,17 @@
           @click="toggleSelect(item)"
         >
           <div class="image-picker__img">
-            <img v-if="item.mimeType?.startsWith('image/')" :src="item.url" loading="lazy" @error="(e: Event) => ((e.target as HTMLElement).style.display = 'none')" />
-            <img v-else-if="item.mimeType?.startsWith('video/')" src="/images/media.png" class="image-picker__video-cover" />
+            <img
+              v-if="item.mimeType?.startsWith('image/')"
+              :src="item.url"
+              loading="lazy"
+              @error="(e: Event) => ((e.target as HTMLElement).style.display = 'none')"
+            />
+            <img
+              v-else-if="item.mimeType?.startsWith('video/')"
+              src="/images/media.png"
+              class="image-picker__video-cover"
+            />
             <div v-else class="image-picker__video-icon">
               <el-icon :size="32"><VideoCamera /></el-icon>
             </div>
@@ -81,28 +90,38 @@ import { ElMessage } from 'element-plus'
 import { Check, VideoCamera } from '@element-plus/icons-vue'
 import { getFileList, uploadFile, type FileItem } from '@/api/file'
 
-const props = withDefaults(defineProps<{
-  visible: boolean
-  multiple?: boolean
-  type?: 'image' | 'video'
-}>(), {
-  multiple: false,
-  type: 'image',
-})
+const props = withDefaults(
+  defineProps<{
+    visible: boolean
+    multiple?: boolean
+    type?: 'image' | 'video'
+  }>(),
+  {
+    multiple: false,
+    type: 'image',
+  },
+)
 
 const emit = defineEmits<{
   'update:visible': [val: boolean]
-  'confirm': [url: string | string[]]
+  confirm: [url: string | string[]]
 }>()
 
-const dialogTitle = computed(() => props.type === 'video' ? '选择视频' : '选择图片')
-const uploadBtnText = computed(() => props.type === 'video' ? '上传视频' : '上传图片')
-const emptyText = computed(() => props.type === 'video' ? '暂无视频' : '暂无图片')
-const acceptFilter = computed(() => props.type === 'video' ? 'video/*' : 'image/*')
+const dialogTitle = computed(() => (props.type === 'video' ? '选择视频' : '选择图片'))
+const uploadBtnText = computed(() => (props.type === 'video' ? '上传视频' : '上传图片'))
+const emptyText = computed(() => (props.type === 'video' ? '暂无视频' : '暂无图片'))
+const acceptFilter = computed(() => (props.type === 'video' ? 'video/*' : 'image/*'))
 
 const visible = ref(props.visible)
-watch(() => props.visible, (val) => { visible.value = val })
-watch(visible, (val) => { emit('update:visible', val) })
+watch(
+  () => props.visible,
+  (val) => {
+    visible.value = val
+  },
+)
+watch(visible, (val) => {
+  emit('update:visible', val)
+})
 
 const loading = ref(false)
 const uploading = ref(false)
@@ -255,7 +274,9 @@ watch(visible, (val) => {
     border-radius: 6px;
     overflow: hidden;
     cursor: pointer;
-    transition: border-color 0.2s, box-shadow 0.2s;
+    transition:
+      border-color 0.2s,
+      box-shadow 0.2s;
 
     &:hover {
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);

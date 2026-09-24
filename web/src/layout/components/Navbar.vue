@@ -29,7 +29,9 @@
           <el-avatar :size="32" :src="userStore.userInfo?.avatar || undefined" class="avatar">
             {{ userStore.userInfo?.nickname?.charAt(0) || 'A' }}
           </el-avatar>
-          <span class="username" v-if="!isMobile">{{ userStore.userInfo?.nickname || userStore.userInfo?.username }}</span>
+          <span class="username" v-if="!isMobile">{{
+            userStore.userInfo?.nickname || userStore.userInfo?.username
+          }}</span>
           <el-icon class="avatar-arrow"><ArrowDown /></el-icon>
         </div>
         <template #dropdown>

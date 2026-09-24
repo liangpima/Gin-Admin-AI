@@ -8,12 +8,41 @@
       </template>
 
       <div class="search-bar">
-        <el-input v-model="queryParams.subject" placeholder="搜索订单标题" clearable style="width: 200px" @keyup.enter="loadData" @clear="loadData" />
-        <el-select v-model="queryParams.channel" placeholder="支付渠道" clearable style="width: 140px" @change="loadData">
-          <el-option v-for="opt in getList('sys_pay_channel', DEFAULT_CHANNELS)" :key="opt.value" :label="opt.label" :value="opt.value" />
+        <el-input
+          v-model="queryParams.subject"
+          placeholder="搜索订单标题"
+          clearable
+          style="width: 200px"
+          @keyup.enter="loadData"
+          @clear="loadData"
+        />
+        <el-select
+          v-model="queryParams.channel"
+          placeholder="支付渠道"
+          clearable
+          style="width: 140px"
+          @change="loadData"
+        >
+          <el-option
+            v-for="opt in getList('sys_pay_channel', DEFAULT_CHANNELS)"
+            :key="opt.value"
+            :label="opt.label"
+            :value="opt.value"
+          />
         </el-select>
-        <el-select v-model="queryParams.status" placeholder="订单状态" clearable style="width: 140px" @change="loadData">
-          <el-option v-for="opt in getList('sys_pay_order_status', DEFAULT_ORDER_STATUS)" :key="opt.value" :label="opt.label" :value="opt.value" />
+        <el-select
+          v-model="queryParams.status"
+          placeholder="订单状态"
+          clearable
+          style="width: 140px"
+          @change="loadData"
+        >
+          <el-option
+            v-for="opt in getList('sys_pay_order_status', DEFAULT_ORDER_STATUS)"
+            :key="opt.value"
+            :label="opt.label"
+            :value="opt.value"
+          />
         </el-select>
         <el-button type="primary" @click="loadData">搜索</el-button>
       </div>
@@ -53,8 +82,17 @@
           <!-- Element Plus 把插槽行推成 DefaultRow，而 handleClose/handleDetail
                形参是 PayOrder，故此处显式断言（数据来自本页查询，类型是可信的） -->
           <template #default="{ row }">
-            <el-button v-if="row.status === 0" type="danger" link size="small" @click="handleClose(row as PayOrder)">关闭</el-button>
-            <el-button type="primary" link size="small" @click="handleDetail(row as PayOrder)">详情</el-button>
+            <el-button
+              v-if="row.status === 0"
+              type="danger"
+              link
+              size="small"
+              @click="handleClose(row as PayOrder)"
+              >关闭</el-button
+            >
+            <el-button type="primary" link size="small" @click="handleDetail(row as PayOrder)"
+              >详情</el-button
+            >
           </template>
         </el-table-column>
       </el-table>
@@ -73,14 +111,24 @@
       <el-descriptions :column="1" border>
         <el-descriptions-item label="订单号">{{ detailData.orderNo }}</el-descriptions-item>
         <el-descriptions-item label="订单标题">{{ detailData.subject }}</el-descriptions-item>
-        <el-descriptions-item label="金额">¥{{ (detailData.amount / 100).toFixed(2) }}</el-descriptions-item>
-        <el-descriptions-item label="渠道">{{ getLabel('sys_pay_channel', detailData.channel) }}</el-descriptions-item>
+        <el-descriptions-item label="金额"
+          >¥{{ (detailData.amount / 100).toFixed(2) }}</el-descriptions-item
+        >
+        <el-descriptions-item label="渠道">{{
+          getLabel('sys_pay_channel', detailData.channel)
+        }}</el-descriptions-item>
         <el-descriptions-item label="状态">
           <DictTag type="sys_pay_order_status" :value="detailData.status" />
         </el-descriptions-item>
-        <el-descriptions-item label="第三方交易号">{{ detailData.tradeNo || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="支付时间">{{ detailData.paidAt ? formatDate(detailData.paidAt) : '-' }}</el-descriptions-item>
-        <el-descriptions-item label="创建时间">{{ formatDate(detailData.createdAt) }}</el-descriptions-item>
+        <el-descriptions-item label="第三方交易号">{{
+          detailData.tradeNo || '-'
+        }}</el-descriptions-item>
+        <el-descriptions-item label="支付时间">{{
+          detailData.paidAt ? formatDate(detailData.paidAt) : '-'
+        }}</el-descriptions-item>
+        <el-descriptions-item label="创建时间">{{
+          formatDate(detailData.createdAt)
+        }}</el-descriptions-item>
       </el-descriptions>
     </el-dialog>
   </div>

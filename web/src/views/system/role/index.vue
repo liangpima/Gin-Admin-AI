@@ -5,12 +5,22 @@
         <el-row :gutter="16">
           <el-col :xs="24" :sm="12" :md="8" :lg="6">
             <el-form-item label="角色名称">
-              <el-input v-model="queryParams.name" placeholder="请输入角色名称" clearable @keyup.enter="handleSearch" />
+              <el-input
+                v-model="queryParams.name"
+                placeholder="请输入角色名称"
+                clearable
+                @keyup.enter="handleSearch"
+              />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="8" :lg="6">
             <el-form-item label="角色编码">
-              <el-input v-model="queryParams.code" placeholder="请输入角色编码" clearable @keyup.enter="handleSearch" />
+              <el-input
+                v-model="queryParams.code"
+                placeholder="请输入角色编码"
+                clearable
+                @keyup.enter="handleSearch"
+              />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="8" :lg="6">
@@ -47,9 +57,15 @@
         </el-table-column>
         <el-table-column label="操作" width="200">
           <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row as RoleItem)">编辑</el-button>
-            <el-button type="primary" link size="small" @click="handlePermission(row as RoleItem)">权限</el-button>
-            <el-button type="danger" link size="small" @click="handleDelete(row as RoleItem)">删除</el-button>
+            <el-button type="primary" link size="small" @click="handleEdit(row as RoleItem)"
+              >编辑</el-button
+            >
+            <el-button type="primary" link size="small" @click="handlePermission(row as RoleItem)"
+              >权限</el-button
+            >
+            <el-button type="danger" link size="small" @click="handleDelete(row as RoleItem)"
+              >删除</el-button
+            >
           </template>
         </el-table-column>
       </el-table>
@@ -65,7 +81,12 @@
       />
     </el-card>
 
-    <FormDialog v-model="dialogVisible" :title="dialogTitle" :loading="submitLoading" @submit="handleSubmit">
+    <FormDialog
+      v-model="dialogVisible"
+      :title="dialogTitle"
+      :loading="submitLoading"
+      @submit="handleSubmit"
+    >
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="80px">
         <el-form-item label="角色名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入角色名称" />
@@ -88,7 +109,12 @@
       </el-form>
     </FormDialog>
 
-    <FormDialog v-model="permDialogVisible" title="分配权限" :loading="permLoading" @submit="handlePermSubmit">
+    <FormDialog
+      v-model="permDialogVisible"
+      title="分配权限"
+      :loading="permLoading"
+      @submit="handlePermSubmit"
+    >
       <el-tree
         ref="menuTreeRef"
         :data="menuTree"
@@ -104,7 +130,14 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { ElMessage, ElTree } from 'element-plus'
-import { getRoleList, createRole, updateRole, deleteRole, type RoleItem, type RoleQuery } from '@/api/role'
+import {
+  getRoleList,
+  createRole,
+  updateRole,
+  deleteRole,
+  type RoleItem,
+  type RoleQuery,
+} from '@/api/role'
 import FormDialog from '@/components/FormDialog/index.vue'
 import { formatDateTime } from '@/utils/format'
 import { getMenuTree, type MenuItem } from '@/api/menu'

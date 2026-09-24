@@ -176,7 +176,7 @@ export function useCrud<
     // 所以只能在这里吵一声（见 useCrud.spec.ts 的用例）。
     if (extra !== undefined && typeof extra !== 'object') {
       throw new Error(
-        '[useCrud] handleAdd 的额外初值必须是对象，例如 handleAdd({ parentId: row.id })'
+        '[useCrud] handleAdd 的额外初值必须是对象，例如 handleAdd({ parentId: row.id })',
       )
     }
     openDialog(false, { ...createForm(), ...(extra ?? {}) })

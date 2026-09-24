@@ -30,10 +30,21 @@
       <div class="login-form-container">
         <div class="login-form-header">
           <div class="login-form-logo">
-            <img v-if="siteInfo.logo" :src="siteInfo.logo" style="height: 40px; width: auto; object-fit: contain; border-radius: 8px;" />
-            <svg v-else viewBox="0 0 32 32" width="40" height="40" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect width="32" height="32" rx="8" fill="var(--color-primary)"/>
-              <path d="M8 16L16 8L24 16L16 24L8 16Z" fill="white" opacity="0.9"/>
+            <img
+              v-if="siteInfo.logo"
+              :src="siteInfo.logo"
+              style="height: 40px; width: auto; object-fit: contain; border-radius: 8px"
+            />
+            <svg
+              v-else
+              viewBox="0 0 32 32"
+              width="40"
+              height="40"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <rect width="32" height="32" rx="8" fill="var(--color-primary)" />
+              <path d="M8 16L16 8L24 16L16 24L8 16Z" fill="white" opacity="0.9" />
             </svg>
           </div>
           <h2 class="login-form-title">{{ siteInfo.name || '欢迎回来' }}</h2>
@@ -314,7 +325,9 @@ onMounted(() => {
     }
 
     &.is-focus {
-      box-shadow: 0 0 0 1px var(--color-primary) inset, 0 0 0 3px var(--color-primary-50);
+      box-shadow:
+        0 0 0 1px var(--color-primary) inset,
+        0 0 0 3px var(--color-primary-50);
     }
   }
 

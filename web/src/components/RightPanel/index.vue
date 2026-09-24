@@ -16,14 +16,17 @@
 <script setup lang="ts">
 import { watch } from 'vue'
 
-const props = withDefaults(defineProps<{
-  visible: boolean
-  title?: string
-  width?: number
-}>(), {
-  title: '',
-  width: 300,
-})
+const props = withDefaults(
+  defineProps<{
+    visible: boolean
+    title?: string
+    width?: number
+  }>(),
+  {
+    title: '',
+    width: 300,
+  },
+)
 
 const emit = defineEmits<{
   'update:visible': [val: boolean]
@@ -33,9 +36,12 @@ function close() {
   emit('update:visible', false)
 }
 
-watch(() => props.visible, (val) => {
-  document.body.style.overflow = val ? 'hidden' : ''
-})
+watch(
+  () => props.visible,
+  (val) => {
+    document.body.style.overflow = val ? 'hidden' : ''
+  },
+)
 </script>
 
 <style lang="scss" scoped>

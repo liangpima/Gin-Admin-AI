@@ -43,7 +43,7 @@ service.interceptors.request.use(
     }
     return config
   },
-  (error) => Promise.reject(error)
+  (error) => Promise.reject(error),
 )
 
 service.interceptors.response.use(
@@ -92,7 +92,7 @@ service.interceptors.response.use(
       ElMessage.error(error.message || '网络错误')
     }
     return Promise.reject(error)
-  }
+  },
 )
 
 /**
@@ -107,14 +107,12 @@ service.interceptors.response.use(
  * 门面把它收敛成单个泛型：`http.get<Result<X>>(url)`，一眼能看出返回什么。
  */
 export const http = {
-  get: <T>(url: string, config?: AxiosRequestConfig) =>
-    service.get<unknown, T>(url, config),
+  get: <T>(url: string, config?: AxiosRequestConfig) => service.get<unknown, T>(url, config),
   post: <T>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
     service.post<unknown, T>(url, data, config),
   put: <T>(url: string, data?: unknown, config?: AxiosRequestConfig) =>
     service.put<unknown, T>(url, data, config),
-  delete: <T>(url: string, config?: AxiosRequestConfig) =>
-    service.delete<unknown, T>(url, config),
+  delete: <T>(url: string, config?: AxiosRequestConfig) => service.delete<unknown, T>(url, config),
 }
 
 export default service

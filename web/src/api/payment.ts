@@ -28,18 +28,20 @@ export interface CreateOrderParams {
 }
 
 export function createPayOrder(data: CreateOrderParams) {
-  return http.post<Result<{
-    orderNo: string
-    amount: number
-    formUrl?: string
-    codeUrl?: string
-    paySign?: string
-    appId?: string
-    timeStamp?: string
-    nonceStr?: string
-    package?: string
-    orderString?: string
-  }>>('/system/pay/order', data)
+  return http.post<
+    Result<{
+      orderNo: string
+      amount: number
+      formUrl?: string
+      codeUrl?: string
+      paySign?: string
+      appId?: string
+      timeStamp?: string
+      nonceStr?: string
+      package?: string
+      orderString?: string
+    }>
+  >('/system/pay/order', data)
 }
 
 export function getPayOrder(orderNo: string) {
@@ -50,10 +52,19 @@ export function closePayOrder(orderNo: string) {
   return http.post<Result>('/system/pay/order/close', { orderNo })
 }
 
-export function getPayOrderList(params: { subject?: string; status?: string; channel?: string; page: number; pageSize: number }) {
+export function getPayOrderList(params: {
+  subject?: string
+  status?: string
+  channel?: string
+  page: number
+  pageSize: number
+}) {
   return http.get<Result<PageResult<PayOrder>>>('/system/pay/order/list', { params })
 }
 
 export function queryPayOrder(orderNo: string) {
-  return http.get<Result<{ orderNo: string; status: number; paidAt: string }>>('/system/pay/order/query', { params: { orderNo } })
+  return http.get<Result<{ orderNo: string; status: number; paidAt: string }>>(
+    '/system/pay/order/query',
+    { params: { orderNo } },
+  )
 }

@@ -31,10 +31,17 @@
       <el-divider v-if="payResult" />
 
       <div v-if="payResult" class="pay-result">
-        <el-alert :title="payResult.message" :type="payResult.success ? 'success' : 'error'" show-icon :closable="false" />
+        <el-alert
+          :title="payResult.message"
+          :type="payResult.success ? 'success' : 'error'"
+          show-icon
+          :closable="false"
+        />
         <div v-if="payResult.formUrl" style="margin-top: 16px">
           <p>请在新窗口打开支付页面：</p>
-          <el-button type="primary" @click="openPayWindow(payResult.formUrl!)">打开支付页面</el-button>
+          <el-button type="primary" @click="openPayWindow(payResult.formUrl!)"
+            >打开支付页面</el-button
+          >
         </div>
         <div v-if="payResult.codeUrl" style="margin-top: 16px">
           <p>微信Native支付码：</p>
@@ -45,7 +52,9 @@
           <el-input v-model="payResult.orderString" type="textarea" :rows="3" readonly />
         </div>
         <div v-if="payResult.orderNo" style="margin-top: 16px">
-          <p>订单号：<el-tag>{{ payResult.orderNo }}</el-tag></p>
+          <p>
+            订单号：<el-tag>{{ payResult.orderNo }}</el-tag>
+          </p>
           <el-button size="small" @click="checkStatus">查询支付状态</el-button>
         </div>
       </div>
@@ -118,7 +127,13 @@ async function checkStatus() {
   if (!payResult.value?.orderNo) return
   try {
     const res = await queryPayOrder(payResult.value.orderNo)
-    const statusMap: Record<number, string> = { 0: '待支付', 1: '已支付', 2: '已关闭', 3: '已退款', 4: '退款中' }
+    const statusMap: Record<number, string> = {
+      0: '待支付',
+      1: '已支付',
+      2: '已关闭',
+      3: '已退款',
+      4: '退款中',
+    }
     ElMessage.info(`订单状态：${statusMap[res.data.status] || '未知'}`)
   } catch {
     ElMessage.error('查询失败')

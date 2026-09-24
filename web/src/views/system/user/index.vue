@@ -5,18 +5,38 @@
         <el-row :gutter="16">
           <el-col :xs="24" :sm="12" :md="8" :lg="6">
             <el-form-item label="用户名">
-              <el-input v-model="queryParams.username" placeholder="请输入用户名" clearable @keyup.enter="handleSearch" />
+              <el-input
+                v-model="queryParams.username"
+                placeholder="请输入用户名"
+                clearable
+                @keyup.enter="handleSearch"
+              />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="8" :lg="6">
             <el-form-item label="手机号">
-              <el-input v-model="queryParams.phone" placeholder="请输入手机号" clearable @keyup.enter="handleSearch" />
+              <el-input
+                v-model="queryParams.phone"
+                placeholder="请输入手机号"
+                clearable
+                @keyup.enter="handleSearch"
+              />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :md="8" :lg="6">
             <el-form-item label="状态">
-              <el-select v-model="queryParams.status" placeholder="全部" clearable style="width: 100%">
-                <el-option v-for="opt in statusOptions" :key="String(opt.value)" :label="opt.label" :value="opt.value" />
+              <el-select
+                v-model="queryParams.status"
+                placeholder="全部"
+                clearable
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="opt in statusOptions"
+                  :key="String(opt.value)"
+                  :label="opt.label"
+                  :value="opt.value"
+                />
               </el-select>
             </el-form-item>
           </el-col>
@@ -45,7 +65,9 @@
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column label="头像" width="60">
           <template #default="{ row }">
-            <el-avatar :size="32" :src="row.avatar || undefined">{{ row.username?.charAt(0)?.toUpperCase() }}</el-avatar>
+            <el-avatar :size="32" :src="row.avatar || undefined">{{
+              row.username?.charAt(0)?.toUpperCase()
+            }}</el-avatar>
           </template>
         </el-table-column>
         <el-table-column prop="username" label="用户名" width="120" />
@@ -63,7 +85,12 @@
               style="width: 100%"
               @change="(val: number[]) => handleRoleChange(row as UserRow, val)"
             >
-              <el-option v-for="role in roleList" :key="role.id" :label="role.name" :value="role.id" />
+              <el-option
+                v-for="role in roleList"
+                :key="role.id"
+                :label="role.name"
+                :value="role.id"
+              />
             </el-select>
           </template>
         </el-table-column>
@@ -82,7 +109,12 @@
         </el-table-column>
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
-            <el-switch v-model="row.status" :active-value="1" :inactive-value="0" @change="handleStatusChange(row as UserRow)" />
+            <el-switch
+              v-model="row.status"
+              :active-value="1"
+              :inactive-value="0"
+              @change="handleStatusChange(row as UserRow)"
+            />
           </template>
         </el-table-column>
         <el-table-column label="创建时间" width="170">
@@ -94,7 +126,7 @@
               :actions="[
                 { label: '编辑', icon: 'Edit', color: 'var(--el-color-primary)' },
                 { label: '重置密码', icon: 'Key', color: 'var(--el-color-warning)' },
-                { label: '删除', icon: 'Delete', color: 'var(--el-color-danger)' }
+                { label: '删除', icon: 'Delete', color: 'var(--el-color-danger)' },
               ]"
               @command="(cmd: string) => handleAction(cmd, row as UserItem)"
             />
@@ -113,7 +145,12 @@
       />
     </el-card>
 
-    <FormDialog v-model="dialogVisible" :title="dialogTitle" :loading="submitLoading" @submit="handleSubmit">
+    <FormDialog
+      v-model="dialogVisible"
+      :title="dialogTitle"
+      :loading="submitLoading"
+      @submit="handleSubmit"
+    >
       <el-form ref="formRef" :model="form" :rules="formRules" label-width="80px">
         <el-form-item label="头像">
           <div class="logo-upload">
@@ -131,7 +168,12 @@
           <el-input v-model="form.username" :disabled="!!form.id" placeholder="请输入用户名" />
         </el-form-item>
         <el-form-item v-if="!form.id" label="密码" prop="password">
-          <el-input v-model="form.password" type="password" placeholder="请输入密码" show-password />
+          <el-input
+            v-model="form.password"
+            type="password"
+            placeholder="请输入密码"
+            show-password
+          />
         </el-form-item>
         <el-form-item label="昵称" prop="nickname">
           <el-input v-model="form.nickname" placeholder="请输入昵称" />
@@ -143,11 +185,29 @@
           <el-input v-model="form.email" placeholder="请输入邮箱" />
         </el-form-item>
         <el-form-item label="部门" prop="deptId">
-          <el-tree-select v-model="form.deptId" :data="deptTree" :props="{ label: 'name', value: 'id' } as any" placeholder="请选择部门" check-strictly />
+          <el-tree-select
+            v-model="form.deptId"
+            :data="deptTree"
+            :props="{ label: 'name', value: 'id' } as any"
+            placeholder="请选择部门"
+            check-strictly
+          />
         </el-form-item>
         <el-form-item label="用户角色">
-          <el-select v-model="form.roleIds" multiple collapse-tags collapse-tags-tooltip placeholder="请选择角色" style="width: 100%">
-            <el-option v-for="role in roleList" :key="role.id" :label="role.name" :value="role.id" />
+          <el-select
+            v-model="form.roleIds"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="请选择角色"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="role in roleList"
+              :key="role.id"
+              :label="role.name"
+              :value="role.id"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
