@@ -16,8 +16,10 @@
 | P1-3 租户 0 旁路 | ✅ 已完成 | `0e7d72d` 平台级身份需持有 admin 角色 |
 | P1-1 dept 租户隔离 | ✅ 已完成 | 模型/仓储/服务/控制器 + 迁移（两步回填）+ BuildTreeForest |
 | P1-2 全局表语义 | ✅ 已完成 | dict 显式声明全局；config 写权限收窄为 admin；agreement 加 tenant_id |
-| P2 工程质量 | ⏳ 未开始 | |
-| P3 体验与长期 | ⏳ 未开始 | |
+| P2-1 测试补齐 | 🚧 进行中 | 49.2% → **54.9%**（目标 60%）；已完成 payment/upload/middleware/controller 两批 |
+| P2-2 lint 转阻断 | ⏳ 未开始 | |
+| P2-3 消除样板 | ⏳ 未开始 | |
+| P2-4 前端工程 | ⏳ 未开始 | |
 
 **⚠️ 升级须知（P0-2/P0-3 带来的部署影响）**
 
@@ -214,12 +216,27 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
 
 ## 阶段 P2 · 工程质量（4–6 人天，可与业务并行）
 
-### P2-1 测试补齐（当前最大短板）
-- controller 层 3.1%、upload 14.3%、payment 24.6%、middleware 21.1%。
-- 目标：核心路径（auth 流程、casbin 拒绝、租户过滤、支付回调验签）补
-  **httptest 集成测试**（`internal/testsupport` 的 sqlite 基建已就绪，
-  `main_test.go` 模式可复制），目标全仓覆盖率 41.8% → 60%+。
-- 优先级：`router` 包（0 测试，但它是权限登记的中枢）> payment notify > upload > auth。
+### P2-1 测试补齐（当前最大短板）🚧 进行中
+- 起点：controller 层 3.1%、upload 14.3%、payment 24.6%、middleware 21.1%。
+- **进度**：全仓平均包覆盖率 49.2% → **54.9%**（18 个包，口径为各包覆盖率求平均）。
+  已完成两批（提交 `4c18f82`、`6fcfa8e`）：
+  - `payment/service` 24.6% → 47.7%：回调验签全链路（测试期生成 RSA 密钥对自签自验）、
+    returnURL 开放重定向防护、doRequest 对非 2xx 的处理、pay.* 配置键名映射
+  - `pkg/upload` 14.3% → 52.4%：本地存储的**写盘路径**（此前一次都没跑过，
+    而它又是默认后端）、Init 的回退逻辑、调度器校验顺序
+  - `middleware` 25.7% → 61.8%：Casbin 适配器与策略生成、CasbinAuth 六组判定、
+    OperatorHoldsPermissions 直接判定
+  - `system/controller` 6.2% → 10.9%：user/role 控制器的上下文透传
+- **顺带修掉一个真 bug**：支付宝 `gmt_payment` 是 GMT+8，代码用 `time.Parse`
+  按 UTC 解析 → 支付时间差 8 小时（界面显示「支付时间在未来」）。
+  改用 `time.ParseInLocation` + 固定 GMT+8。微信侧无此问题（RFC3339 自带偏移）。
+- **有意划的边界**：云存储后端（aliyun/tencent/minio）与真实出网的网关方法
+  （Prepay/Refund/QueryTrade）需要真实凭据与网络，不进单测 ——
+  不为覆盖率数字去 mock 掉整个网络层。
+- **剩余待补**（按缺口排序）：`system/controller` 10.9%、`system/repository` 34.3%、
+  `system/service` 38.8%、`member/repository` 38.1%、`pkg/task` 31.2%、
+  `internal/database` 28.6%、`cmd/migrate` 50%。
+  其中 controller 层缺口最大（约 12 个控制器只测了 3 个），是达到 60% 的关键。
 
 ### P2-2 golangci-lint 转阻断
 - `ci.yml:76-89` 现为 `continue-on-error: true`，注释已写明"基线清理干净后去掉"。
