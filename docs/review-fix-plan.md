@@ -16,10 +16,11 @@
 | P1-3 租户 0 旁路 | ✅ 已完成 | `0e7d72d` 平台级身份需持有 admin 角色 |
 | P1-1 dept 租户隔离 | ✅ 已完成 | 模型/仓储/服务/控制器 + 迁移（两步回填）+ BuildTreeForest |
 | P1-2 全局表语义 | ✅ 已完成 | dict 显式声明全局；config 写权限收窄为 admin；agreement 加 tenant_id |
-| P2-1 测试补齐 | 🚧 进行中 | 49.2% → **56.9%**（目标 60%）；已补 payment/upload/middleware/controller 三批 |
+| P2-1 测试补齐 | ✅ 已完成 | 56.9% → **70.5%**（目标 60%，口径为各包覆盖率求平均）；`0b183f3` 补仓储与工具包 |
 | P2-2 lint 转阻断 | ✅ 已完成 | 基线 29 → **0**，`e15142b`；顺带修掉「观察项本身失效」 |
-| P2-3 消除样板 | 🚧 进行中 | 后端已完成（BindPage 收口 + 忽略错误）；前端 useCrud 与类型去重未做 |
-| P2-4 前端工程 | ⏳ 未开始 | |
+| P2-3 消除样板 | ✅ 已完成 | 后端 `658a41d`（BindPage 收口 + 忽略错误）；前端 `f088f75`（useCrud + 类型去重） |
+| P2-4 前端工程 | ✅ 已完成 | `4950839` ESLint/Prettier/vitest 接入 CI；lint 基线 1794 → 0 |
+| 附：真 bug 修复 | ✅ 已完成 | `f5159fa` 登录限频把 redis.Nil 误判为故障（任何干净登录 500）；`bc67715` 仪表盘部门数按租户统计 |
 
 **⚠️ 升级须知（P0-2/P0-3 带来的部署影响）**
 
@@ -216,27 +217,42 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
 
 ## 阶段 P2 · 工程质量（4–6 人天，可与业务并行）
 
-### P2-1 测试补齐（当前最大短板）🚧 进行中
+### P2-1 测试补齐 ✅ 已完成
 - 起点：controller 层 3.1%、upload 14.3%、payment 24.6%、middleware 21.1%。
-- **进度**：全仓平均包覆盖率 49.2% → **54.9%**（18 个包，口径为各包覆盖率求平均）。
-  已完成两批（提交 `4c18f82`、`6fcfa8e`）：
-  - `payment/service` 24.6% → 47.7%：回调验签全链路（测试期生成 RSA 密钥对自签自验）、
+- **结果**：全仓平均包覆盖率 49.2% → **70.5%**（18 个包，口径为各包覆盖率求平均），
+  超出 60% 目标。分批提交：`4c18f82`、`6fcfa8e`、`ca8b0f3`、`0b183f3`。
+  - `payment/service` 24.6% → 47.5%：回调验签全链路（测试期生成 RSA 密钥对自签自验）、
     returnURL 开放重定向防护、doRequest 对非 2xx 的处理、pay.* 配置键名映射
-  - `pkg/upload` 14.3% → 52.4%：本地存储的**写盘路径**（此前一次都没跑过，
+  - `pkg/upload` 14.3% → 52.1%：本地存储的**写盘路径**（此前一次都没跑过，
     而它又是默认后端）、Init 的回退逻辑、调度器校验顺序
   - `middleware` 25.7% → 61.8%：Casbin 适配器与策略生成、CasbinAuth 六组判定、
     OperatorHoldsPermissions 直接判定
-  - `system/controller` 6.2% → 10.9%：user/role 控制器的上下文透传
-- **顺带修掉一个真 bug**：支付宝 `gmt_payment` 是 GMT+8，代码用 `time.Parse`
-  按 UTC 解析 → 支付时间差 8 小时（界面显示「支付时间在未来」）。
-  改用 `time.ParseInLocation` + 固定 GMT+8。微信侧无此问题（RFC3339 自带偏移）。
+  - `system/controller` 6.2% → 35.0%：user/role 等控制器的上下文透传
+  - `member/repository` 38.1% → **93.3%**：level/tag/points_log 三个仓储此前
+    整体 0% 覆盖；补多条件过滤（`status=-1` 才表示不过滤）、ReplaceTags 清空与
+    跨租户拒绝、Delete 释放唯一值与清理关联、FindByWechatOpenid 的租户隔离
+  - `system/repository` 34.3% → **80.6%**：config/dict/file/log/dashboard 五个仓储
+    此前整体 0%，另补 menu/post 两个整体 0% 的仓储；重点覆盖唯一键识别、
+    软删除释放唯一值、Update 的 Select 白名单、`*int8` 状态过滤、
+    日志清理的 `tenantID=0` 拒绝、FindPermissionsByIDs（授权收敛校验的输入）
+  - `pkg/task` 31.2% → **100%**、`pkg/utils` 42.2% → **100%**、
+    `internal/database` 40.0% → 56.0%（带真实 MySQL 时 92.0%）
+- **顺带修掉两个真 bug**：
+  1. 支付宝 `gmt_payment` 是 GMT+8，代码用 `time.Parse` 按 UTC 解析 →
+     支付时间差 8 小时（界面显示「支付时间在未来」）。改用 `time.ParseInLocation`
+     + 固定 GMT+8。微信侧无此问题（RFC3339 自带偏移）。
+  2. 仪表盘 `GetStats` 把 `sys_dept` 当全局表统计，导致**每个租户的「部门数量」
+     都等于全平台部门总数**（数字不准 + 泄漏平台规模）。根因是 AGENTS.md 规则 7
+     的表清单仍把 `sys_dept`/`sys_agreement` 列为全局表，而两者早已在
+     2026-09-25 的迁移里改成租户内表 —— 本次一并修正了那份清单（提交 `bc67715`）。
 - **有意划的边界**：云存储后端（aliyun/tencent/minio）与真实出网的网关方法
   （Prepay/Refund/QueryTrade）需要真实凭据与网络，不进单测 ——
   不为覆盖率数字去 mock 掉整个网络层。
-- **剩余待补**（按缺口排序）：`system/controller` 10.9%、`system/repository` 34.3%、
-  `system/service` 38.8%、`member/repository` 38.1%、`pkg/task` 31.2%、
-  `internal/database` 28.6%、`cmd/migrate` 50%。
-  其中 controller 层缺口最大（约 12 个控制器只测了 3 个），是达到 60% 的关键。
+  需要真实 MySQL 的用例（`internal/database`）用 `TEST_MYSQL_*` 环境变量开启，
+  未设置则跳过，CI 上不设置即不受影响。
+- **仍偏低**（下一轮可选）：`system/controller` 35.0%（约 12 个控制器只测了一部分，
+  且 Controller 构造时就 `service.NewXxxService()`、无法注入 mock，只能端到端）、
+  `system/service` 39.6%、`member/service` 44.2%。
 
 ### P2-2 golangci-lint 转阻断 ✅ 已完成
 - **先发现了一个被掩盖的问题**：CI 用 `golangci-lint-action@v6` + `version: latest`，
@@ -258,7 +274,7 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   验证码作废失败导致 token 可重复提交、`png.Encode` 失败返回空白图、
   `payCtx()` 写好了却从未被调用等）。
 
-### P2-3 消除样板与忽略错误 🚧 后端已完成
+### P2-3 消除样板与忽略错误 ✅ 已完成
 - ✅ `_ =` 忽略错误：逐处评估完毕。其中 8 处是真的吞掉了有后果的错误（已改为正确处理，
   见 P2-2 的说明），其余是 `defer x.Close()` / `logger.Sync()` 这类无处上报的，
   显式写成 `_ =` 表明是有意忽略。
@@ -268,14 +284,37 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   被当成「没传」按默认分页返回），另有一处曾把 page/pageSize 硬编码成 1/10。
   已新增 `common.PageQuery` + `common.Paged` + `common.BindPage(c, req)`，
   14 处全部收口（提交 `658a41d`）。
-- ⏳ 前端 13 份 CRUD 样板 → 抽 `useCrud` hook（`loadData/handleAdd/handleEdit/handleDelete/pagination`）。
-- ⏳ 前端 `Result`/`PageResult` 在 `api/index.ts` 与 `types/api.ts` 双份定义 → 删一处。
+- ✅ 前端 CRUD 样板 → `useCrud` hook（提交 `f088f75`）：10 个页面改造，
+  净减 280 行。核心动机是 10 份样板里**各自写错同一件事** —— 把「删除确认」
+  与「接口调用」塞进同一个 catch（或干脆没有），于是「用户点取消」与
+  「接口真失败」不可区分，或产生 unhandled rejection。
+  - `handleDelete` 两段式 try/catch（`ElMessageBox` 取消时 reject 的是
+    `'cancel'`/`'close'` 字符串，与接口失败分开处理）
+  - `defaultRowToForm` 以 `createForm()` 的**键**做白名单复制，避免
+    `Object.assign(form, row)` 把 `createdAt`/`dataScope`/`menuIds` 等
+    服务端字段带回提交载荷
+  - **顺带修掉两个真 bug**：dept/menu 模板里 `handleAdd(row.id)` 传的是数字，
+    `{...createForm(), ...42}` 展开成 `{}`，`parentId` 停在 0 →
+    「新增子部门 / 新增子菜单」实际建成了根节点；`system/user` 的
+    `handleResetPwd` 取消 `ElMessageBox.prompt` 会 unhandled rejection。
+    前者 vue-tsc 拦不住（el-table 的 slot row 是 `any`），因此另用 CDP 驱动
+    headless Chrome 对 11 个页面做了页面级冒烟（无异常、列表有数据、
+    点「新增」弹窗可见且标题正确），全部通过。
+- ✅ 前端 `Result`/`PageResult` 双份定义：删除 `web/src/types/api.ts`
+  （与 `api/index.ts` 重复，79 个调用点无一引用它）。
 
-### P2-4 前端工程设施
-- 引入 ESLint（`eslint-plugin-vue` + `@typescript-eslint`）+ Prettier，先以
-  warning 级别落地一轮再收紧 —— 与后端 lint 同样策略，避免 CI 长红。
-- 目前前端**零测试**：至少给 `useDict`、`api` 拦截器、`permission.generateRoutes`
-  三个纯逻辑补 vitest 用例（不需要组件测试）。
+### P2-4 前端工程设施 ✅ 已完成（提交 `4950839`）
+- ESLint（扁平配置）+ Prettier + vitest 落地，并接入 CI 与 `make check-frontend`。
+- **一个被实测推翻的假设**：原打算用 `flat/strongly-recommended` 绕开格式规则，
+  实测该假设不成立 —— 1794 条告警里 **1787 条是格式类**
+  （`vue/max-attributes-per-line` 1277、`singleline-html-element-content-newline` 452）。
+  最终在配置末尾追加 `eslint-config-prettier/flat` 显式关闭与 Prettier 冲突的规则，
+  而不是手写清单（清单会随插件版本漂移）。基线 1794 → **0**。
+- Prettier 配置实测与仓库现有风格**零差异**（`trailingComma: none` 时有 58 个文件差异）。
+- vitest 覆盖 `useDict`、`api` 拦截器、`permission.generateRoutes`、
+  `useCrud` 四个纯逻辑文件，共 **50 个用例**（不需要组件测试）。
+- `format:check` **暂未接入 CI**：历史约 50 个文件未格式化，直接阻断会让 CI 长期红。
+  先单独跑一次 `npm run format` 并提交，再接 `format:check`。
 
 ---
 

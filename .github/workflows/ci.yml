@@ -78,11 +78,14 @@ jobs:
       - name: 单元测试（vitest）
         run: npm run test
 
-      # 说明：`npm run format:check` 暂未接入 CI。
-      # 仓库历史文件尚未按 .prettierrc 统一格式化（实测 50 个文件有差异），
-      # 直接阻断会让 CI 长期红 —— 与后端 lint 一样分两步走：
-      # 先跑一次 `npm run format` 并单独提交（纯机械改动，便于 review），
-      # 之后再把 format:check 加到这里。
+      # 格式检查：**阻断项**。
+      # 分两步走完了：先单独跑一次 `npm run format`（51 个文件，纯机械改动，
+      # 便于 review），再把它接进来。之所以不一开始就阻断，是因为历史文件
+      # 尚未按 .prettierrc 统一格式化，直接加会让 CI 长期红 ——
+      # 长期红的检查等于没有检查。
+      - name: 格式检查（Prettier）
+        run: npm run format:check
+
       - name: 构建
         run: npx vite build
 
