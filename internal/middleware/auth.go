@@ -76,6 +76,41 @@ func Auth() gin.HandlerFunc {
 		c.Set(common.ContextKeyTenantID, claims.TenantID)
 		c.Set(common.ContextKeyDeptID, claims.DeptID)
 
+		// 平台级身份校验：租户 ID 为 0 的账号代表「不做租户过滤」，
+		// 而 TenantScope(db, 0) 正是「不过滤」的哨兵值 —— 换句话说，
+		// 持有一个 tenantID=0 的 token 就等于拿到了跨租户读写能力。
+		//
+		// 因此这里要求它必须同时持有 admin 角色（当前系统中唯一的平台级身份）：
+		// 光有「token 里写着 0」不足以获得这种权限。这堵住了两类情形：
+		//   · 账号被误建成 tenant_id=0（历史遗留 / 手工 SQL / 迁移脚本出错）
+		//   · 将来某条签发路径把租户信息丢了，签发出一张「无租户」的 token
+		// 两者的共同点是把「上下文丢失」伪装成了「平台级账号」，
+		// 而下游完全无法分辨 —— 只能在入口按身份把住。
+		//
+		// 只对 tenantID==0 的请求解析角色（普通租户账号直接短路），
+		// 避免给每个请求都多加一次角色查询；解析结果与 CasbinAuth 共用同一份缓存。
+		// 角色解析失败时返回空列表，按无权限处理（fail-closed），
+		// 与 CasbinAuth 的取舍一致：算不出来就拒绝，绝不放行。
+		if claims.TenantID == 0 && !canAccessWithoutTenant(resolveRoleCodes(c)) {
+			logger.Log.Warnf(
+				"[auth] 拒绝平台级请求：账号无 admin 角色但 token 租户为 0（user=%d username=%s path=%s）",
+				claims.UserID, claims.Username, c.FullPath())
+			common.Unauthorized(c, "账号租户信息异常，请联系管理员")
+			c.Abort()
+			return
+		}
+
 		c.Next()
 	}
+}
+
+// canAccessWithoutTenant 判断「租户 ID 为 0」的请求能否放行。
+//
+// 抽成独立函数有两个理由：
+//   - 它是本项目的**策略点**：平台级身份 = 持有 admin 角色。策略要变（例如将来
+//     出现平台级审计员角色）只需改这里，且改动会被 TestCanAccessWithoutTenant 拦下
+//   - Auth 前面几步依赖 Redis（吊销检查 fail-closed），测试环境没有 Redis
+//     就走不到这里，纯函数才能被直接覆盖
+func canAccessWithoutTenant(roleCodes []string) bool {
+	return HasAdminRole(roleCodes)
 }
