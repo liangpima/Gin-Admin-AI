@@ -8,7 +8,17 @@ type CreateMenuRequest struct {
 	Redirect   string `json:"redirect" binding:"max=200"`
 	Icon       string `json:"icon" binding:"max=64"`
 	Title      string `json:"title" binding:"max=64"`
-	Type       int8   `json:"type" binding:"required,oneof=0 1 2"`
+	// Type 菜单类型：0 目录 / 1 菜单 / 2 按钮。
+	//
+	// ⚠️ 这里**不能**加 `required`：validator 的 required 判的是「不等于零值」，
+	// 而 int8 的零值 0 恰好是合法取值（目录）。加上它之后「新增目录型菜单」
+	// 会被 400 拒绝，报错还是 Field validation for 'Type' failed on the
+	// 'required' tag 这种看不出所以然的话 —— 前端菜单表单默认 type=1，
+	// 只有用户主动选「目录」时才会踩到，所以很容易长期没被发现。
+	//
+	// `oneof=0 1 2` 已经能挡掉非法取值（3、-1 等）；省略该字段时按 0（目录）处理，
+	// 这是可接受的默认值（前端始终显式传该字段）。
+	Type       int8   `json:"type" binding:"oneof=0 1 2"`
 	Permission string `json:"permission" binding:"max=200"`
 	Sort       int    `json:"sort"`
 	Visible    int8   `json:"visible" binding:"oneof=0 1"`
