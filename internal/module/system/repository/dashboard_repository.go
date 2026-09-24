@@ -22,9 +22,19 @@ func NewDashboardRepository() DashboardRepository {
 
 // GetStats 汇总仪表盘统计数据。
 //
-// sys_user / sys_role / sys_post / sys_operation_log 属于多租户表，必须按租户过滤，
-// 否则会把其他租户的数量也统计进来；
-// sys_menu / sys_dept / sys_config 为全局表，不做租户过滤。
+// 每张表的统计口径必须与它的租户模型一致，否则数字只是「偏大」而不报错：
+//
+//	按租户过滤：sys_user / sys_role / sys_post / sys_operation_log / sys_dept
+//	全局表：    sys_menu / sys_config
+//
+// 关于 sys_dept：它的模型继承 TenantBaseModel、表里有 tenant_id，
+// deptRepository 的每个方法也都施加了 TenantScope（部门是租户内数据，
+// 见 sql/migrations/2026-09-25-dept-tenant.sql）。这里**必须**一起过滤 ——
+// 早前把它当成全局表，导致每个租户的仪表盘都显示全平台的部门数量，
+// 既不准确，也顺带把平台规模泄漏给了租户。
+//
+// 注意 AGENTS.md 规则 7 的表清单里 sys_dept 仍被列为全局表，那是迁移前的
+// 旧描述，以本文件与 deptRepository 为准。
 func (r *dashboardRepository) GetStats(tenantID uint) (*model.DashboardStats, error) {
 	stats := &model.DashboardStats{}
 
@@ -35,7 +45,7 @@ func (r *dashboardRepository) GetStats(tenantID uint) (*model.DashboardStats, er
 		{common.TenantScope(r.db.Model(&model.SysUser{}), tenantID), &stats.UserCount},
 		{common.TenantScope(r.db.Model(&model.SysRole{}), tenantID), &stats.RoleCount},
 		{r.db.Model(&model.SysMenu{}), &stats.MenuCount},
-		{r.db.Model(&model.SysDept{}), &stats.DeptCount},
+		{common.TenantScope(r.db.Model(&model.SysDept{}), tenantID), &stats.DeptCount},
 		{common.TenantScope(r.db.Model(&model.SysPost{}), tenantID), &stats.PostCount},
 		{r.db.Model(&model.SysConfig{}), &stats.ConfigCount},
 		{common.TenantScope(r.db.Model(&model.SysOperationLog{}), tenantID), &stats.LogCount},

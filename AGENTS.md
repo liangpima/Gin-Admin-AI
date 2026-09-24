@@ -203,13 +203,21 @@ type BaseModel struct {
 - 支付回调等外部接口可使用 `FindByXxxForNotify()`（无 tenant 过滤）
 
 **必须按租户过滤的表**（表含 `tenant_id` 列；多数继承 `TenantBaseModel`，
-`pay_order` 为手动声明 `TenantID` 字段）：
+`pay_order` / `sys_operation_log` / `sys_login_log` 为手动声明 `TenantID` 字段）：
 
-`sys_user`、`sys_role`、`sys_post`、`sys_file`、`sys_operation_log`、`sys_login_log`、`pay_order`、`pay_member`、`pay_member_level`、`pay_member_tag`、`pay_points_log`
+`sys_user`、`sys_role`、`sys_post`、`sys_dept`、`sys_agreement`、`sys_file`、`sys_operation_log`、`sys_login_log`、`pay_order`、`pay_member`、`pay_member_level`、`pay_member_tag`、`pay_points_log`
 
 **全局表**（继承 `BaseModel`，**不要**加租户过滤，否则会因无 `tenant_id` 列而 SQL 报错）：
 
-`sys_menu`、`sys_dept`、`sys_config`、`sys_dict_type`、`sys_dict_data`、`sys_agreement`、`sys_tenant`
+`sys_menu`、`sys_config`、`sys_dict_type`、`sys_dict_data`、`sys_tenant`
+
+> ⚠️ **`sys_dept` 与 `sys_agreement` 已改为租户内表**（见
+> `sql/migrations/2026-09-25-dept-tenant.sql` 与 `2026-09-25-agreement-tenant.sql`）。
+> 它们此前被列在「全局表」清单里，而这份过期描述已经造成过一处真实缺陷：
+> 仪表盘 `dashboardRepository.GetStats` 按全局口径统计部门数，导致**每个租户
+> 看到的都是全平台部门数量**（既不准确，也泄漏平台规模）。
+> 新增/修改涉及租户的查询前，请**核对模型是否继承 `TenantBaseModel`
+> 以及表里是否真有 `tenant_id` 列**，不要照抄清单。
 
 **纯关联表**（**没有** `tenant_id` 列，同样不能套 `TenantScope`）：
 
