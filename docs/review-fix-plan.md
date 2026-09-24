@@ -227,7 +227,7 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
     而它又是默认后端）、Init 的回退逻辑、调度器校验顺序
   - `middleware` 25.7% → 61.8%：Casbin 适配器与策略生成、CasbinAuth 六组判定、
     OperatorHoldsPermissions 直接判定
-  - `system/controller` 6.2% → 35.0%：user/role 等控制器的上下文透传
+  - `system/controller` 6.2% → 35.0% → **84.8%**（第二轮见 P2-1b）：user/role 等控制器的上下文透传
   - `member/repository` 38.1% → **93.3%**：level/tag/points_log 三个仓储此前
     整体 0% 覆盖；补多条件过滤（`status=-1` 才表示不过滤）、ReplaceTags 清空与
     跨租户拒绝、Delete 释放唯一值与清理关联、FindByWechatOpenid 的租户隔离
@@ -250,9 +250,29 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   不为覆盖率数字去 mock 掉整个网络层。
   需要真实 MySQL 的用例（`internal/database`）用 `TEST_MYSQL_*` 环境变量开启，
   未设置则跳过，CI 上不设置即不受影响。
-- **仍偏低**（下一轮可选）：`system/controller` 35.0%（约 12 个控制器只测了一部分，
-  且 Controller 构造时就 `service.NewXxxService()`、无法注入 mock，只能端到端）、
-  `system/service` 39.6%、`member/service` 44.2%。
+- **仍偏低**（下一轮可选）：`member/service` 44.2%、`payment/service` 47.5%、
+  `cmd/migrate` 49.5%、`pkg/upload` 52.1%。
+
+### P2-1b `system` 两包深挖 ✅ 已完成
+- 起点：`system/service` 39.6%、`system/controller` 35.0%（P2-1 第一轮留下的两处洼地）。
+- **结果**：39.6% → **79.4%**、35.0% → **84.8%**；全仓包均覆盖率 70.5% → **75.5%**
+  （同为 18 个包、同口径）。新增 6 个测试文件。
+- **做法：不用手写桩，走「真实仓储 + 内存库」端到端**。这两个包大多是薄封装，
+  桩会把「参数有没有透传」「租户条件有没有带上」「软删除有没有释放唯一键」
+  这些真正会出错的地方一起替换掉，测了等于没测；走真实路径还顺带覆盖了
+  `NewXxxService` 构造器 —— 它们此前全是 0%，正是因为老用例一律
+  `&xxxService{repo: mock}` 直接构造、绕开了构造器。
+- Controller 侧新增 `newFullSystemDB` 一次建全套表：Controller 之间会互相构造
+  Service（`UserController` → `NewDeptService`/`NewPostService`），缺一张表会在
+  看起来无关的接口上炸出 SQL 错误。
+- 断言「拒绝」一律同时校验 body 里的业务码与「被拒的写操作真的没落库」，
+  而不是只看 HTTP 状态。
+- **每批都做了变异验证**（临时改回缺陷写法，确认用例转红）。其中一处暴露了
+  用例本身的缺陷：`ClearOperationLogs(0)` 原先只断言「有 error」，而 GORM 对
+  不带条件的 `Delete` 自带 `WHERE conditions required` 兜底 —— 把仓库层的
+  `if tenantID == 0` 整段删掉后用例**仍然转绿**，等于没测。改为断言错误来自
+  仓库层显式护栏（`strings.Contains(err, "租户上下文")`）后才真正转红。
+- 有意不测的部分与 P2-1 相同（云存储后端、真实出网网关方法）。
 
 ### P2-2 golangci-lint 转阻断 ✅ 已完成
 - **先发现了一个被掩盖的问题**：CI 用 `golangci-lint-action@v6` + `version: latest`，
