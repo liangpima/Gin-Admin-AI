@@ -283,13 +283,26 @@ func (g *AlipayGateway) ParseNotify(body []byte) (*PayNotifyResult, error) {
 	if tradeStatus == "TRADE_SUCCESS" || tradeStatus == "TRADE_FINISHED" {
 		result.Status = "success"
 		gmtPayStr := form.Get("gmt_payment")
-		if t, err := time.Parse("2006-01-02 15:04:05", gmtPayStr); err == nil {
+		if t, err := time.ParseInLocation(alipayTimeLayout, gmtPayStr, alipayLocation); err == nil {
 			result.PaidAt = &t
 		}
 	}
 
 	return result, nil
 }
+
+// 支付宝的时间字段格式与时区。
+//
+// gmt_payment 的格式是 yyyy-MM-dd HH:mm:ss，**时区固定为 GMT+8**
+// （支付宝接口文档明确写了这一点，与服务器所在时区无关）。
+//
+// 因此不能用 time.Parse：它会把不带时区的串按 **UTC** 解析，
+// 支付时间会整体差 8 小时 —— 本机就是 +08:00 时，记录出来的支付时间
+// 比真实时间晚 8 小时，在界面上表现为「支付时间在未来」，
+// 对账时也必然对不上。微信侧同理（那边是 RFC3339 自带偏移，所以没这个问题）。
+const alipayTimeLayout = "2006-01-02 15:04:05"
+
+var alipayLocation = time.FixedZone("GMT+8", 8*60*60)
 
 // fenToYuan 把「分」转换为支付宝要求的「元」字符串（保留两位小数）。
 //
