@@ -17,6 +17,25 @@ jobs:
   backend:
     name: 后端（vet / test / build）
     runs-on: ubuntu-latest
+    # ────────────────────────────────────────────────────────────
+    # Redis：middleware 的 Auth 用例需要它才能覆盖「token 合法」之后的路径
+    # （吊销检查 fail-closed 的取舍、平台级身份校验、用户级吊销）。
+    # 不提供的话这些用例会走 t.Skip —— 恰恰是安全最关键的一段在 CI 上没测，
+    # 而本地又跑得到，覆盖率数字会对不上。
+    #
+    # 用例侧用「连不上就 skip」而不是硬依赖，所以没有 Redis 的机器
+    # （比如开发者本机没起 Redis）`go test ./...` 仍然能跑通。
+    # ────────────────────────────────────────────────────────────
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
