@@ -34,6 +34,9 @@ func (m *mockMenuRepo) FindMenusByRoleIDs([]uint) ([]model.SysMenu, error) {
 	return nil, nil
 }
 
+// FindPermissionsByIDs 本文件的用例不涉及授权收敛校验，返回空即可。
+func (m *mockMenuRepo) FindPermissionsByIDs([]uint) ([]string, error) { return nil, nil }
+
 func (m *mockMenuRepo) Update(menu *model.SysMenu) error {
 	// 记录快照：Service 就地修改同一个对象，只存指针检测不出字段被清零
 	snapshot := *menu

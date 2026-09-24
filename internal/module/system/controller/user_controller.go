@@ -293,7 +293,8 @@ func (ctl *UserController) UpdateRoles(c *gin.Context) {
 	}
 
 	tenantID := common.GetTenantID(c)
-	if err := ctl.userService.UpdateRoles(tenantID, &req); err != nil {
+	operatorID := common.GetCurrentUserID(c)
+	if err := ctl.userService.UpdateRoles(tenantID, operatorID, &req); err != nil {
 		common.FailWith(c, err)
 		return
 	}

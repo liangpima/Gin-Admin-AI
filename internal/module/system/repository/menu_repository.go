@@ -13,6 +13,12 @@ type MenuRepository interface {
 	FindAll() ([]model.SysMenu, error)
 	FindAllForManage() ([]model.SysMenu, error)
 	FindMenusByRoleIDs(roleIDs []uint) ([]model.SysMenu, error)
+	// FindPermissionsByIDs 返回这些菜单上配置的权限码（去重、忽略空值）。
+	//
+	// 菜单的 permission 字段即权限码（见 middleware.SyncPoliciesFromRoleMenus），
+	// 因此「这次授权涉及哪些权限」等价于「这些菜单声明了哪些权限码」。
+	// 供角色服务做授权收敛校验：操作者只能授予自己已持有的权限码。
+	FindPermissionsByIDs(ids []uint) ([]string, error)
 	Update(menu *model.SysMenu) error
 	Delete(id uint) error
 	// FindParentID 返回菜单的父节点 ID，ok=false 表示菜单不存在（用于父级成环校验）
@@ -58,6 +64,23 @@ func (r *menuRepository) FindMenusByRoleIDs(roleIDs []uint) ([]model.SysMenu, er
 		Order("sys_menu.sort ASC, sys_menu.id ASC").
 		Distinct().Find(&menus).Error
 	return menus, err
+}
+
+// FindPermissionsByIDs 返回这些菜单声明的权限码（去重、忽略空值）。
+//
+// 只取 permission <> '' 的菜单：目录型菜单不承载权限，勾选它们不构成授权，
+// 因此不参与「只能授予自己已有的权限」的比对（否则低权管理员连建目录都做不了）。
+func (r *menuRepository) FindPermissionsByIDs(ids []uint) ([]string, error) {
+	perms := make([]string, 0)
+	if len(ids) == 0 {
+		return perms, nil
+	}
+	err := r.db.Model(&model.SysMenu{}).
+		Where("id IN ?", ids).
+		Where("permission <> ''").
+		Distinct().
+		Pluck("permission", &perms).Error
+	return perms, err
 }
 
 func (r *menuRepository) Update(menu *model.SysMenu) error {

@@ -21,11 +21,17 @@ const roleTenantB uint = 2
 // 建 casbin_rule 表是为了让 Update 里的 syncPolicies 走通：
 // Update 结尾一定会调 SyncPoliciesFromRoleMenus，表不存在会让它返回错误。
 // 虽然该失败只记日志、不影响用例断言，但没必要让测试输出里充满无关报错。
+//
+// menuRepo 必须一并注入：授权收敛校验会用它查「这些菜单声明了哪些权限码」，
+// 漏了会在勾选菜单时直接空指针。
 func newTestRoleService(t *testing.T) *roleService {
 	t.Helper()
 	testsupport.NewDB(t, &model.SysRole{}, &model.SysRoleMenu{}, &model.SysMenu{},
 		&middleware.CasbinRule{})
-	return &roleService{roleRepo: repository.NewRoleRepository()}
+	return &roleService{
+		roleRepo: repository.NewRoleRepository(),
+		menuRepo: repository.NewMenuRepository(),
+	}
 }
 
 func seedRole(t *testing.T, tenantID uint, code string, status int8) *model.SysRole {

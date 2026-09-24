@@ -21,6 +21,11 @@ type RoleRepository interface {
 	ReplaceMenus(tenantID, roleID uint, menuIDs []uint) error
 	FindMenusByRoleID(tenantID, roleID uint) ([]model.SysMenu, error)
 	FindMenuIDsByRoleID(tenantID, roleID uint) ([]uint, error)
+	// FindPermissionsByRoleIDs 返回这些角色当前持有的权限码（去重、忽略空值）。
+	//
+	// 用于授权收敛校验：把角色授予他人前，必须先确认该角色的权限集是
+	// 操作者自身权限集的子集，否则低权管理员可以借「授予一个高权角色」提权。
+	FindPermissionsByRoleIDs(roleIDs []uint) ([]string, error)
 	// CountByCode 按角色编码统计，**不做租户过滤**（详见实现处注释）
 	CountByCode(code string, excludeID uint) (int64, error)
 	FindByIDs(tenantID uint, ids []uint) ([]model.SysRole, error)
@@ -184,6 +189,25 @@ func (r *roleRepository) FindMenuIDsByRoleID(tenantID, roleID uint) ([]uint, err
 	}
 	err := query.Pluck("menu_id", &menuIDs).Error
 	return menuIDs, err
+}
+
+// FindPermissionsByRoleIDs 汇总这些角色经「角色-菜单」关联到的权限码。
+//
+// 刻意不做租户过滤：调用方（Service）必须先用 FindByIDs 确认角色归属，
+// 否则这里过滤掉越权角色会让它「看起来权限为空」从而通过收敛校验 ——
+// 把拒绝伪装成放行是这类校验最危险的失败方向。
+func (r *roleRepository) FindPermissionsByRoleIDs(roleIDs []uint) ([]string, error) {
+	perms := make([]string, 0)
+	if len(roleIDs) == 0 {
+		return perms, nil
+	}
+	err := r.db.Model(&model.SysMenu{}).
+		Joins("JOIN sys_role_menu ON sys_role_menu.menu_id = sys_menu.id").
+		Where("sys_role_menu.role_id IN ?", roleIDs).
+		Where("sys_menu.permission <> ''").
+		Distinct().
+		Pluck("sys_menu.permission", &perms).Error
+	return perms, err
 }
 
 // CountByCode 统计同编码角色数，**刻意不做租户过滤**。

@@ -34,8 +34,12 @@ var syncMu sync.Mutex
 const (
 	// rbacDomain 与 config/casbin/model.conf 中的 dom 对应
 	rbacDomain = "default"
-	// adminRoleCode 超级管理员角色 code，始终持有通配策略
-	adminRoleCode = "admin"
+	// AdminRoleCode 超级管理员角色编码，始终持有通配策略。
+	//
+	// 导出它是因为「谁持有这个角色」等价于「谁拥有全部权限」：业务侧做授权收敛
+	// 判定（如角色服务禁止低权管理员授予超出自身范围的权限）时必须能识别出来，
+	// 否则会把 admin 角色当作普通角色去逐条比对权限码，从而误判为可授予。
+	AdminRoleCode = "admin"
 	// rbacRoleCacheTTL 用户角色缓存时长，角色变更后最多这么久生效
 	rbacRoleCacheTTL = 60 * time.Second
 	// maxRuleValueLen casbin_rule 各策略列的长度上限
@@ -93,8 +97,8 @@ func SyncPoliciesFromRoleMenus() error {
 	//
 	// 必须**校验通过后才动数据库**：否则一旦中途失败，会出现
 	// 「旧策略已清空、新策略没写进去」→ 除 admin 外全站 403 的严重后果。
-	rules := [][]string{{adminRoleCode, rbacDomain, "*", "*"}}
-	seen := map[string]bool{adminRoleCode + "\x00*": true}
+	rules := [][]string{{AdminRoleCode, rbacDomain, "*", "*"}}
+	seen := map[string]bool{AdminRoleCode + "\x00*": true}
 
 	for _, r := range rows {
 		if r.RoleCode == "" || r.Permission == "" {
@@ -223,35 +227,47 @@ func SetRoleResolver(r RoleResolver) {
 }
 
 // resolveRoleCodes 解析当前用户的角色 code 列表，作为 RBAC 的匹配主体。
-// 结果短时缓存于 Redis，避免每个请求都查库。
 func resolveRoleCodes(c *gin.Context) []string {
-	userID := common.GetCurrentUserID(c)
-	if userID == 0 {
+	codes, err := RoleCodesFor(common.GetTenantID(c), common.GetCurrentUserID(c))
+	if err != nil {
+		// 解析失败绝不能当作「有权限」：返回 nil，由上层按无角色拒绝
+		logger.Log.Errorf("[casbin] %v", err)
 		return nil
 	}
-	tenantID := common.GetTenantID(c)
+	return codes
+}
+
+// RoleCodesFor 解析指定用户在指定租户下的角色 code 列表（带短时缓存）。
+//
+// 与 resolveRoleCodes 共用同一份缓存，因此业务侧（Service 层）调用它做授权
+// 收敛判定时不会引入额外的查库开销。
+//
+// 为什么不接收 *gin.Context：Service 层不允许触碰 gin.Context（见 AGENTS.md 规则 2），
+// 而「操作者持有哪些角色」这一判断在 Controller 与 Service 两侧都要用。
+// 因此这里只依赖 (tenantID, userID) 两个标量，由调用方各自从上下文取出。
+func RoleCodesFor(tenantID, userID uint) ([]string, error) {
+	if userID == 0 {
+		return nil, nil
+	}
 
 	ctx := context.Background()
 	cacheKey := fmt.Sprintf("rbac:roles:%d:%d", tenantID, userID)
 
 	if v, err := cache.Get(ctx, cacheKey); err == nil {
 		if codes := splitRoleCodes(v); len(codes) > 0 {
-			return codes
+			return codes, nil
 		}
 	}
 
-	// 未注入实现属启动配置错误。返回 nil 会让上层按「无角色」拒绝（403），
+	// 未注入实现属启动配置错误。返回错误让上层按「无角色」拒绝（403），
 	// 比放行更安全，同时留下能指向根因的日志。
 	if roleResolver == nil {
-		logger.Log.Errorf("[casbin] RoleResolver 未注入，无法解析用户 %d 的角色", userID)
-		return nil
+		return nil, fmt.Errorf("RoleResolver 未注入，无法解析用户 %d 的角色", userID)
 	}
 
 	codes, err := roleResolver.RoleCodesOf(tenantID, userID)
 	if err != nil {
-		// 查库失败绝不能当作「有权限」：返回 nil，由上层按无角色拒绝
-		logger.Log.Errorf("[casbin] 解析用户 %d 的角色失败: %v", userID, err)
-		return nil
+		return nil, fmt.Errorf("解析用户 %d 的角色失败: %w", userID, err)
 	}
 
 	if len(codes) > 0 {
@@ -261,7 +277,70 @@ func resolveRoleCodes(c *gin.Context) []string {
 			logger.Log.Warnf("[casbin] 角色缓存写入失败（仅影响性能）: userID=%d err=%v", userID, err)
 		}
 	}
-	return codes
+	return codes, nil
+}
+
+// HasAdminRole 判断角色列表里是否包含超级管理员。
+// admin 持有通配策略（*/*），在授权收敛判定中应直接放行。
+func HasAdminRole(roleCodes []string) bool {
+	for _, code := range roleCodes {
+		if code == AdminRoleCode {
+			return true
+		}
+	}
+	return false
+}
+
+// OperatorHoldsPermissions 判断操作者是否**持有全部**指定权限码。
+//
+// 用途是「授权必须向上收敛」：低权管理员不得把超出自身权限范围的菜单/角色
+// 授予他人，否则他只要给自己或他人挂上全量菜单，就能拿到超管权限（垂直提权）。
+//
+// 判定口径与 CasbinAuth 保持一致：逐个角色尝试 Enforce，任一角色命中该权限码
+// 即视为持有；持有 admin 角色直接放行（与 SyncPoliciesFromRoleMenus 写入的
+// 通配策略同源，不依赖 enforcer 是否已加载）。
+//
+// 空 permissions 表示「本次没有涉及任何需要鉴权的权限码」（例如只勾选了目录型
+// 菜单，permission 为空），返回 true —— 与「空 MenuIds 不拦截」的约定一致。
+func OperatorHoldsPermissions(tenantID, operatorID uint, permissions []string) (bool, error) {
+	if len(permissions) == 0 {
+		return true, nil
+	}
+
+	roles, err := RoleCodesFor(tenantID, operatorID)
+	if err != nil {
+		return false, err
+	}
+	if len(roles) == 0 {
+		return false, nil
+	}
+	if HasAdminRole(roles) {
+		return true, nil
+	}
+
+	enforcer := currentEnforcer()
+	if enforcer == nil {
+		// 鉴权设施未就绪：拒绝而不是放行，与 CasbinAuth 的策略一致
+		return false, fmt.Errorf("casbin enforcer 未初始化，无法判定操作者权限")
+	}
+
+	for _, perm := range permissions {
+		held := false
+		for _, role := range roles {
+			ok, err := enforcer.Enforce(role, rbacDomain, perm, "*")
+			if err != nil {
+				return false, fmt.Errorf("权限校验出错: %w", err)
+			}
+			if ok {
+				held = true
+				break
+			}
+		}
+		if !held {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func splitRoleCodes(v string) []string {

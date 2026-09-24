@@ -40,6 +40,12 @@ func (s *stubRoleService) FindList(tenantID uint, req *dto.RoleListRequest) ([]i
 func (s *stubRoleService) UpdateStatus(tenantID uint, req *dto.StatusRequest) error { return nil }
 func (s *stubRoleService) FindAll(tenantID uint) ([]model.SysRole, error)          { return nil, nil }
 
+// EnsureRolesGrantable 在这些用例里不做拦截：本文件的重点是租户归属校验，
+// 授权收敛的判定逻辑由 role_service_test.go 覆盖。
+func (s *stubRoleService) EnsureRolesGrantable(tenantID, operatorID uint, roles []model.SysRole) error {
+	return nil
+}
+
 // TestNormalizeRoleIDsRejectsForeignRole 回归保护：跨租户角色分配必须被拒绝。
 //
 // sys_user_role 是纯关联表（只有 user_id / role_id，没有 tenant_id 列），
@@ -51,7 +57,7 @@ func TestNormalizeRoleIDsRejectsForeignRole(t *testing.T) {
 	stub := &stubRoleService{roles: []model.SysRole{{Code: "editor"}}}
 	svc := &userService{roleService: stub}
 
-	_, err := svc.normalizeRoleIDs(2, []uint{1, 99})
+	_, err := svc.normalizeRoleIDs(2, 1, []uint{1, 99})
 	if err == nil {
 		t.Fatal("包含非本租户的角色 ID 时必须拒绝")
 	}
@@ -65,7 +71,7 @@ func TestNormalizeRoleIDsAcceptsOwnRoles(t *testing.T) {
 	stub := &stubRoleService{roles: []model.SysRole{{Code: "editor"}, {Code: "viewer"}}}
 	svc := &userService{roleService: stub}
 
-	got, err := svc.normalizeRoleIDs(2, []uint{1, 2})
+	got, err := svc.normalizeRoleIDs(2, 1, []uint{1, 2})
 	if err != nil {
 		t.Fatalf("本租户角色不应报错: %v", err)
 	}
@@ -79,7 +85,7 @@ func TestNormalizeRoleIDsDedupesAndDropsZero(t *testing.T) {
 	stub := &stubRoleService{roles: []model.SysRole{{Code: "editor"}}}
 	svc := &userService{roleService: stub}
 
-	got, err := svc.normalizeRoleIDs(1, []uint{1, 1, 0, 1})
+	got, err := svc.normalizeRoleIDs(1, 1, []uint{1, 1, 0, 1})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -97,7 +103,7 @@ func TestNormalizeRoleIDsEmptySkipsQuery(t *testing.T) {
 	svc := &userService{roleService: stub}
 
 	for _, in := range [][]uint{nil, {}, {0}} {
-		got, err := svc.normalizeRoleIDs(1, in)
+		got, err := svc.normalizeRoleIDs(1, 1, in)
 		if err != nil {
 			t.Errorf("空输入不应报错, in=%v, err=%v", in, err)
 		}
@@ -107,7 +113,7 @@ func TestNormalizeRoleIDsEmptySkipsQuery(t *testing.T) {
 	}
 
 	// 传空数组表示「清空角色」，调用方会走到 ReplaceRoles(userID, nil)
-	got, err := svc.normalizeRoleIDs(1, []uint{})
+	got, err := svc.normalizeRoleIDs(1, 1, []uint{})
 	if err != nil || got != nil {
 		t.Errorf("空数组应返回 (nil, nil) 以便清空角色, got=%v err=%v", got, err)
 	}
@@ -119,7 +125,7 @@ func TestNormalizeRoleIDsPropagatesSystemError(t *testing.T) {
 	stub := &stubRoleService{err: errors.New("db down")}
 	svc := &userService{roleService: stub}
 
-	_, err := svc.normalizeRoleIDs(1, []uint{1})
+	_, err := svc.normalizeRoleIDs(1, 1, []uint{1})
 	if err == nil {
 		t.Fatal("系统错误必须上抛")
 	}
@@ -430,7 +436,7 @@ func TestUserServiceUpdateRoles(t *testing.T) {
 		}}
 		svc := newTestUserService(repo)
 
-		err := svc.UpdateRoles(testTenantID, &dto.UpdateUserRolesRequest{ID: 999, RoleIds: []uint{1}})
+		err := svc.UpdateRoles(testTenantID, 1, &dto.UpdateUserRolesRequest{ID: 999, RoleIds: []uint{1}})
 		assertBizError(t, err, common.CodeNotFound)
 		if repo.replacedRoles != nil {
 			t.Error("用户不存在时不应改写角色")

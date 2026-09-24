@@ -31,7 +31,7 @@ type UserService interface {
 	// ExportList 导出用列表：同样的筛选条件，但不做分页截断
 	ExportList(tenantID uint, req *dto.UserListRequest) ([]interface{}, error)
 	UpdateStatus(tenantID uint, req *dto.StatusRequest) error
-	UpdateRoles(tenantID uint, req *dto.UpdateUserRolesRequest) error
+	UpdateRoles(tenantID, operatorID uint, req *dto.UpdateUserRolesRequest) error
 	UpdateDept(tenantID uint, req *dto.UpdateUserDeptRequest) error
 	ResetPassword(tenantID uint, req *dto.ResetPasswordRequest) error
 	ChangePassword(userID uint, req *dto.ChangePasswordRequest) error
@@ -90,7 +90,11 @@ func dedupeNonZeroIDs(ids []uint) []uint {
 //
 // tenantID 为 0 时 FindByIDs 会退化为不过滤 —— 平台级账号可跨租户分配角色，
 // 与项目既定的 TenantScope 语义保持一致。
-func (s *userService) normalizeRoleIDs(tenantID uint, roleIDs []uint) ([]uint, error) {
+//
+// 除归属外还要做**授权收敛**校验（EnsureRolesGrantable）：把角色绑到用户上
+// 等价于把该角色的全部权限授予该用户，若只校验归属，一个只有 user:edit 权限的
+// 管理员就能把超管角色绑给自己或新建的账号 —— 这是比改角色菜单更短的一条提权路径。
+func (s *userService) normalizeRoleIDs(tenantID, operatorID uint, roleIDs []uint) ([]uint, error) {
 	unique := dedupeNonZeroIDs(roleIDs)
 	if len(unique) == 0 {
 		return nil, nil
@@ -103,6 +107,9 @@ func (s *userService) normalizeRoleIDs(tenantID uint, roleIDs []uint) ([]uint, e
 	if len(roles) != len(unique) {
 		// 不点名是哪个 ID 不合法：否则可被用来探测其他租户的角色 ID 是否存在
 		return nil, common.NewBizError("包含无效的角色，请刷新后重试")
+	}
+	if err := s.roleService.EnsureRolesGrantable(tenantID, operatorID, roles); err != nil {
+		return nil, err
 	}
 	return unique, nil
 }
@@ -136,7 +143,7 @@ func (s *userService) Create(tenantID uint, req *dto.CreateUserRequest, operator
 
 	// 先校验角色/岗位归属再落库：若放在创建之后，校验失败会留下一个
 	// 已建好但没有角色/岗位的半成品用户
-	roleIDs, err := s.normalizeRoleIDs(tenantID, req.RoleIds)
+	roleIDs, err := s.normalizeRoleIDs(tenantID, operatorID, req.RoleIds)
 	if err != nil {
 		return err
 	}
@@ -227,26 +234,38 @@ func (s *userService) Update(tenantID uint, req *dto.UpdateUserRequest, operator
 	}
 	user.UpdateBy = operatorID
 
+	// 角色/岗位的归属与授权收敛校验统一提到落库之前。
+	//
+	// 原先它们在 userRepo.Update 之后执行，于是「资料已改、角色被拒」会留下
+	// 半成品状态：用户看到 403 以为整次提交都失败了，实际昵称/邮箱已经变了。
+	// 与 Create 的「先校验再落库」保持一致。
+	var roleIDs []uint
+	if req.RoleIds != nil {
+		// 传空数组表示清空角色；传了非本租户或超出自身权限范围的角色会被拒绝
+		roleIDs, err = s.normalizeRoleIDs(tenantID, operatorID, req.RoleIds)
+		if err != nil {
+			return err
+		}
+	}
+	var postIDs []uint
+	if req.PostIds != nil {
+		// 传空数组表示清空岗位；传了非本租户的岗位 ID 会被拒绝
+		postIDs, err = s.normalizePostIDs(tenantID, req.PostIds)
+		if err != nil {
+			return err
+		}
+	}
+
 	if err := s.userRepo.Update(user); err != nil {
 		return err
 	}
 
 	if req.RoleIds != nil {
-		// 传空数组表示清空角色；传了非本租户的角色 ID 会被拒绝
-		roleIDs, err := s.normalizeRoleIDs(tenantID, req.RoleIds)
-		if err != nil {
-			return err
-		}
 		if err := s.userRepo.ReplaceRoles(user.ID, roleIDs); err != nil {
 			return err
 		}
 	}
 	if req.PostIds != nil {
-		// 传空数组表示清空岗位；传了非本租户的岗位 ID 会被拒绝
-		postIDs, err := s.normalizePostIDs(tenantID, req.PostIds)
-		if err != nil {
-			return err
-		}
 		if err := s.userRepo.ReplacePosts(user.ID, postIDs); err != nil {
 			return err
 		}
@@ -374,14 +393,15 @@ func (s *userService) UpdateStatus(tenantID uint, req *dto.StatusRequest) error 
 	return nil
 }
 
-func (s *userService) UpdateRoles(tenantID uint, req *dto.UpdateUserRolesRequest) error {
+func (s *userService) UpdateRoles(tenantID, operatorID uint, req *dto.UpdateUserRolesRequest) error {
 	_, err := s.userRepo.FindByID(tenantID, req.ID)
 	if err != nil {
 		return common.NewNotFoundError("用户不存在")
 	}
 
-	// 校验角色归属：这是「更新角色」接口，也是跨租户提权最直接的入口
-	roleIDs, err := s.normalizeRoleIDs(tenantID, req.RoleIds)
+	// 校验角色归属与授权收敛：这是「更新角色」接口，也是跨租户提权
+	// 与垂直提权最直接的入口
+	roleIDs, err := s.normalizeRoleIDs(tenantID, operatorID, req.RoleIds)
 	if err != nil {
 		return err
 	}

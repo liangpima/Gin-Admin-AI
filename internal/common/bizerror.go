@@ -57,6 +57,17 @@ func NewUnauthorizedError(msg string) error {
 	return &BizError{Code: CodeUnauthorized, Msg: msg}
 }
 
+// NewForbiddenError 身份已确认，但无权执行该操作，对应 403。
+//
+// 与 401 的区别在语义而不只是数字：401 是「你是谁我不清楚」（需要重新登录），
+// 403 是「知道你是谁，但这件事不归你做」（重新登录也没用）。
+// 前端对 401 会清会话并跳登录页，对 403 只弹提示，混用会让用户被无端踢出登录。
+//
+// 典型场景：授权收敛 —— 低权管理员试图把超出自己权限范围的菜单/角色授予他人。
+func NewForbiddenError(msg string) error {
+	return &BizError{Code: CodeForbidden, Msg: msg}
+}
+
 // ErrDuplicateKey 唯一约束冲突的哨兵错误。
 //
 // 由 Repository 在捕获到数据库唯一键冲突（MySQL 1062）时包装返回，
