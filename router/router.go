@@ -105,6 +105,17 @@ func protected(g *gin.RouterGroup, method, path, code string, h gin.HandlerFunc)
 	g.Handle(method, path, h)
 }
 
+// protectedAdmin 与 protected 相同，但额外要求操作者持有 admin 角色。
+//
+// 用于**全局表**的写接口（sys_config 保存 OSS / 支付密钥、字典维护等）：
+// 这些表没有 tenant_id，任何持有对应权限码的租户管理员都能改写，
+// 而改动会作用到所有租户。Casbin 只能表达「有没有某个权限码」，
+// 表达不了「必须是平台级角色」，因此这类接口在权限码之外再加一道角色判定（AND）。
+func protectedAdmin(g *gin.RouterGroup, method, path, code string, h gin.HandlerFunc) {
+	middleware.RegisterPermission(method, g.BasePath()+path, code)
+	g.Handle(method, path, middleware.RequireAdminRole(), h)
+}
+
 func Setup(mode string) *gin.Engine {
 	gin.SetMode(mode)
 
@@ -261,13 +272,18 @@ func Setup(mode string) *gin.Engine {
 			protected(system, http.MethodDelete, "/post/:id", permPostDelete, postController.Delete)
 			protected(system, http.MethodGet, "/post/list", permPostList, postController.FindList)
 
-			protected(system, http.MethodPost, "/config", permConfigAdd, configController.Create)
-			protected(system, http.MethodPut, "/config", permConfigEdit, configController.Update)
-			protected(system, http.MethodDelete, "/config/:id", permConfigDelete, configController.Delete)
+			// sys_config 是**全局表**（无 tenant_id），承载 OSS / 支付 / 短信等
+			// 平台级凭据。因此写接口用 protectedAdmin：权限码之外再要求 admin 角色，
+			// 否则任何拿到 config:edit 的租户管理员都能把平台共用的凭据换成自己的，
+			// 影响范围是**所有租户**（见 middleware.RequireAdminRole）。
+			// 读接口不限制：值里的敏感项已在 Service 层打码（maskConfig）。
+			protectedAdmin(system, http.MethodPost, "/config", permConfigAdd, configController.Create)
+			protectedAdmin(system, http.MethodPut, "/config", permConfigEdit, configController.Update)
+			protectedAdmin(system, http.MethodDelete, "/config/:id", permConfigDelete, configController.Delete)
 			protected(system, http.MethodGet, "/config/list", permConfigList, configController.FindList)
 			protected(system, http.MethodGet, "/config/prefix", permConfigList, configController.FindByPrefix)
-			protected(system, http.MethodPut, "/config/batch", permConfigEdit, configController.BatchSave)
-			protected(system, http.MethodPost, "/config/upload", permConfigEdit, configController.UploadCert)
+			protectedAdmin(system, http.MethodPut, "/config/batch", permConfigEdit, configController.BatchSave)
+			protectedAdmin(system, http.MethodPost, "/config/upload", permConfigEdit, configController.UploadCert)
 
 			protected(system, http.MethodPost, "/dict/type", permDictAdd, dictController.CreateType)
 			protected(system, http.MethodPut, "/dict/type/:id", permDictEdit, dictController.UpdateType)

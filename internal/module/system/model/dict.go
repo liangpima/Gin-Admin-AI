@@ -4,6 +4,25 @@ import (
 	"go-admin/internal/common"
 )
 
+// 字典是**有意的平台级数据**：sys_dict_type / sys_dict_data 都不继承
+// TenantBaseModel、没有 tenant_id，查询也**不要**套 TenantScope
+// （套了会因无 tenant_id 列直接 SQL 报错）。
+//
+// 为什么必须全局共享：字典是「值 → 显示文案」的**共同词汇表**，
+// 而字典类型编码是代码里的字面量（前端 `useDict('sys_user_status')`、
+// 后端校验也按固定编码取选项）。按租户各存一份会让同一套编码在不同租户下
+// 指向不同数据，代码里的字面量立刻失去确定性 —— 新增一个状态值时
+// 还得保证每个租户都同步，实际上做不到。
+//
+// 由此带来的残留风险（已知并接受，记录在此以免后来者重新发现一遍）：
+// 持有 dict:add/edit/delete 的角色改的是**所有租户共用**的文案与选项，
+// 影响范围跨租户。当前默认只有 admin 角色持有这些权限码；
+// 若某个部署要把字典维护下放给租户管理员，需要另行评估
+// （或参照 config 的做法用 middleware.RequireAdminRole 收窄写入）。
+//
+// 读取侧不受影响：业务页面取选项走 `GET /dict/data/type/:type`（仅登录态），
+// 因此任何登录用户都能拿到下拉/标签所需的引用数据。
+
 type SysDictType struct {
 	common.BaseModel
 	Name   string `gorm:"type:varchar(128);comment:字典名称" json:"name"`

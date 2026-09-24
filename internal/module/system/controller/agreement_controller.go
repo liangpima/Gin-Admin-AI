@@ -27,7 +27,8 @@ func (ctl *AgreementController) Create(c *gin.Context) {
 		common.Error(c, common.CodeBadRequest, err.Error())
 		return
 	}
-	if err := ctl.agreementService.Create(req.Title, req.Content, req.Type, req.Sort, req.Status, common.GetCurrentUserID(c)); err != nil {
+	if err := ctl.agreementService.Create(req.Title, req.Content, req.Type, req.Sort, req.Status,
+			common.GetCurrentUserID(c), common.GetTenantID(c)); err != nil {
 		common.FailWith(c, err)
 		return
 	}
@@ -47,7 +48,8 @@ func (ctl *AgreementController) Update(c *gin.Context) {
 		common.Error(c, common.CodeBadRequest, err.Error())
 		return
 	}
-	if err := ctl.agreementService.Update(req.ID, req.Title, req.Content, req.Type, req.Sort, req.Status, common.GetCurrentUserID(c)); err != nil {
+	if err := ctl.agreementService.Update(req.ID, req.Title, req.Content, req.Type, req.Sort, req.Status,
+			common.GetCurrentUserID(c), common.GetTenantID(c)); err != nil {
 		common.FailWith(c, err)
 		return
 	}
@@ -60,7 +62,7 @@ func (ctl *AgreementController) Delete(c *gin.Context) {
 		common.Error(c, common.CodeBadRequest, "参数错误")
 		return
 	}
-	if err := ctl.agreementService.Delete(id); err != nil {
+	if err := ctl.agreementService.Delete(common.GetTenantID(c), id); err != nil {
 		common.FailWith(c, err)
 		return
 	}
@@ -77,7 +79,7 @@ func (ctl *AgreementController) FindList(c *gin.Context) {
 	}
 	c.ShouldBindQuery(&req)
 	req.Page, req.PageSize = common.NormalizePageParams(req.Page, req.PageSize)
-	list, total, err := ctl.agreementService.FindList(req.Name, req.Type, req.Status, req.Page, req.PageSize)
+	list, total, err := ctl.agreementService.FindList(common.GetTenantID(c), req.Name, req.Type, req.Status, req.Page, req.PageSize)
 	if err != nil {
 		common.FailWith(c, err)
 		return
@@ -91,7 +93,7 @@ func (ctl *AgreementController) FindByType(c *gin.Context) {
 		common.Error(c, common.CodeBadRequest, "类型不能为空")
 		return
 	}
-	agreement, err := ctl.agreementService.FindByType(typ)
+	agreement, err := ctl.agreementService.FindByType(common.GetTenantID(c), typ)
 	if err != nil {
 		common.FailWith(c, err)
 		return

@@ -272,6 +272,7 @@ CREATE TABLE IF NOT EXISTS `sys_tenant` (
 -- 协议管理表
 CREATE TABLE IF NOT EXISTS `sys_agreement` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `tenant_id` bigint unsigned DEFAULT 0 COMMENT '租户ID',
   `title` varchar(128) NOT NULL COMMENT '标题',
   `content` longtext COMMENT '内容',
   `type` varchar(32) DEFAULT '' COMMENT '类型',
@@ -285,8 +286,9 @@ CREATE TABLE IF NOT EXISTS `sys_agreement` (
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   PRIMARY KEY (`id`),
   KEY `idx_type` (`type`),
+  KEY `idx_tenant_id` (`tenant_id`),
   KEY `idx_deleted_at` (`deleted_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='协议管理表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='协议管理表（租户内数据）';
 
 -- 关联表
 CREATE TABLE IF NOT EXISTS `sys_user_role` (

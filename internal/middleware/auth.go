@@ -114,3 +114,31 @@ func Auth() gin.HandlerFunc {
 func canAccessWithoutTenant(roleCodes []string) bool {
 	return HasAdminRole(roleCodes)
 }
+
+// RequireAdminRole 要求当前操作者持有 admin 角色，否则 403。
+//
+// 用途：**全局表**的写接口。这类表没有 tenant_id（sys_config / sys_dict_type /
+// sys_dict_data / sys_agreement 等），任何持有对应权限码的租户管理员都能改写，
+// 而改动的效果会作用到**所有租户** —— 例如把平台共用的 OSS / 支付凭据换成自己的，
+// 或改掉全平台共用的字典文案。
+//
+// 为什么不靠 Casbin 解决：Casbin 的策略主体是权限码，只能表达「有没有某个权限码」，
+// 表达不了「必须是平台级角色」。若改成用一个不下发给任何菜单的权限码来限制，
+// 那层保护是隐式的 —— 谁把该码挂到菜单上，保护就悄悄失效了。
+// 显式判定角色，意图和失效边界都写在代码里。
+//
+// 与 CasbinAuth 是 **AND** 关系（串联在路由上），两者都通过才放行：
+// 权限码负责「这个接口归哪类人」，本中间件负责「这类人里只有超管能动全局数据」。
+func RequireAdminRole() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !HasAdminRole(resolveRoleCodes(c)) {
+			logger.Log.Warnf(
+				"[auth] 拒绝平台级数据写入：操作者无 admin 角色（user=%d path=%s）",
+				common.GetCurrentUserID(c), c.FullPath())
+			common.Forbidden(c, "该操作仅限超级管理员")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}

@@ -1,6 +1,15 @@
 package middleware
 
-import "testing"
+import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"go-admin/internal/common"
+
+	"github.com/gin-gonic/gin"
+)
 
 // TestCanAccessWithoutTenant 平台级身份的判定策略（P1-3）。
 //
@@ -34,6 +43,77 @@ func TestCanAccessWithoutTenant(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := canAccessWithoutTenant(tc.roleCodes); got != tc.want {
 				t.Errorf("canAccessWithoutTenant(%v) = %v，期望 %v", tc.roleCodes, got, tc.want)
+			}
+		})
+	}
+}
+
+// stubRoleResolver 用于直接驱动中间件，不依赖 Redis 与数据库。
+type stubRoleResolver struct {
+	codes []string
+	err   error
+}
+
+func (s stubRoleResolver) RoleCodesOf(tenantID, userID uint) ([]string, error) {
+	return s.codes, s.err
+}
+
+// withRoleResolver 临时注入角色解析实现并在用例结束时还原。
+// roleResolver 是包级变量（启动时注入一次、运行期只读），测试里必须还原，
+// 否则会影响同包其它用例。
+func withRoleResolver(t *testing.T, r RoleResolver) {
+	t.Helper()
+	prev := roleResolver
+	roleResolver = r
+	t.Cleanup(func() { roleResolver = prev })
+}
+
+// TestRequireAdminRole 平台级数据写接口的角色护栏（P1-2）。
+//
+// sys_config / 字典这类**全局表**没有 tenant_id，任何持有对应权限码的角色
+// 改动的都是所有租户共用的数据。Casbin 只能表达「有没有某个权限码」，
+// 表达不了「必须是平台级角色」，所以这类接口额外串联本中间件。
+func TestRequireAdminRole(t *testing.T) {
+	cases := []struct {
+		name       string
+		resolver   RoleResolver
+		wantStatus int
+	}{
+		{"admin 放行", stubRoleResolver{codes: []string{AdminRoleCode}}, 200},
+		{"admin 与其它角色并存仍放行", stubRoleResolver{codes: []string{"editor", AdminRoleCode}}, 200},
+		{"普通角色被拒", stubRoleResolver{codes: []string{"editor"}}, 403},
+		{"无角色被拒", stubRoleResolver{codes: nil}, 403},
+		// 解析失败（Redis/DB 故障）必须按无权限处理，否则「算不出来」会变成放行
+		{"角色解析失败被拒", stubRoleResolver{err: errors.New("redis down")}, 403},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withRoleResolver(t, tc.resolver)
+
+			handlerRan := false
+			r := gin.New()
+			// 身份信息必须由**引擎内部**的中间件写入：
+			// 在外部测试上下文上 c.Set 的值不会带到 r.ServeHTTP 新建的上下文里。
+			r.POST("/api/v1/system/config",
+				func(c *gin.Context) {
+					c.Set(common.ContextKeyUserID, uint(7))
+					c.Set(common.ContextKeyTenantID, uint(1))
+				},
+				RequireAdminRole(),
+				func(c *gin.Context) {
+					handlerRan = true
+					c.Status(http.StatusOK)
+				})
+
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/system/config", nil))
+
+			if w.Code != tc.wantStatus {
+				t.Errorf("状态码应为 %d，实际 %d（body=%s）", tc.wantStatus, w.Code, w.Body.String())
+			}
+			if wantRun := tc.wantStatus == 200; handlerRan != wantRun {
+				t.Errorf("业务处理函数是否执行应为 %v，实际 %v", wantRun, handlerRan)
 			}
 		})
 	}

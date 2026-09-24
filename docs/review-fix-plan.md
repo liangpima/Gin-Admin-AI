@@ -15,7 +15,7 @@
 | P1-4 LIKE 转义 | ✅ 已完成 | `8c45aa4` 18 处统一转义 |
 | P1-3 租户 0 旁路 | ✅ 已完成 | `0e7d72d` 平台级身份需持有 admin 角色 |
 | P1-1 dept 租户隔离 | ✅ 已完成 | 模型/仓储/服务/控制器 + 迁移（两步回填）+ BuildTreeForest |
-| P1-2 全局表语义 | ⏳ 未开始 | |
+| P1-2 全局表语义 | ✅ 已完成 | dict 显式声明全局；config 写权限收窄为 admin；agreement 加 tenant_id |
 | P2 工程质量 | ⏳ 未开始 | |
 | P3 体验与长期 | ⏳ 未开始 | |
 
@@ -167,16 +167,34 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   Controller 层 4 个 httptest 用例（含「新建部门落在操作者租户下」）。
   三处均已做「移除修复即转红」的验证。
 
-### P1-2 全局表语义显式化 [Medium]
+### P1-2 全局表语义显式化 [Medium] ✅ 已完成
 - **现状**：`config`（含 OSS 密钥）、`dict`、`agreement` 三表无 `tenant_id`，
   任一租户管理员可经 `config_controller.go:123-148 BatchSave` 改写全平台 OSS 凭据。
-- **修法**（按表分级，不一刀切加租户字段）：
-  - `dict`：字典本应全局共享 → **保持全局**，但在 model 注释里写明"有意的平台级数据"。
-  - `config`：拆两段 —— `sys_config` 保持全局但**写权限码收窄**为仅 `admin` 角色
-    （`router.go` 的 permConfigEdit 校验加操作者角色判断），站点展示类 key 另开租户级表
-    或按 `key` 前缀白名单放行租户编辑。
-  - `agreement`：用户协议通常租户各有版本 → 加 `tenant_id`，迁移同 P1-1。
-- **验收**：租户管理员修改 OSS 配置 → 403；字典下拉全租户可用。
+- **实施结果**（按表分级，不一刀切加租户字段）：
+  - `dict`：**保持全局**，在 `model/dict.go` 写明「有意的平台级数据」及理由
+    （字典类型编码是代码里的字面量，按租户各存一份会让字面量失去确定性），
+    并记录残留风险（持有 dict:add/edit 的角色改的是所有租户共用的文案；
+    默认只有 admin 持有，若某部署要下放需另行评估）。
+  - `config`：保持全局（承载平台级凭据，按租户复制一份在业务上不成立），
+    **写权限收窄为 admin**：新增 `middleware.RequireAdminRole`，路由侧新增
+    `protectedAdmin`，应用于 POST/PUT/DELETE `/config`、`PUT /config/batch`、
+    `POST /config/upload` 五个写接口。读接口不限制（敏感项的值已在 Service 层打码）。
+    **偏离原计划一处**：原计划写的是「站点展示类 key 另开租户级表或按 key 前缀白名单
+    放行租户编辑」—— 那是新增功能而非修复，且需要产品决策（哪些 key 算展示类），
+    本次不做；已在 `model/config.go` 注明正确做法是另开租户级表，而不是给本表加 tenant_id。
+  - `agreement`：加 `tenant_id`（协议本就是「每个租户各有版本」的数据），
+    迁移 `sql/migrations/2026-09-25-agreement-tenant.sql`。
+    **与 dept 不同，协议不做回填**：表里没有任何归属线索（不指向用户，内容也推断不出
+    租户），历史协议一律保留 0 = 平台级，由人工按脚本末尾的清单确认。
+- **验收**（真实 HTTP，端到端）：
+  - 租户管理员（tenant=1，持有 `config:list` + `config:add`）：读配置 200、
+    写配置 **403「该操作仅限超级管理员」**，且越权写入未落库（`sys_config` 0 行）；
+  - 平台 admin：读 200、写 200（合法路径未被破坏）；
+  - 字典下拉 `GET /dict/data/type/sys_user_status` 对租户管理员 200（全租户可用）。
+  - 迁移在全新空库上跑通 `init.sql` + 全部 migrations 并重复执行 2 轮确认幂等；
+    开发库已备份 `runtime/backup-sys_agreement-before-p1.sql` 后执行。
+  - 测试：`middleware` 新增 5 组 `RequireAdminRole` 用例（含「角色解析失败必须拒绝」）、
+    仓储层 4 组协议跨租户用例（已验证「移除 TenantScope 即转红」）。
 
 ### P1-3 `GetTenantID` 返回 0 的静默旁路 [Medium]
 - **问题**：`common/context.go:22-29` 取不到租户返回 0，而 `TenantScope(db,0)` 不过滤
