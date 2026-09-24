@@ -22,7 +22,7 @@ func TestLocalDeleteRejectsPathTraversal(t *testing.T) {
 	if err := os.WriteFile(outside, []byte("secret"), 0600); err != nil {
 		t.Fatalf("准备测试文件失败: %v", err)
 	}
-	defer os.Remove(outside)
+	defer func() { _ = os.Remove(outside) }()
 
 	u := &localUploader{}
 	traversal := "../" + filepath.Base(outside)

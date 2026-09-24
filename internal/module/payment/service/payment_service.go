@@ -288,11 +288,16 @@ func (s *PaymentService) CreateOrderWithPayInfo(tenantID uint, orderNo, subject,
 		},
 	}
 
+	// 出网调用必须有明确的等待上限：payCtx 早就为此写好了，但调用方一直传 nil
+	// （网关内部再把 nil 降级为 Background），等于「签名上有 ctx、实际没有超时」。
+	ctx, cancel := payCtx()
+	defer cancel()
+
 	switch channel {
 	case "wechat":
 		cfg := LoadWechatPayConfig()
 		gw := NewWechatPayGateway(*cfg)
-		payInfo, payErr := gw.Prepay(nil, orderNo, subject, body, amount, openID)
+		payInfo, payErr := gw.Prepay(ctx, orderNo, subject, body, amount, openID)
 		if payErr != nil {
 			result.PayError = payErr
 		} else {
@@ -303,7 +308,7 @@ func (s *PaymentService) CreateOrderWithPayInfo(tenantID uint, orderNo, subject,
 	case "alipay":
 		cfg := LoadAlipayConfig()
 		gw := NewAlipayGateway(*cfg)
-		payInfo, payErr := gw.Prepay(nil, orderNo, subject, amount, cfg.ReturnURL)
+		payInfo, payErr := gw.Prepay(ctx, orderNo, subject, amount, cfg.ReturnURL)
 		if payErr != nil {
 			result.PayError = payErr
 		} else {
@@ -411,7 +416,14 @@ func (s *PaymentService) RefundOrderWithPayInfo(tenantID uint, orderNo string, r
 func loadPayConfig() map[string]string {
 	configService := systemService.NewConfigService()
 	// 需要真实密钥用于签名与验签，因此读取原始值（接口侧会打码）
-	results, _ := configService.FindByPrefixRaw("pay.")
+	results, err := configService.FindByPrefixRaw("pay.")
+	if err != nil {
+		// 不静默：读不到配置会让所有渠道凭据变成空串，最终以「签名失败」
+		// 「商户号未配置」这类看不出根因的错误暴露出来。
+		// 仍返回空 map：调用方（LoadWechatPayConfig / LoadAlipayConfig）
+		// 的签名是返回配置结构，改签名会牵连上层；这里至少把根因留在日志里。
+		logger.Log.Errorf("[payment] 读取 pay.* 配置失败，渠道凭据将为空: %v", err)
+	}
 
 	cfgMap := make(map[string]string)
 	for _, r := range results {

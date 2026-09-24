@@ -32,13 +32,13 @@ func (l *localUploader) Upload(file *multipart.FileHeader) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("打开文件失败: %w", err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	dst, err := os.Create(fullPath)
 	if err != nil {
 		return "", fmt.Errorf("创建文件失败: %w", err)
 	}
-	defer dst.Close()
+	defer func() { _ = dst.Close() }()
 
 	if _, err := dst.ReadFrom(src); err != nil {
 		return "", fmt.Errorf("写入文件失败: %w", err)

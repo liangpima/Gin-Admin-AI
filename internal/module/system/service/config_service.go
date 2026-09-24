@@ -1,12 +1,13 @@
 package service
 
 import (
-	"go-admin/internal/common"
-	"go-admin/internal/module/system/model"
-	"go-admin/internal/module/system/repository"
-
 	"errors"
 	"strings"
+
+	"go-admin/internal/common"
+	"go-admin/internal/logger"
+	"go-admin/internal/module/system/model"
+	"go-admin/internal/module/system/repository"
 
 	"gorm.io/gorm"
 )
@@ -111,11 +112,24 @@ func (s *configService) Update(id uint, name, key, value string, typ int8, opera
 	// 若直接落库，真实的支付/OSS/短信密钥会被覆盖成字面量 "******"，
 	// 之后的表现是「签名失败」「上传失败」，完全指不到是配置被写坏了。
 	// BatchSave 早已有此保护，Update 这条路径之前漏了，这里补齐。
-	if !(value == maskedValue && (isSensitiveConfigKey(key) || isSensitiveConfigKey(config.ConfigKey))) {
+	if !isMaskedSensitiveSubmit(value, key, config.ConfigKey) {
 		config.Value = value
 	}
 
 	return s.configRepo.Update(config)
+}
+
+// isMaskedSensitiveSubmit 判断本次提交是否只是「把打码占位符原样交回来」。
+//
+// 是 → 保留库里的真实密钥（用户只改了别的字段，没动密钥）；
+// 否 → 按提交值更新。
+// 抽成具名函数而不是写成一串 !(a && (b || c))：那个写法读起来要绕两圈，
+// 而这里判断错了的后果是「真实密钥被覆盖成 ******」，且很难从现象倒推。
+func isMaskedSensitiveSubmit(value, submittedKey, storedKey string) bool {
+	if value != maskedValue {
+		return false
+	}
+	return isSensitiveConfigKey(submittedKey) || isSensitiveConfigKey(storedKey)
 }
 
 func (s *configService) Delete(id uint) error {
@@ -199,7 +213,14 @@ func (s *configService) BatchSave(prefix string, items []ConfigItem, operatorID 
 // 需要真实密钥，因此使用 FindByPrefixRaw。
 func LoadOSSConfig() map[string]string {
 	svc := NewConfigService()
-	results, _ := svc.FindByPrefixRaw("oss.")
+	results, err := svc.FindByPrefixRaw("oss.")
+	if err != nil {
+		// 不静默：读不到配置会让上传模块回退到本地存储（或带着空凭据初始化），
+		// 排查时表现为「配置明明填了却没用上」，必须能从日志看出是查库失败。
+		// 仍然返回空 map 而不是让调用方崩溃：上传属于非核心路径，
+		// 配置缺失时回退本地存储是既有行为。
+		logger.Log.Errorf("[config] 读取 oss.* 配置失败，将使用空配置: %v", err)
+	}
 
 	cfgMap := make(map[string]string)
 	for _, r := range results {

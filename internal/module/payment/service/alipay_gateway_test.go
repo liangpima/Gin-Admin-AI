@@ -112,6 +112,8 @@ func TestAlipayDoRequestNilContextIsSafe(t *testing.T) {
 	defer srv.Close()
 
 	g := newTestAlipayGateway(t)
+	//nolint:staticcheck // 本用例专门验证「上层漏传 ctx」这条防御路径：
+	// doRequest 必须把 nil 降级为 Background，而不是让 NewRequestWithContext panic。
 	if _, err := g.doRequest(nil, http.MethodPost, srv.URL, map[string]string{"a": "1"}); err != nil {
 		t.Fatalf("nil ctx 应降级为 Background，实际报错: %v", err)
 	}

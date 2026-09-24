@@ -3,6 +3,8 @@ package middleware
 import (
 	"strings"
 
+	"go-admin/internal/logger"
+
 	"github.com/casbin/casbin/v2/model"
 	"github.com/casbin/casbin/v2/persist"
 	"gorm.io/gorm"
@@ -65,7 +67,14 @@ func (a *gormAdapter) LoadPolicy(m model.Model) error {
 		return err
 	}
 	for _, r := range rules {
-		persist.LoadPolicyLine(ruleToLine(r), m)
+		line := ruleToLine(r)
+		if err := persist.LoadPolicyLine(line, m); err != nil {
+			// 单行策略格式非法（列数不对、ptype 不认识等）：记录并跳过。
+			// 不让整个加载失败，是因为失败会让服务起不来；
+			// 跳过的后果是「这条策略不生效」，方向是 fail-closed（少一条授权），
+			// 而且日志里留下了原始行，便于定位是库里哪条数据坏了。
+			logger.Log.Errorf("[casbin] 策略行解析失败，已跳过: line=%q err=%v", line, err)
+		}
 	}
 	return nil
 }

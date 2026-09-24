@@ -61,7 +61,7 @@ func main() {
 	if err != nil {
 		exitf("%v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	if err := ensureMigrationTable(db); err != nil {
 		exitf("创建 %s 表失败: %v", migrationsTable, err)
@@ -139,7 +139,7 @@ func appliedVersions(db *sql.DB) (map[string]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	result := make(map[string]bool)
 	for rows.Next() {

@@ -122,8 +122,8 @@ func TestAdapterSaveAndLoadPolicyRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("加载模型失败: %v", err)
 	}
-	m.AddPolicy("p", "p", []string{"admin", "default", "*", "*"})
-	m.AddPolicy("p", "p", []string{"editor", "default", "system:user:list", "*"})
+	_ = m.AddPolicy("p", "p", []string{"admin", "default", "*", "*"})
+	_ = m.AddPolicy("p", "p", []string{"editor", "default", "system:user:list", "*"})
 
 	if err := adapter.SavePolicy(m); err != nil {
 		t.Fatalf("保存策略失败: %v", err)
@@ -181,7 +181,7 @@ func TestAdapterSavePolicyIsFullRebuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("加载模型失败: %v", err)
 	}
-	m.AddPolicy("p", "p", []string{"admin", "default", "*", "*"})
+	_ = m.AddPolicy("p", "p", []string{"admin", "default", "*", "*"})
 	if err := adapter.SavePolicy(m); err != nil {
 		t.Fatalf("保存失败: %v", err)
 	}

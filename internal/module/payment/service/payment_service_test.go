@@ -267,7 +267,9 @@ func TestCloseOrder(t *testing.T) {
 		repo := newMockRepo()
 		svc := newTestService(repo)
 
-		svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", "")
+		if _, err := svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", ""); err != nil {
+			t.Fatalf("准备订单失败: %v", err)
+		}
 		err := svc.CloseOrder(testTenantID, "ORDER001")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -283,7 +285,9 @@ func TestCloseOrder(t *testing.T) {
 		repo := newMockRepo()
 		svc := newTestService(repo)
 
-		svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", "")
+		if _, err := svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", ""); err != nil {
+			t.Fatalf("准备订单失败: %v", err)
+		}
 		repo.orders["ORDER001"].Status = 1
 
 		err := svc.CloseOrder(testTenantID, "ORDER001")
@@ -296,7 +300,9 @@ func TestCloseOrder(t *testing.T) {
 		repo := newMockRepo()
 		svc := newTestService(repo)
 
-		svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", "")
+		if _, err := svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", ""); err != nil {
+			t.Fatalf("准备订单失败: %v", err)
+		}
 		repo.orders["ORDER001"].Status = 2
 
 		err := svc.CloseOrder(testTenantID, "ORDER001")
@@ -366,7 +372,9 @@ func TestHandleNotify(t *testing.T) {
 		repo := newMockRepo()
 		svc := newTestService(repo)
 
-		svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", "")
+		if _, err := svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", ""); err != nil {
+			t.Fatalf("准备订单失败: %v", err)
+		}
 		paidAt := time.Now()
 		err := svc.HandleNotify("wechat", &PayNotifyResult{
 			OrderNo: "ORDER001",
@@ -398,7 +406,9 @@ func TestHandleNotify(t *testing.T) {
 		// 没有金额字段（或解析失败），任意订单都能被标记为已支付。
 		repo := newMockRepo()
 		svc := newTestService(repo)
-		svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", "")
+		if _, err := svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", ""); err != nil {
+			t.Fatalf("准备订单失败: %v", err)
+		}
 
 		err := svc.HandleNotify("wechat", &PayNotifyResult{
 			OrderNo: "ORDER001",
@@ -416,7 +426,9 @@ func TestHandleNotify(t *testing.T) {
 	t.Run("金额不匹配的回调必须被拒绝", func(t *testing.T) {
 		repo := newMockRepo()
 		svc := newTestService(repo)
-		svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", "")
+		if _, err := svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", ""); err != nil {
+			t.Fatalf("准备订单失败: %v", err)
+		}
 
 		err := svc.HandleNotify("wechat", &PayNotifyResult{
 			OrderNo: "ORDER001",
@@ -436,7 +448,9 @@ func TestHandleNotify(t *testing.T) {
 		// 属于防御纵深：某个渠道的验签万一被绕过，也不能借此跨渠道改单。
 		repo := newMockRepo()
 		svc := newTestService(repo)
-		svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", "")
+		if _, err := svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", ""); err != nil {
+			t.Fatalf("准备订单失败: %v", err)
+		}
 
 		err := svc.HandleNotify("alipay", &PayNotifyResult{
 			OrderNo: "ORDER001",
@@ -455,7 +469,9 @@ func TestHandleNotify(t *testing.T) {
 		repo := newMockRepo()
 		svc := newTestService(repo)
 
-		svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", "")
+		if _, err := svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", ""); err != nil {
+			t.Fatalf("准备订单失败: %v", err)
+		}
 		repo.orders["ORDER001"].Status = 1
 
 		err := svc.HandleNotify("wechat", &PayNotifyResult{
@@ -504,7 +520,9 @@ func TestHandleNotify(t *testing.T) {
 		repo := newMockRepo()
 		svc := newTestService(repo)
 
-		svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", "")
+		if _, err := svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", ""); err != nil {
+			t.Fatalf("准备订单失败: %v", err)
+		}
 		err := svc.HandleNotify("wechat", &PayNotifyResult{
 			OrderNo: "ORDER001",
 			Status:  "pending",
@@ -523,7 +541,9 @@ func TestHandleNotify(t *testing.T) {
 		repo := newMockRepo()
 		svc := newTestService(repo)
 
-		svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", "")
+		if _, err := svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", ""); err != nil {
+			t.Fatalf("准备订单失败: %v", err)
+		}
 		paidAt := time.Now()
 		err := svc.HandleNotify("wechat", &PayNotifyResult{
 			OrderNo: "ORDER001",
@@ -599,7 +619,9 @@ func TestPartialRefund(t *testing.T) {
 		return nil
 	}
 
-	svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 1000, "wechat", "", "", "")
+	if _, err := svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 1000, "wechat", "", "", ""); err != nil {
+		t.Fatalf("准备订单失败: %v", err)
+	}
 	repo.orders["ORDER001"].Status = model.StatusPaid
 
 	t.Run("第一次部分退款后订单保持已支付", func(t *testing.T) {
@@ -665,7 +687,9 @@ func TestGetOrder(t *testing.T) {
 		repo := newMockRepo()
 		svc := newTestService(repo)
 
-		svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", "")
+		if _, err := svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", ""); err != nil {
+			t.Fatalf("准备订单失败: %v", err)
+		}
 		order, err := svc.GetOrder(testTenantID, "ORDER001")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -691,7 +715,9 @@ func TestGetOrderByID(t *testing.T) {
 		repo := newMockRepo()
 		svc := newTestService(repo)
 
-		svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", "")
+		if _, err := svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", ""); err != nil {
+			t.Fatalf("准备订单失败: %v", err)
+		}
 		order, err := svc.GetOrderByID(testTenantID, 1)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -716,9 +742,15 @@ func TestFindList(t *testing.T) {
 	repo := newMockRepo()
 	svc := newTestService(repo)
 
-	svc.CreateOrder(testTenantID, "O1", "商品A", "", 100, "wechat", "", "", "")
-	svc.CreateOrder(testTenantID, "O2", "商品B", "", 200, "alipay", "", "", "")
-	svc.CreateOrder(testTenantID, "O3", "商品A", "", 300, "wechat", "", "", "")
+	if _, err := svc.CreateOrder(testTenantID, "O1", "商品A", "", 100, "wechat", "", "", ""); err != nil {
+		t.Fatalf("准备订单失败: %v", err)
+	}
+	if _, err := svc.CreateOrder(testTenantID, "O2", "商品B", "", 200, "alipay", "", "", ""); err != nil {
+		t.Fatalf("准备订单失败: %v", err)
+	}
+	if _, err := svc.CreateOrder(testTenantID, "O3", "商品A", "", 300, "wechat", "", "", ""); err != nil {
+		t.Fatalf("准备订单失败: %v", err)
+	}
 	repo.orders["O2"].Status = 1
 
 	t.Run("按标题搜索", func(t *testing.T) {

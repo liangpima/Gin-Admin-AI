@@ -61,7 +61,7 @@ func main() {
 		fmt.Printf("初始化日志失败: %v\n", err)
 		os.Exit(1)
 	}
-	defer logger.Log.Sync()
+	defer func() { _ = logger.Log.Sync() }()
 
 	// 开发模式下 Swagger 与 gin 调试输出是开启的（见 router.Setup）。
 	// 逐条打印风险点：这些项叠加时（监听所有网卡 + 调试入口开放 + 默认密钥）

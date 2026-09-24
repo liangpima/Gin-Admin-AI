@@ -65,25 +65,34 @@ jobs:
         run: npx vite build
 
   # ────────────────────────────────────────────────────────────
-  # golangci-lint：先以「不阻断」方式跑起来。
+  # golangci-lint：**阻断项**。
   #
-  # 为什么不禁用、也不直接阻断：
-  #   · go vet 覆盖不到 unused / ineffassign / staticcheck 这些问题
-  #   · 但仓库当前没有 golangci-lint 基线，直接设为阻断会让 CI 长期变红，
-  #     反而促使大家忽略 CI
-  # 待基线清理干净后，把 continue-on-error 去掉即可转为强制。
+  # 2026-09-24 完成两件事后转为强制：
+  #  1. 基线清零：29 项（errcheck 24 / staticcheck 4 / unused 1）全部修掉或豁免，
+  #     配置见 .golangci.yml
+  #  2. 修掉「观察项本身失效」的问题 —— 此前用的是 v6 action + `version: latest`，
+  #     而 latest 解析到 golangci-lint v1.64.8（用 go1.24 构建），面对要求 go 1.25
+  #     的 go.mod 会直接在加载阶段失败：
+  #       "the Go language version (go1.24) used to build golangci-lint is lower
+  #        than the targeted Go version (1.25.0)"
+  #     也就是说这个任务此前一直没在真正检查代码，而 continue-on-error 让它
+  #     连失败都不显眼 —— 观察项在观察项失效时是最危险的组合。
+  #
+  # 因此这里两处都钉死：
+  #  · action 用 v8（v7 起才支持 golangci-lint v2，v6 只支持 v1）
+  #  · lint 版本显式钉到本地验证过的 v2.13.2，不用 latest
+  #    （latest 会随上游发布漂移，而版本漂移正是上面那个坑的成因）
   # ────────────────────────────────────────────────────────────
-  lint-advisory:
-    name: 静态检查（观察项，不阻断）
+  lint:
+    name: 静态检查（golangci-lint）
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.13.2
           args: --timeout=5m

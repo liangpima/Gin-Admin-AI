@@ -64,7 +64,7 @@ func (m *minioUploader) Upload(file *multipart.FileHeader) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("打开文件失败: %w", err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	ext := ""
 	if i := strings.LastIndex(file.Filename, "."); i >= 0 {

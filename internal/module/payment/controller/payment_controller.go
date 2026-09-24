@@ -128,7 +128,12 @@ func (ctl *PaymentController) FindList(c *gin.Context) {
 	channel := c.Query("channel")
 	status := -1
 	if s := c.Query("status"); s != "" {
-		fmt.Sscanf(s, "%d", &status)
+		// 解析失败时保持 -1（不过滤）：
+		// 若沿用 Sscanf 部分写入的零值，传个非法 status 会变成「只看待支付」，
+		// 用户以为筛掉了数据，实际是参数写错 —— 比直接报错更难排查。
+		if _, err := fmt.Sscanf(s, "%d", &status); err != nil {
+			status = -1
+		}
 	}
 	page, pageSize := common.GetPageInfo(c)
 	tenantID := common.GetTenantID(c)
@@ -149,7 +154,7 @@ func (ctl *PaymentController) WechatNotify(c *gin.Context) {
 		c.JSON(200, gin.H{"code": "FAIL", "message": "read body failed"})
 		return
 	}
-	defer c.Request.Body.Close()
+	defer func() { _ = c.Request.Body.Close() }()
 
 	logger.Log.Infof("[pay-notify] wechat received body length: %d", len(body))
 
@@ -184,7 +189,7 @@ func (ctl *PaymentController) AlipayNotify(c *gin.Context) {
 		c.String(200, "fail")
 		return
 	}
-	defer c.Request.Body.Close()
+	defer func() { _ = c.Request.Body.Close() }()
 
 	logger.Log.Infof("[pay-notify] alipay received body length: %d", len(body))
 

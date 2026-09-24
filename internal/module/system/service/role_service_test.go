@@ -51,9 +51,8 @@ func seedRole(t *testing.T, tenantID uint, code string, status int8) *model.SysR
 	return role
 }
 
-func int8p(v int8) *int8   { return &v }
-func intptr(v int) *int    { return &v }
-func stringp(v string) *string { return &v }
+func int8p(v int8) *int8 { return &v }
+func intptr(v int) *int  { return &v }
 
 // TestRoleUpdatePartialKeepsFields 「只保存权限」的部分更新回归测试。
 //

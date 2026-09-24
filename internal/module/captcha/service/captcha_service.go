@@ -134,7 +134,10 @@ func (s *captchaService) Generate(clientIP string) (*model.CaptchaGenerateRespon
 	}
 
 	bgImg := s.generateBackground(chars, points)
-	bgBase64 := imageToBase64(bgImg)
+	bgBase64, err := imageToBase64(bgImg)
+	if err != nil {
+		return nil, err
+	}
 
 	token := generateToken()
 
@@ -194,7 +197,12 @@ func (s *captchaService) Verify(clientIP, token string, points []model.Point) (*
 	// 不这样做的话，token 在 TTL（5 分钟）内可以反复提交 ——
 	// 攻击者可以对同一张图穷举点击坐标，把「3 个点、每个点 ±40px」
 	// 的搜索空间摊薄成多次尝试，一次通过的代价大幅下降。
-	cache.Del(context.Background(), key)
+	// 作废失败必须留痕：删不掉就意味着该 token 在 TTL（5 分钟）内
+	// 仍可重复提交，「一次验证一次提交」的保证被破 —— 这是可被利用的窗口，
+	// 而不是「少了一次清理」这种无关紧要的事。
+	if err := cache.Del(context.Background(), key); err != nil {
+		logger.Log.Errorf("[captcha] 验证码作废失败，该 token 在 TTL 内仍可重复提交: key=%s err=%v", key, err)
+	}
 
 	var data captchaData
 	if err := json.Unmarshal([]byte(val), &data); err != nil {
@@ -538,10 +546,17 @@ func (s *captchaService) drawLine(img *image.RGBA, x0, y0, x1, y1 int, c color.R
 	}
 }
 
-func imageToBase64(img image.Image) string {
+// imageToBase64 把出图编码成 base64。
+//
+// 返回 error 而不是吞掉 png.Encode 的失败：编码失败时 buf 是空的，
+// 前端拿到 "data:image/png;base64," 会显示一张空白图 ——
+// 用户看到的是「验证码刷不出来」，排查时完全指不到编码这一步。
+func imageToBase64(img image.Image) (string, error) {
 	var buf bytes.Buffer
-	png.Encode(&buf, img)
-	return base64.StdEncoding.EncodeToString(buf.Bytes())
+	if err := png.Encode(&buf, img); err != nil {
+		return "", fmt.Errorf("编码验证码图片失败: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
 }
 
 func generateToken() string {

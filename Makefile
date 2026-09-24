@@ -12,8 +12,19 @@ run:
 clean:
 	rm -rf $(BUILD_DIR)
 
+# lint 与 CI 的 lint 任务保持一致（go vet + golangci-lint）。
+#
+# 这里显式检查 golangci-lint 是否存在：否则「make check 等价于 CI」这句约定
+# 会在本地悄悄失效 —— 开发者在本地看到绿色，推上去才被 CI 拦住。
+# 注意必须用 v2：v1 的发布二进制用 go1.24 构建，面对 go.mod 要求的 go 1.25
+# 会在加载阶段直接失败（原因详见 .golangci.yml 顶部注释）。
 lint:
 	go vet ./...
+	@command -v golangci-lint >/dev/null 2>&1 || { \
+		echo "缺少 golangci-lint，无法完成与 CI 等价的静态检查。"; \
+		echo "安装：go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2"; \
+		exit 1; }
+	golangci-lint run --timeout=5m
 
 test:
 	go test ./...

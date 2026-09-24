@@ -419,3 +419,69 @@ func TestUpdateMemberCrossTenantRejected(t *testing.T) {
 		t.Error("跨租户更新竟然生效了")
 	}
 }
+
+// TestCreatePhoneDuplicateCheck 手机号查重的两种结果必须区分开。
+//
+// 背景：这里原先写的是 `existing, _ := s.memberRepo.FindByPhone(...)`，
+// 而 FindByPhone 无论查没查到都返回非 nil 指针（&member, err）——
+// 吞掉 err 等于把「数据库故障」误判成「手机号没被注册」，查重被静默跳过。
+// 这正是 dict_service 注释里点名警告过的反模式（同一坑踩过第二次）。
+func TestCreatePhoneDuplicateCheck(t *testing.T) {
+	t.Run("手机号已注册返回业务错误", func(t *testing.T) {
+		svc := newTestMemberService(t)
+
+		if err := svc.Create(&dto.CreateMemberRequest{Phone: "13800000001"}, 1, tenantA); err != nil {
+			t.Fatalf("首个会员应创建成功: %v", err)
+		}
+		err := svc.Create(&dto.CreateMemberRequest{Phone: "13800000001"}, 1, tenantA)
+
+		if err == nil {
+			t.Fatal("重复手机号必须被拒绝")
+		}
+		if !common.IsBizError(err) {
+			t.Errorf("重名属业务错误（400），实际 %T: %v", err, err)
+		}
+		if !strings.Contains(err.Error(), "手机号") {
+			t.Errorf("提示应点明是手机号冲突，实际: %v", err)
+		}
+	})
+
+	t.Run("查库失败必须上抛而不是当成未注册", func(t *testing.T) {
+		// 用桩仓储精确制造「只有查重这一步失败」：
+		// 直接删表是测不出来的 —— 那样后续 INSERT 也会失败，
+		// 有缺陷的实现（吞掉查重错误继续往下走）与修复后的实现
+		// 最终都会返回一个系统错误，断言无法区分。
+		stub := &stubMemberRepo{findByPhoneErr: errors.New("db down")}
+		svc := newTestMemberService(t)
+		svc.memberRepo = stub
+
+		err := svc.Create(&dto.CreateMemberRequest{Phone: "13800000002"}, 1, tenantA)
+		if err == nil {
+			t.Fatal("数据库故障时必须上抛，不能当成「手机号未注册」继续创建")
+		}
+		if common.IsBizError(err) {
+			t.Errorf("数据库故障属系统错误（500），不该包装成业务错误: %v", err)
+		}
+		if stub.created != 0 {
+			t.Error("查重失败时不应继续创建会员（否则查重形同虚设）")
+		}
+	})
+}
+
+// stubMemberRepo 只实现查重路径用到的两个方法。
+// 内嵌 repository.MemberRepository 接口来满足类型要求：
+// 未实现的方法一旦被调用会 panic，这正好能暴露「测试路径与预期不符」。
+type stubMemberRepo struct {
+	repository.MemberRepository
+	findByPhoneErr error
+	created        int
+}
+
+func (s *stubMemberRepo) FindByPhone(tenantID uint, phone string) (*model.Member, error) {
+	return &model.Member{}, s.findByPhoneErr
+}
+
+func (s *stubMemberRepo) Create(*model.Member) error {
+	s.created++
+	return nil
+}

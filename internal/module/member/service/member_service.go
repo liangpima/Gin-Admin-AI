@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -15,6 +16,8 @@ import (
 	"go-admin/internal/module/member/repository"
 	systemModel "go-admin/internal/module/system/model"
 	systemService "go-admin/internal/module/system/service"
+
+	"gorm.io/gorm"
 )
 
 type MemberService interface {
@@ -135,9 +138,21 @@ func (s *memberService) Create(req *dto.CreateMemberRequest, operatorID, tenantI
 	digits := s.memberNoDigits()
 
 	if req.Phone != "" {
-		existing, _ := s.memberRepo.FindByPhone(tenantID, req.Phone)
-		if existing != nil && existing.ID > 0 {
-			return common.NewBizError("手机号已注册")
+		// 判定依据只能是 err，且**不能吞掉它**：
+		//   · FindByPhone 无论查没查到都返回非 nil 指针（&member, err），
+		//     所以 `existing, _ := ...; if existing != nil` 恒为真；
+		//   · 吞掉 err 会把「数据库故障」误判成「手机号没被注册」，
+		//     重名校验被静默跳过（与 CountByUsername / CountByCode 同一取舍）。
+		existing, err := s.memberRepo.FindByPhone(tenantID, req.Phone)
+		switch {
+		case err == nil:
+			if existing != nil && existing.ID > 0 {
+				return common.NewBizError("手机号已注册")
+			}
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			// 未注册，可以继续创建
+		default:
+			return err
 		}
 	}
 

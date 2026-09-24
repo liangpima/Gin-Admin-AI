@@ -1,0 +1,36 @@
+# golangci-lint 配置（v2 格式）
+#
+# 为什么必须用 v2：本仓库 go.mod 要求 go 1.25，而 v1.x 的发布二进制是用 go1.24
+# 构建的，加载阶段会直接报
+#   "the Go language version (go1.24) used to build golangci-lint is lower than
+#    the targeted Go version (1.25.0)"
+# 也就是**根本跑不起来**。CI 里那个 lint 任务此前设了 continue-on-error，
+# 所以这个失败一直没被人看见 —— 观察项在观察项失效时是最危险的组合。
+#
+# 为什么不开 gofmt / goimports：
+#   Windows 上 core.autocrlf=true 会把工作区检出成 CRLF，而 gofmt 把 CRLF 视为
+#   格式错误（整文件每一行都会报），开了之后每个 Windows 开发者的本地 lint 都会红。
+#   CI 在 Linux 上检出的是 LF，本身没问题。
+#   要同时兼顾两边，正确做法是加 .gitattributes 把 Go 文件固定为 eol=lf，
+#   届时再把 formatters 打开（这属于独立的仓库级改动，见计划 P2-3）。
+version: "2"
+
+linters:
+  # standard = errcheck / govet / ineffassign / staticcheck / unused
+  #
+  # 这五项覆盖的是「真问题」而不是风格：
+  #   errcheck    —— 错误被丢弃（本项目最在意的一类：吞掉 DB 错误会让「查不到」
+  #                  与「查不了」混为一谈，校验被静默跳过）
+  #   staticcheck —— 明确写错或写法可疑（如传 nil context、恒真的条件）
+  #   unused      —— 死代码
+  #   ineffassign —— 赋值后从未被使用（多为改漏的中间变量）
+  #   govet       —— 与 go vet 一致
+  #
+  # 基线已在 2026-09-24 清零（29 项 → 0 项），因此 CI 里已改为阻断。
+  default: standard
+
+issues:
+  # 不限制同类问题的显示条数：CI 里需要一次看到全部待修项，
+  # 否则修完一轮才知道还有下一轮，反馈周期被拉长。
+  max-issues-per-linter: 0
+  max-same-issues: 0
