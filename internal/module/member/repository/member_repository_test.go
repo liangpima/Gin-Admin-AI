@@ -203,3 +203,207 @@ func TestMemberRepositorySoftDeleteReleasesUnique(t *testing.T) {
 		t.Errorf("删除后应清掉标签关联，实际残留 %v（孤儿记录）", rels)
 	}
 }
+
+// TestMemberRepositoryUpdate 会员整行保存。
+//
+// 注意 Update 的实现是 `Save(member)`，**不带租户条件** —— 归属校验由
+// Service 层承担（memberService.Update 先 FindByID(tenantID, req.ID)，
+// 查不到直接 404）。这里把这个分工记下来：若将来有人在 Controller 里
+// 直接调 Repository.Update，就等于开了一条「拿别家会员 ID 改写整行」的旁路，
+// 必须先在 Service 里补归属校验。
+func TestMemberRepositoryUpdate(t *testing.T) {
+	repo := newMemberRepoWithDB(t)
+	m := seedMemberForTest(t, memberTenantA, "13800000066", "000006", "原名")
+
+	m.Nickname = "改名了"
+	m.Points = 500
+	m.Gender = 2
+	if err := repo.Update(m); err != nil {
+		t.Fatalf("更新失败: %v", err)
+	}
+
+	got, err := repo.FindByID(memberTenantA, m.ID)
+	if err != nil {
+		t.Fatalf("回读失败: %v", err)
+	}
+	if got.Nickname != "改名了" || got.Points != 500 || got.Gender != 2 {
+		t.Errorf("更新未完整落库: %+v", got)
+	}
+	// 手机号/会员号没动过，不能被 Save 清空（Save 是整行覆盖，字段值取错就会丢）
+	if got.Phone != "13800000066" || got.MemberNo != "000006" {
+		t.Errorf("未修改的唯一字段被覆盖了: phone=%q memberNo=%q", got.Phone, got.MemberNo)
+	}
+}
+
+// TestMemberRepositoryFindByWechatOpenid 按微信 openid 查会员（小程序登录入口）。
+//
+// 这条查询是小程序侧「静默登录」的入口：命中就复用会员、未命中就注册新会员。
+// 若租户过滤失效，A 租户的小程序用户会被认成 B 租户的会员 ——
+// 直接登录进别人的账号，属于最严重的一类问题。
+func TestMemberRepositoryFindByWechatOpenid(t *testing.T) {
+	repo := newMemberRepoWithDB(t)
+
+	mine := seedMemberForTest(t, memberTenantA, "13800000077", "000007", "甲租户")
+	mine.WechatOpenid = "openid-of-tenant-a"
+	if err := repo.Update(mine); err != nil {
+		t.Fatalf("写入 openid 失败: %v", err)
+	}
+
+	theirs := seedMemberForTest(t, memberTenantB, "13800000088", "000008", "乙租户")
+	theirs.WechatOpenid = "openid-of-tenant-b"
+	if err := repo.Update(theirs); err != nil {
+		t.Fatalf("写入 openid 失败: %v", err)
+	}
+
+	t.Run("本租户能查到", func(t *testing.T) {
+		got, err := repo.FindByWechatOpenid(memberTenantA, "openid-of-tenant-a")
+		if err != nil {
+			t.Fatalf("查询失败: %v", err)
+		}
+		if got.ID != mine.ID {
+			t.Errorf("查到了错误的会员: %+v", got)
+		}
+	})
+
+	t.Run("跨租户查不到", func(t *testing.T) {
+		if _, err := repo.FindByWechatOpenid(memberTenantA, "openid-of-tenant-b"); err == nil {
+			t.Error("跨租户按 openid 查到了会员 —— 小程序登录会串号")
+		}
+	})
+
+	t.Run("不存在的 openid 查不到", func(t *testing.T) {
+		if _, err := repo.FindByWechatOpenid(memberTenantA, "openid-not-exists"); err == nil {
+			t.Error("不存在的 openid 不应查到记录")
+		}
+		if _, err := repo.FindByWechatOpenid(memberTenantA, ""); err == nil {
+			t.Error("空 openid 不应查到记录（否则未登录用户会被认成第一个空 openid 会员）")
+		}
+	})
+}
+
+// TestMemberRepositoryFindListFilters 会员列表的多条件过滤与「不传即不过滤」语义。
+//
+// 这里最容易出错的是 status：它是 int8，约定用 **-1 表示不过滤**（而不是 0），
+// 因为 0 本身是「停用」这个有效取值。若写成 `status != 0` 才过滤，
+// 「筛选停用会员」会退化成「返回全部」—— 界面看着有结果，其实筛选没生效。
+func TestMemberRepositoryFindListFilters(t *testing.T) {
+	repo := newMemberRepoWithDB(t)
+
+	normal := seedMemberForTest(t, memberTenantA, "13900000001", "100001", "张三")
+	normal.LevelID, normal.Status = 1, 1
+	if err := repo.Update(normal); err != nil {
+		t.Fatalf("准备数据失败: %v", err)
+	}
+
+	disabled := seedMemberForTest(t, memberTenantA, "13900000002", "100002", "李四")
+	disabled.LevelID, disabled.Status = 2, 0
+	if err := repo.Update(disabled); err != nil {
+		t.Fatalf("准备数据失败: %v", err)
+	}
+
+	other := seedMemberForTest(t, memberTenantB, "13900000003", "100003", "王五")
+	other.LevelID, other.Status = 1, 1
+	if err := repo.Update(other); err != nil {
+		t.Fatalf("准备数据失败: %v", err)
+	}
+
+	// 逐条件跑一遍：每个 case 都断言「只命中预期的那一条」
+	cases := []struct {
+		name     string
+		phone    string
+		nickname string
+		levelID  uint
+		status   int8
+		wantID   uint
+	}{
+		{"手机号模糊匹配", "13900000002", "", 0, -1, disabled.ID},
+		{"手机号前缀匹配", "139000000", "", 0, -1, 0}, // 0 = 命中多条，只校验条数
+		{"昵称模糊匹配", "", "李", 0, -1, disabled.ID},
+		{"按等级过滤", "", "", 1, -1, normal.ID},
+		{"筛选停用（status=0 必须真的过滤）", "", "", 0, 0, disabled.ID},
+		{"筛选正常（status=1）", "", "", 0, 1, normal.ID},
+		{"status=-1 表示不过滤", "", "", 0, -1, 0},
+		{"等级+状态组合", "", "", 2, 0, disabled.ID},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			list, total, err := repo.FindList(memberTenantA, tc.phone, tc.nickname, tc.levelID, tc.status, 1, 100)
+			if err != nil {
+				t.Fatalf("查询失败: %v", err)
+			}
+			// 所有 case 都必须只看到本租户的数据（租户B 的王五不该出现）
+			for _, m := range list {
+				if m.Nickname == "王五" {
+					t.Fatalf("过滤条件越租户了: %+v", m)
+				}
+			}
+
+			if tc.wantID == 0 {
+				// 期望命中多条（或不过滤）：只校验条数与 total 一致
+				if int(total) != len(list) {
+					t.Errorf("total(%d) 与返回条数(%d) 不一致", total, len(list))
+				}
+				if len(list) == 0 {
+					t.Error("应命中至少一条，实际为空")
+				}
+				return
+			}
+
+			if total != 1 || len(list) != 1 {
+				t.Fatalf("应只命中 1 条，实际 total=%d list=%+v", total, list)
+			}
+			if list[0].ID != tc.wantID {
+				t.Errorf("命中了错误的记录: %+v", list[0])
+			}
+		})
+	}
+}
+
+// TestMemberRepositoryReplaceTagsClear 传空标签列表表示「清空标签」。
+//
+// 语义与「传 nil 表示不修改」相邻且容易混淆：清空是有效业务操作
+// （把会员从所有标签里摘掉），必须真的删掉关联，而不是提前 return 什么都不做。
+func TestMemberRepositoryReplaceTagsClear(t *testing.T) {
+	repo := newMemberRepoWithDB(t)
+	m := seedMemberForTest(t, memberTenantA, "13900000009", "100009", "要摘标签的")
+
+	if err := repo.ReplaceTags(memberTenantA, m.ID, []uint{1, 2}); err != nil {
+		t.Fatalf("准备标签失败: %v", err)
+	}
+	if got, _ := repo.FindTagIDsByMemberID(memberTenantA, m.ID); len(got) != 2 {
+		t.Fatalf("准备数据异常: %v", got)
+	}
+
+	if err := repo.ReplaceTags(memberTenantA, m.ID, nil); err != nil {
+		t.Fatalf("清空标签失败: %v", err)
+	}
+	if got, _ := repo.FindTagIDsByMemberID(memberTenantA, m.ID); len(got) != 0 {
+		t.Errorf("清空后不应残留标签关联: %v", got)
+	}
+
+	// 再绑一次，确认清空后还能正常写入（不是把会员本身搞坏了）
+	if err := repo.ReplaceTags(memberTenantA, m.ID, []uint{3}); err != nil {
+		t.Fatalf("重新绑定标签失败: %v", err)
+	}
+	if got, _ := repo.FindTagIDsByMemberID(memberTenantA, m.ID); len(got) != 1 || got[0] != 3 {
+		t.Errorf("重新绑定后应为 [3]，实际 %v", got)
+	}
+}
+
+// TestMemberRepositoryReplaceTagsRejectsForeignMember 拿别家会员 ID 写标签必须失败。
+//
+// pay_member_tag_rel 没有 tenant_id 列，租户隔离只能靠「先校验会员归属」。
+// 少了这一步，攻击者就能用别家的 memberID 改写对方的标签关联
+// （例如把「黑名单」标签摘掉）。
+func TestMemberRepositoryReplaceTagsRejectsForeignMember(t *testing.T) {
+	repo := newMemberRepoWithDB(t)
+	foreign := seedMemberForTest(t, memberTenantB, "13900000010", "100010", "别人的会员")
+
+	if err := repo.ReplaceTags(memberTenantA, foreign.ID, []uint{1}); err == nil {
+		t.Error("用别家会员 ID 写标签应失败")
+	}
+	if got, _ := repo.FindTagIDsByMemberID(memberTenantB, foreign.ID); len(got) != 0 {
+		t.Errorf("跨租户写标签竟然生效了: %v", got)
+	}
+}
