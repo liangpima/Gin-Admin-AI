@@ -63,15 +63,15 @@ func (s *authService) Login(req *dto.LoginRequest, lc *dto.LoginContext) (*vo.Lo
 	// 人机校验：凭证由 /captcha/verify 校验通过后签发，一次性。
 	// 早前的写法在第一次 ShouldBindJSON 之后又绑定一次请求体取坐标 ——
 	// 请求体已被读尽，二次绑定必然失败且错误被丢弃，于是整个校验分支从未执行过。
-	if !captchaService.ConsumeVerifiedToken(req.CaptchaToken) {
+	//
+	// 除 token 外还要比对来源 IP：凭证绑定了生成它的客户端，
+	// 使「把图发给打码平台换回凭证」这种转手使用在跨出口地址时失效。
+	if !captchaService.ConsumeVerifiedToken(loginIP(lc), req.CaptchaToken) {
 		return nil, common.NewBizError("验证码无效或已失效，请重新验证")
 	}
 
 	ctx := context.Background()
-	ip := ""
-	if lc != nil {
-		ip = lc.IP
-	}
+	ip := loginIP(lc)
 	keys := loginRateLimitKeys(ip, req.Username)
 
 	locked, err := checkLoginRateLimit(ctx, keys...)

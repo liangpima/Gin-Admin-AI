@@ -17,7 +17,7 @@ func NewCaptchaController() *CaptchaController {
 }
 
 func (ctl *CaptchaController) Generate(c *gin.Context) {
-	resp, err := ctl.captchaService.Generate()
+	resp, err := ctl.captchaService.Generate(c.ClientIP())
 	if err != nil {
 		common.FailWith(c, err)
 		return
@@ -32,7 +32,7 @@ func (ctl *CaptchaController) Verify(c *gin.Context) {
 		return
 	}
 
-	resp, err := ctl.captchaService.Verify(req.Token, req.Points)
+	resp, err := ctl.captchaService.Verify(c.ClientIP(), req.Token, req.Points)
 	if err != nil {
 		common.FailWith(c, err)
 		return

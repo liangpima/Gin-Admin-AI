@@ -104,6 +104,23 @@ func Expire(ctx context.Context, key string, expiration time.Duration) error {
 	return c.Expire(ctx, key, expiration).Err()
 }
 
+// IncrWindow 在固定时间窗口内自增计数，返回自增后的值（首次调用返回 1）。
+//
+// 窗口从**首次调用**起算，长度固定为 ttl，不做滑动续期。
+// 用 SETNX 建键 + INCR 自增，而不是「INCR 之后再 EXPIRE」：
+// 后者是两次独立往返，若 INCR 成功而 EXPIRE 失败（网络抖动、主从切换），
+// 该键就永远不会过期，对应的 IP/账号会被永久限流，只能人工清 Redis。
+// SETNX 把 TTL 与建键合成一次原子操作；键已存在时不影响原有 TTL，
+// 因此窗口语义仍是「首次计数起的固定 ttl」。
+//
+// 供限流类场景复用（登录失败计数、验证码生成频率等）。
+func IncrWindow(ctx context.Context, key string, ttl time.Duration) (int64, error) {
+	if _, err := SetNX(ctx, key, 0, ttl); err != nil {
+		return 0, err
+	}
+	return Incr(ctx, key)
+}
+
 // ---- refresh token 相关键 ----
 //
 // 每个 refresh token 自身是一个键（存储 userID），

@@ -11,9 +11,11 @@ import (
 	"image/color"
 	"image/png"
 	"math/big"
+	"strings"
 	"time"
 
 	"go-admin/internal/cache"
+	"go-admin/internal/common"
 	"go-admin/internal/logger"
 	"go-admin/internal/module/captcha/model"
 
@@ -72,13 +74,34 @@ const (
 	// 画布收敛后可用位置变少（第三个点最差只有约 8% 的成功率），
 	// 故上限提到 500，把整体失败概率压到 1e-18 量级。
 	maxPlaceAttempts = 500
+
+	// captchaRatePrefix 生成接口的限流键前缀
+	captchaRatePrefix = captchaPrefix + "rate:ip:"
+	// captchaRateLimit 单个 IP 在 captchaRateWindow 内允许的生成次数。
+	//
+	// 为什么必须限流：chars 是「请依次点击 X Y Z」的提示语，必须下发给前端
+	// （前端要靠它渲染与计数，坐标只存服务端），因此脚本拿到 chars + bg 后
+	// 可以离线做模板匹配、免人工点选。限流不能让人工点击重新变得必要，
+	// 但能把「批量刷验证码」的成本抬到需要真实 IP 资源的量级。
+	//
+	// 取 10 是「远高于真人需求、远低于脚本收益」的值：真人失败几次就刷新一次，
+	// 一分钟内很难超过 10 次；而撞库脚本每秒就需要数百张图。
+	//
+	// ⚠️ 部署在反向代理之后时，ClientIP 可能是代理自身地址，本限流会退化成
+	// 全站共用额度 —— 必须在 server.trusted_proxies 中填上代理网段。
+	captchaRateLimit = 10
+	// captchaRateWindow 限流窗口长度
+	captchaRateWindow = time.Minute
 )
 
 var charPool = []rune("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
 
 type CaptchaService interface {
-	Generate() (*model.CaptchaGenerateResponse, error)
-	Verify(token string, points []model.Point) (*model.CaptchaVerifyResponse, error)
+	// Generate 生成一张验证码图。clientIP 用于生成频率限流，
+	// 由 Controller 从请求上下文采集（Service 不依赖 gin）。
+	Generate(clientIP string) (*model.CaptchaGenerateResponse, error)
+	// Verify 校验点击结果。clientIP 必须与生成时一致，否则视为凭证被转手。
+	Verify(clientIP, token string, points []model.Point) (*model.CaptchaVerifyResponse, error)
 }
 
 type captchaService struct{}
@@ -86,13 +109,20 @@ type captchaService struct{}
 type captchaData struct {
 	Points []model.Point `json:"points"`
 	Chars  string        `json:"chars"`
+	// IP 生成该验证码的客户端地址，用于把凭证绑死在同一个客户端上。
+	// 老数据（本字段为空）不做拦截，避免升级瞬间让在途验证码全部失效。
+	IP string `json:"ip,omitempty"`
 }
 
 func NewCaptchaService() CaptchaService {
 	return &captchaService{}
 }
 
-func (s *captchaService) Generate() (*model.CaptchaGenerateResponse, error) {
+func (s *captchaService) Generate(clientIP string) (*model.CaptchaGenerateResponse, error) {
+	if err := checkGenerateRate(clientIP); err != nil {
+		return nil, err
+	}
+
 	chars, err := s.randomChars(charCount)
 	if err != nil {
 		return nil, err
@@ -108,7 +138,7 @@ func (s *captchaService) Generate() (*model.CaptchaGenerateResponse, error) {
 
 	token := generateToken()
 
-	data := captchaData{Points: points, Chars: chars}
+	data := captchaData{Points: points, Chars: chars, IP: clientIP}
 	dataBytes, _ := json.Marshal(data)
 	if err := cache.Set(context.Background(), captchaPrefix+token, string(dataBytes), captchaExpiry); err != nil {
 		return nil, fmt.Errorf("缓存验证码失败: %w", err)
@@ -123,7 +153,33 @@ func (s *captchaService) Generate() (*model.CaptchaGenerateResponse, error) {
 	}, nil
 }
 
-func (s *captchaService) Verify(token string, points []model.Point) (*model.CaptchaVerifyResponse, error) {
+// checkGenerateRate 按客户端 IP 限制生成频率。
+//
+// 失败方向是 fail-closed：限流设施不可用时拒绝生成，而不是放行。
+// 这里不会引入新的不可用场景 —— Generate 紧接着就要往 Redis 写验证码数据，
+// Redis 真的不可用时它本来就会失败；反过来说，若此时放行，攻击者只要让计数
+// 这一步失败就能无限刷图。
+func checkGenerateRate(clientIP string) error {
+	if clientIP == "" {
+		// 取不到 IP 时不计数（否则所有取不到 IP 的请求会共用一个键而互相拖累），
+		// 但仍留下日志：正常情况下 ClientIP 一定有值。
+		logger.Log.Warnf("[captcha] 生成验证码时未取到客户端 IP，已跳过频率限制")
+		return nil
+	}
+
+	count, err := cache.IncrWindow(context.Background(), captchaRatePrefix+clientIP, captchaRateWindow)
+	if err != nil {
+		logger.Log.Errorf("[captcha] 生成频率计数失败，按 fail-closed 拒绝: ip=%s err=%v", clientIP, err)
+		return fmt.Errorf("验证码服务暂不可用: %w", err)
+	}
+	if count > int64(captchaRateLimit) {
+		logger.Log.Warnf("[captcha] 验证码生成过于频繁，已拒绝: ip=%s count=%d", clientIP, count)
+		return common.NewBizError("请求过于频繁，请稍后再试")
+	}
+	return nil
+}
+
+func (s *captchaService) Verify(clientIP, token string, points []model.Point) (*model.CaptchaVerifyResponse, error) {
 	key := captchaPrefix + token
 	val, err := cache.Get(context.Background(), key)
 	if err != nil {
@@ -133,6 +189,11 @@ func (s *captchaService) Verify(token string, points []model.Point) (*model.Capt
 		}, nil
 	}
 
+	// 先作废再校验：无论成功失败，本次点击结果都只能用一次。
+	//
+	// 不这样做的话，token 在 TTL（5 分钟）内可以反复提交 ——
+	// 攻击者可以对同一张图穷举点击坐标，把「3 个点、每个点 ±40px」
+	// 的搜索空间摊薄成多次尝试，一次通过的代价大幅下降。
 	cache.Del(context.Background(), key)
 
 	var data captchaData
@@ -140,6 +201,21 @@ func (s *captchaService) Verify(token string, points []model.Point) (*model.Capt
 		return &model.CaptchaVerifyResponse{
 			Success: false,
 			Message: "验证码数据异常",
+		}, nil
+	}
+
+	// 凭证必须与生成它的客户端同源。
+	//
+	// 目的不是防「脚本自己做模板匹配」（那需要限流 + 提高识别成本），
+	// 而是防「把图发给打码平台、拿回通过凭证」这种转手使用：
+	// 绑到服务端观测到的 IP 后，平台方必须与调用方处于同一出口地址才用得上。
+	//
+	// data.IP 为空表示是本次升级之前生成的在途验证码，放行以免打断正在登录的用户。
+	if data.IP != "" && clientIP != "" && data.IP != clientIP {
+		logger.Log.Warnf("[captcha] 验证码凭证来源与生成时不符，已拒绝: gen=%s now=%s", data.IP, clientIP)
+		return &model.CaptchaVerifyResponse{
+			Success: false,
+			Message: "验证码已失效，请重新获取",
 		}, nil
 	}
 
@@ -162,12 +238,15 @@ func (s *captchaService) Verify(token string, points []model.Point) (*model.Capt
 
 	newToken := generateToken()
 
-	// 记录「该 token 已通过人机校验」。
+	// 记录「该 token 已通过人机校验」，并把来源 IP 一并绑定。
 	//
 	// 校验结果必须落盘，否则前端拿到的 newToken 只是一个无意义的随机串 ——
 	// 登录接口无从判断它是否真的通过过验证，攻击者直接 POST /auth/login
 	// 就能完全绕过验证码，人机校验形同虚设。
-	if err := cache.Set(context.Background(), verifiedKey(newToken), "1", captchaExpiry); err != nil {
+	//
+	// 存成 "1|ip" 形式：登录侧消费时比对来源，使「验证」与「登录」两步
+	// 也发生在同一个客户端上。
+	if err := cache.Set(context.Background(), verifiedKey(newToken), verifiedValue(clientIP), captchaExpiry); err != nil {
 		return &model.CaptchaVerifyResponse{
 			Success: false,
 			Message: "验证状态保存失败，请重试",
@@ -181,23 +260,43 @@ func (s *captchaService) Verify(token string, points []model.Point) (*model.Capt
 	}, nil
 }
 
+// verifiedValue 已通过校验的凭证内容：标记 + 来源 IP。
+// 用 | 分隔而不是 JSON，是为了让「老格式（纯 "1"）」也能被兼容解析。
+func verifiedValue(clientIP string) string {
+	return "1|" + clientIP
+}
+
+// verifiedIPOf 从凭证内容里取出绑定的来源 IP，老格式返回空串。
+func verifiedIPOf(val string) string {
+	if idx := strings.Index(val, "|"); idx >= 0 {
+		return val[idx+1:]
+	}
+	return ""
+}
+
 func verifiedKey(token string) string {
 	return captchaPrefix + "verified:" + token
 }
 
 // ConsumeVerifiedToken 消费一次性的人机校验凭证。
 //
-// 登录接口调用：凭证存在则删除并返回 true（一次性，防止重放），
-// 不存在说明未通过验证或已用过，返回 false。
-func ConsumeVerifiedToken(token string) bool {
+// 登录接口调用：凭证存在且来源一致则删除并返回 true，
+// 不存在、来源不符或删除失败都返回 false。
+func ConsumeVerifiedToken(clientIP, token string) bool {
 	if token == "" {
 		return false
 	}
 	ctx := context.Background()
 	key := verifiedKey(token)
 
-	exists, err := cache.Exists(ctx, key)
-	if err != nil || !exists {
+	val, err := cache.Get(ctx, key)
+	if err != nil {
+		return false
+	}
+
+	// 来源比对：老格式（不含 |）跳过比对，保证升级期间在途凭证仍可用
+	if ip := verifiedIPOf(val); ip != "" && clientIP != "" && ip != clientIP {
+		logger.Log.Warnf("[captcha] 一次性凭证来源不符，已拒绝: gen=%s now=%s", ip, clientIP)
 		return false
 	}
 
