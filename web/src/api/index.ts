@@ -119,13 +119,19 @@ export const http = {
 
 export default service
 
-export interface Result<T = any> {
+/**
+ * 统一响应体。默认泛型用 unknown 而不是 any：
+ * any 会让「忘了写泛型」的调用点静默获得任意属性访问能力，
+ * 而 unknown 会在 `.data.xxx` 处直接报错，逼调用方补上真实类型。
+ * 仓库里 `http.post<Result>(...)` 这类不关心 data 的写法的照常可用。
+ */
+export interface Result<T = unknown> {
   code: number
   message: string
   data: T
 }
 
-export interface PageResult<T = any> {
+export interface PageResult<T = unknown> {
   list: T[]
   total: number
   page: number

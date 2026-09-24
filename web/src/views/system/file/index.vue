@@ -194,7 +194,14 @@ async function handleDelete(row: FileItem) {
     await deleteFile(row.id)
     ElMessage.success('删除成功')
     loadData()
-  } catch {}
+  } catch (err) {
+    // 用户点「取消」时 ElMessageBox 会 reject 出 'cancel' / 'close' 字符串，
+    // 那是正常操作，不该记成错误；只有接口真的失败才留排查痕迹
+    // （接口失败的提示由响应拦截器负责）
+    if (err !== 'cancel' && err !== 'close') {
+      console.warn('[file] 删除文件失败', err)
+    }
+  }
 }
 </script>
 

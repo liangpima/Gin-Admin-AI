@@ -1,0 +1,6 @@
+dist
+node_modules
+package-lock.json
+# unplugin 生成的类型声明，不该由人维护
+src/auto-imports.d.ts
+src/components.d.ts

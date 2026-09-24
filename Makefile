@@ -36,7 +36,9 @@ check-backend: lint test
 	@echo "后端检查通过"
 
 check-frontend:
-	cd web && npx vue-tsc --noEmit
+	cd web && npm run typecheck
+	cd web && npm run lint
+	cd web && npm run test
 	cd web && npx vite build
 	@echo "前端检查通过"
 
@@ -59,7 +61,7 @@ help:
 	@echo "  make build          - Build the application"
 	@echo "  make run            - Run the application"
 	@echo "  make clean          - Clean build artifacts"
-	@echo "  make lint           - Run go vet"
+	@echo "  make lint           - Run go vet + golangci-lint"
 	@echo "  make test           - Run tests"
 	@echo "  make check          - 跑一遍 CI 的全部检查（后端 + 前端），提交前建议执行"
 	@echo "  make migrate        - Apply pending DB migrations"

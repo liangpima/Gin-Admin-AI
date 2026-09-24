@@ -251,14 +251,20 @@ async function loadLevels() {
   try {
     const res = await getAllMemberLevels()
     levelList.value = res.data
-  } catch {}
+  } catch (err) {
+    // 等级只用于筛选与下拉选择，加载失败不阻断列表本身
+    console.warn('[member] 会员等级加载失败，等级筛选与选择将为空', err)
+  }
 }
 
 async function loadTags() {
   try {
     const res = await getAllMemberTags()
     tagList.value = res.data
-  } catch {}
+  } catch (err) {
+    // 标签只用于筛选与下拉选择，加载失败不阻断列表本身
+    console.warn('[member] 会员标签加载失败，标签筛选与选择将为空', err)
+  }
 }
 
 function handleSearch() {

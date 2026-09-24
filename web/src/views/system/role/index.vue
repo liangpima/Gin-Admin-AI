@@ -221,7 +221,11 @@ async function handlePermission(row: RoleItem) {
   try {
     const res = await getMenuTree()
     menuTree.value = res.data
-  } catch {}
+  } catch (err) {
+    // 菜单树取不到就没法分配权限，但仍要打开弹窗并给出空态，
+    // 否则用户点了「分配权限」没有任何反应，比看到空列表更困惑
+    console.warn('[role] 菜单树加载失败，权限分配将无菜单可选', err)
+  }
   permDialogVisible.value = true
 }
 

@@ -71,7 +71,11 @@ export const useUserStore = defineStore('user', {
         // 必须带上 refreshToken，否则服务端无法定位并吊销它，
         // 登出后该凭据仍可换发新的 access token
         await logoutApi(this.refreshToken || getRefreshToken())
-      } catch {}
+      } catch (err) {
+        // 登出必须「尽力而为」：服务端吊销失败（网络异常、refreshToken 已过期）
+        // 也不能把用户卡在登录态，本地会话照清不误，只留一条排查痕迹
+        console.warn('[user] 服务端登出失败，已仅清理本地会话', err)
+      }
       this.clearSession()
     },
 

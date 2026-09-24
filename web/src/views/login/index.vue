@@ -130,7 +130,10 @@ async function loadSiteInfo() {
     if (siteInfo.title) {
       document.title = siteInfo.title
     }
-  } catch {}
+  } catch (err) {
+    // 站点信息是登录页的锦上添花，取不到就保留默认文案，不阻断登录
+    console.warn('[login] 站点信息加载失败，将使用默认标题', err)
+  }
 }
 
 function onCaptchaSuccess(token: string) {

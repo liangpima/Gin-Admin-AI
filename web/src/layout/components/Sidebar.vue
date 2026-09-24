@@ -21,10 +21,10 @@
       >
         <template v-if="menuRoutes.length > 0">
           <SidebarItem
-            v-for="route in menuRoutes"
-            :key="route.path"
-            :item="route"
-            :base-path="route.path"
+            v-for="menuRoute in menuRoutes"
+            :key="menuRoute.path"
+            :item="menuRoute"
+            :base-path="menuRoute.path"
           />
         </template>
       </el-menu>
@@ -92,7 +92,11 @@ onMounted(async () => {
     })
     if (map.name) siteName.value = map.name
     if (map.logo) siteLogo.value = map.logo
-  } catch {}
+  } catch (err) {
+    // 站点信息取不到就退回默认标题，不影响侧边栏其余功能；
+    // 面向用户的提示由响应拦截器统一负责，这里只留排查用的痕迹
+    console.warn('[Sidebar] 站点信息加载失败，将使用默认标题', err)
+  }
 })
 </script>
 

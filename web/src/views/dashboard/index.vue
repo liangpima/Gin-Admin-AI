@@ -111,7 +111,10 @@ onMounted(async () => {
     stats.value = res.data
     const values = [res.data.userCount, res.data.roleCount, res.data.menuCount, res.data.deptCount]
     values.forEach((v, i) => animateCount(v, i))
-  } catch {}
+  } catch (err) {
+    // 统计加载失败时保持 0 值展示，页面其余部分仍然可用
+    console.warn('[dashboard] 统计数据加载失败', err)
+  }
 })
 </script>
 

@@ -1,17 +1,23 @@
 <template>
   <div class="wangeditor-wrapper">
+    <!--
+      属性/事件按仓库约定写 kebab-case（vue/attribute-hyphenation）。
+      wangeditor 官方文档里是 camelCase，两者等价：组件显式声明了 defaultConfig prop，
+      Vue 会按官方规则把 default-config 归一化到它；on-created 与 onCreated 编译出的
+      监听器名同为 onOnCreated（已用 @vue/compiler-sfc 实测比对）。
+    -->
     <Toolbar
       :editor="editorRef"
-      :defaultConfig="toolbarConfig"
+      :default-config="toolbarConfig"
       :mode="mode"
       class="wangeditor-toolbar"
     />
     <Editor
       v-model="valueHtml"
-      :defaultConfig="editorConfig"
+      :default-config="editorConfig"
       :mode="mode"
       class="wangeditor-editor"
-      @onCreated="handleCreated"
+      @on-created="handleCreated"
     />
     <ImagePicker v-model:visible="imagePickerVisible" @confirm="handleImagePick" />
     <ImagePicker v-model:visible="videoPickerVisible" type="video" @confirm="handleVideoPick" />

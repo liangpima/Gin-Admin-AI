@@ -253,14 +253,20 @@ async function loadRoles() {
   try {
     const res = await getAllRoles()
     roleList.value = res.data
-  } catch {}
+  } catch (err) {
+    // 角色只用于筛选与表单下拉，加载失败不阻断用户列表本身
+    console.warn('[user] 角色列表加载失败，角色筛选与分配将为空', err)
+  }
 }
 
 async function loadDepts() {
   try {
     const res = await getDeptTree()
     deptTree.value = res.data
-  } catch {}
+  } catch (err) {
+    // 部门树只用于筛选与表单选择，加载失败不阻断用户列表本身
+    console.warn('[user] 部门树加载失败，部门筛选与选择将为空', err)
+  }
 }
 
 function handleSearch() {
