@@ -1,4 +1,4 @@
-.PHONY: build run clean lint test check check-backend check-frontend swagger migrate migrate-status
+.PHONY: build run clean lint test coverage check check-backend check-frontend swagger migrate migrate-status deps help
 
 APP_NAME := go-admin
 BUILD_DIR := ./dist
@@ -26,13 +26,24 @@ lint:
 		exit 1; }
 	golangci-lint run --timeout=5m
 
+# 快速跑测试，不带覆盖率门槛
 test:
 	go test ./...
+
+# 跑完整测试并检查「包均覆盖率」门槛。阈值与口径写在脚本头部注释里。
+#
+# 用 `bash scripts/...` 而不是 `./scripts/...`：仓库里的可执行位在 Windows
+# 检出后不一定保留，显式调 bash 更稳。
+#
+# check-backend 用它而不是 test —— 跑一遍测试就同时拿到门槛检查，
+# 不必把测试跑两遍。
+coverage:
+	bash scripts/check-coverage.sh
 
 # check 与 CI（.github/workflows/ci.yml）保持一致：提交前跑一遍即可等价于 CI
 check: check-backend check-frontend
 
-check-backend: lint test
+check-backend: lint coverage
 	@echo "后端检查通过"
 
 check-frontend:
@@ -63,7 +74,8 @@ help:
 	@echo "  make run            - Run the application"
 	@echo "  make clean          - Clean build artifacts"
 	@echo "  make lint           - Run go vet + golangci-lint"
-	@echo "  make test           - Run tests"
+	@echo "  make test           - Run tests（不含覆盖率门槛，用于快速迭代）"
+	@echo "  make coverage       - Run tests + 包均覆盖率门槛检查"
 	@echo "  make check          - 跑一遍 CI 的全部检查（后端 + 前端），提交前建议执行"
 	@echo "  make migrate        - Apply pending DB migrations"
 	@echo "  make migrate-status - Show DB migration status"
