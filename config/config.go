@@ -54,6 +54,12 @@ type CORSConfig struct {
 }
 
 type ServerConfig struct {
+	// Host 监听地址，留空表示监听所有网卡（":8080"）。
+	//
+	// 提供它主要是为了让「开发环境只在本机可达」成为可配置项：
+	// debug 模式下 Swagger 与调试信息全开，若同时又监听所有网卡、
+	// 且 JWT 密钥仍是默认值，同网段任何人都能伪造 token 登录。
+	Host         string `mapstructure:"host"`
 	Port         int    `mapstructure:"port"`
 	Mode         string `mapstructure:"mode"`
 	ReadTimeout  int    `mapstructure:"read_timeout"`
@@ -279,6 +285,61 @@ func validateTrustedProxies(proxies []string) []string {
 		}
 	}
 	return problems
+}
+
+// ListenAddr 返回 HTTP 服务的监听地址。
+func (s ServerConfig) ListenAddr() string {
+	return fmt.Sprintf("%s:%d", s.Host, s.Port)
+}
+
+// ListensOnAllInterfaces 判断监听地址是否对所有网卡可达。
+// 空 Host、0.0.0.0、:: 都是「所有网卡」的写法。
+func (s ServerConfig) ListensOnAllInterfaces() bool {
+	switch s.Host {
+	case "", "0.0.0.0", "::", "[::]":
+		return true
+	}
+	return false
+}
+
+// DevelopmentWarnings 汇总「开发模式下仍带病运行」的风险点，返回可逐条打印的文案。
+//
+// 为什么不直接拒绝启动：本地开发本来就需要 debug 模式与默认密钥，
+// 一刀切会让「起步体验」和「生产安全」对立起来。但下面这几项叠加时
+// （监听所有网卡 + 调试入口开放 + 默认 JWT 密钥），同网段任何人都能
+// 伪造任意用户的 token 登录 —— 那已经不是「开发环境风险」，
+// 而是一个可被直接利用的入口，因此必须在启动日志里一眼可见。
+//
+// 生产环境（mode=release）由 ValidateSecurity 直接拒绝启动，故返回空。
+func DevelopmentWarnings() []string {
+	if IsProduction() {
+		return nil
+	}
+
+	var warnings []string
+
+	warnings = append(warnings, fmt.Sprintf(
+		"开发模式（mode=%s）：Swagger 文档与调试信息已开启，生产环境请设置 mode=release",
+		Cfg.Server.Mode))
+
+	if Cfg.Server.ListensOnAllInterfaces() {
+		warnings = append(warnings, fmt.Sprintf(
+			"服务监听在所有网卡（%s），同网段任何主机都可访问；仅需本机访问可设置 server.host: 127.0.0.1",
+			Cfg.Server.ListenAddr()))
+	}
+
+	if secret := GetJWTSecret(); secret == "" || secret == defaultJWTSecret {
+		warnings = append(warnings, fmt.Sprintf(
+			"jwt.secret 仍为默认值（%q）：任何知道该值的人都能伪造任意用户的 token；"+
+				"请设置环境变量 JWT_SECRET（生成方式：openssl rand -base64 48）", defaultJWTSecret))
+	}
+
+	if Cfg.Database.Password == defaultDBPassword {
+		warnings = append(warnings, fmt.Sprintf(
+			"database.password 仍为默认值（%q），请设置环境变量 DB_PASSWORD", defaultDBPassword))
+	}
+
+	return warnings
 }
 
 // GetJWTSecret returns JWT secret, preferring env var

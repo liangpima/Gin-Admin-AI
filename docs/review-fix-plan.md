@@ -4,40 +4,79 @@
 > 目标：P0+P1 完成后约 80 分，全部完成约 85–88 分。
 > 节奏建议：P0 一次提交一个修复项，全部带回归测试；P1 涉及迁移，单独开分支。
 
+## 执行进度
+
+| 阶段 | 状态 | 说明 |
+|---|---|---|
+| P0-1 角色提权 | ✅ 已完成 | `791c85c` 授权向上收敛 + 保留编码护栏，新增 9 个用例 |
+| P0-2 限频绕过 | ✅ 已完成 | `bc0676a` trusted_proxies + fail-closed，router 包从 0 测试到 3 个 |
+| P0-3 验证码 | ✅ 已完成 | `9b00513` 生成限流 + 凭证绑定来源；2 条原计划项经核实已存在或改法 |
+| P0-4 密钥护栏 | ✅ 已完成 | 开发模式启动告警逐条打印 + `server.host` + 部署配置补白名单 |
+| P1 多租户补全 | ⏳ 未开始 | 需迁移脚本，按计划单独开分支 |
+| P2 工程质量 | ⏳ 未开始 | |
+| P3 体验与长期 | ⏳ 未开始 | |
+
+**⚠️ 升级须知（P0-2/P0-3 带来的部署影响）**
+
+IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分钟）现在按
+`c.ClientIP()` 计数，而该值默认**只取连接对端地址**。因此：
+
+- **裸机直连部署**：无需改动，行为正确。
+- **反向代理之后**（nginx / SLB / 容器编排）：**必须**在 `server.trusted_proxies`
+  填入代理网段。漏配的后果不是"限流失效"而是"限流过度" —— 所有用户共用代理
+  的一个 IP，任意 5 次登录失败会锁死全站 15 分钟。
+  `deploy/config.docker.yaml` 已按 `172.16.0.0/12` 预置（见该文件注释）。
+- 启动日志会明确打印当前 IP 计数依据，可用于确认配置是否生效。
+
 ---
 
 ## 阶段 P0 · 安全修复（1–2 人天，上线前必须）
 
-### P0-1 角色提权：授权必须向上收敛 [High]
+### P0-1 角色提权：授权必须向上收敛 [High] ✅ 已完成
 - **问题**：`internal/module/system/service/role_service.go:73-77, 133-137` 对 `req.MenuIds`
   直接落库并 `syncPolicies()`，没有校验操作者自己是否持有这些权限；
   `user_service.go:93-108 normalizeRoleIDs` 同样只校验"属于本租户"，不校验"我能否授予"。
   拥有 `system:role:add/edit` 的低权管理员可给自己的角色挂全量菜单 → 垂直提权到超管。
-- **修法**（复用现有 Casbin 设施，不引入新依赖）：
-  1. `middleware` 包新增导出函数 `OperatorCanGrant(c *gin.Context, menuIDs []uint) (bool, error)`：
-     取操作者角色（复用 `resolveRoleCodes`）→ 加载目标 menu 的 `permission` 列表
-     （`sys_menu` 按 ID 批查）→ 逐个 `currentEnforcer().Enforce(role, "default", perm, "*")`。
-     任一权限不持有即 false。操作者含 `admin` 角色直接放行（与 `casbin.go:96` 通配策略一致）。
-  2. `role_service.Create/Update` 与 `user_service.UpdateRoles`（给用户绑角色时，校验目标角色的
-     权限集是操作者权限集的子集）在写库前调用，失败返回 `common.Forbidden`。
-  3. 空 `MenuIds` / 仅目录型菜单（`permission == ""`）不拦截。
-- **验收**：非 admin 账号创建角色勾选超出自身权限的菜单 → 403；admin 不受影响；
-  新增单测覆盖"子集放行 / 超集拒绝 / admin 跳过"三种情况。
+- **实施结果**：
+  1. `middleware` 新增 `RoleCodesFor` / `HasAdminRole` / `OperatorHoldsPermissions`。
+     **偏离原计划的一处**：原计划签名是 `OperatorCanGrant(c *gin.Context, ...)`，
+     但 Service 层不允许触碰 `gin.Context`（AGENTS.md 规则 2），而该判定在
+     Controller 与 Service 两侧都要用，故改为只依赖 `(tenantID, userID)` 两个标量，
+     由调用方各自从上下文取出。顺带把 `resolveRoleCodes` 重构到它之上，
+     两侧共用同一份角色缓存，不增加查库开销。
+  2. `common.NewForbiddenError` 让授权失败以 403 语义返回（而非 400）。
+  3. 校验一律放在**落库之前**：`role_service.Create/Update` 校验菜单权限码是操作者
+     权限的子集；`user_service.normalizeRoleIDs` 覆盖"建用户绑角色/改用户换角色/
+     更新用户角色"三条路径。`user_service.Update` 的角色校验也从"落库之后"提到之前，
+     避免「资料已改、角色被拒」的半成品状态。
+  4. 额外补上原计划未列出的**保留编码护栏**：admin 的通配策略只依赖角色编码、
+     与名下菜单无关，因此非 admin 操作者不得新建 code=admin 的角色、不得把角色改名
+     为 admin、也不得改动 admin 角色本身（改名等于把通配权限交给新编码）。
+     同理，授予 admin 角色按**编码**拦截而非比对菜单权限集。
+  5. 空 `MenuIds` / 仅目录型菜单（`permission == ""`）不拦截。
+- **验收**：`internal/module/system/service/role_grant_test.go`（9 个用例）覆盖
+  「子集放行 / 超集拒绝且不落库 / 目录型菜单放行 / admin 操作者放行 /
+  保留编码三条染指路径 / 给用户绑 admin 角色被拒」。提交 `791c85c`。
 
-### P0-2 登录限频可被伪造 IP 绕过 [High]
+### P0-2 登录限频可被伪造 IP 绕过 [High] ✅ 已完成
 - **问题**：`internal/module/system/controller/auth_controller.go:41` 用 `c.ClientIP()`，
   全仓无 `SetTrustedProxies`（gin 默认信任所有代理头）→ 每次伪造 `X-Forwarded-For`
   即绕过 IP 维度锁定；`login_guard.go:51-57` 在 Redis 故障时 fail-open，
   缓存抖动期暴力破解窗口完全敞开。
-- **修法**：
-  1. `config.go` 的 Server 段加 `trusted_proxies: []string`（默认空）；
-     `router.Setup` 里 `r.SetTrustedProxies(cfg)` —— 空列表 = 不信任任何代理头，
-     `ClientIP()` 直接用连接对端 IP，伪造失效；部署在 nginx 后时填内网网段。
-  2. `login_guard` 加配置 `security.login_fail_closed: true`（默认 true）：
-     Redis 查询失败时**拒绝本次登录**（返回"服务繁忙"），与 `middleware/auth.go`
-     吊销检查的 fail-closed 策略对齐；确需可用性优先的环境可显式改 false，但告警日志保留。
-- **验收**：连续伪造不同 `X-Forwarded-For` 登录失败，第 6 次仍被锁；
-  单测覆盖 fail-closed 分支。
+- **实施结果**：
+  1. `config.ServerConfig` 新增 `trusted_proxies`（默认空 = 不信任任何代理头），
+     `router.Setup` 在注册路由前调用 `r.SetTrustedProxies`；
+     `config.Validate` 增加白名单校验并显式拒绝 `0.0.0.0/0`、`::/0`
+     （gin 解析失败会保留上一份配置，"配错了比不配更危险"，故必须启动期拦下）。
+  2. 新增 `security.login_fail_closed`（`*bool`，默认 true）：Redis 不可用时拒绝登录。
+     用指针是因为 Go 的 bool 零值恰好等于不安全的那一侧，漏配必须落到安全侧。
+     失败计数被写成非整数时按"已达上限"处理。
+  3. 核实后 `auth_controller` 的业务逻辑早已下沉到 Service（本次只需传参改造），
+     故原计划"Controller 承载业务逻辑"这部分不在本项范围内。
+- **验收**：`router/router_test.go`（3 个用例，router 包此前 0 测试）用真实路由验证
+  「默认忽略代理头 / 可信代理的头被采信 / 非可信对端的头被忽略」；
+  已验证移除 `SetTrustedProxies` 后前两个用例立刻转红。
+  另加 `config` 白名单用例与 `service` 的 fail-closed / fail-open 用例。提交 `bc0676a`。
 
 ### P0-3 验证码自动化成本 [Medium]（修正：不能删 `chars`）✅ 已完成
 - **核实结论**：`chars` 是"请依次点击 X Y Z"的提示语，前端
@@ -65,10 +104,25 @@
   必须在 `server.trusted_proxies` 中填代理网段，否则 5 次登录失败即锁全站。
 
 
-### P0-4 默认密钥护栏补强 [Low]
-- 现状：`config.ValidateSecurity` 仅在 `mode=release` 拦截 —— 正确。
-- 补充：`mode=debug` 且监听 `0.0.0.0` 时打印醒目告警（现只提示 Swagger 开启）；
-  `.env.example` 加 `JWT_SECRET` 生成指引（`openssl rand -base64 48`）。
+### P0-4 默认密钥护栏补强 [Low] ✅ 已完成
+- 现状：`config.ValidateSecurity` 仅在 `mode=release` 拦截 —— 正确，保持不变。
+- **实施结果**：
+  1. 新增 `config.DevelopmentWarnings()`：开发模式逐条打印风险点（调试入口开放、
+     监听所有网卡、JWT 密钥仍为默认值、库密码仍为默认值），
+     密钥那条同时给出生成方式（`openssl rand -base64 48`）—— 只报风险不给出路的
+     告警等于没有告警。生产环境返回空（由 `ValidateSecurity` 直接拒绝启动）。
+  2. 新增 `server.host`（留空 = 所有网卡）：让"开发环境只在本机可达"成为可配置项，
+     否则第 1 条的告警没有可执行的动作。同时新增 `ServerConfig.ListenAddr()` /
+     `ListensOnAllInterfaces()`，`cmd/server` 改用前者拼监听地址。
+  3. 启动日志明确打印 IP 计数依据（对端地址 / 可信代理转发），
+     用于确认 `trusted_proxies` 是否按预期生效 —— 这是 P0-2/P0-3 唯一的部署陷阱。
+  4. `.env.example` 补 `openssl rand -base64 48` 生成方式，并说明 debug 模式下
+     默认密钥只会告警不会拒绝启动。
+  5. `deploy/config.docker.yaml` 预置 `trusted_proxies: 172.16.0.0/12`：
+     该部署**确定**在 nginx 之后（`proxy_pass http://app:8080`），
+     漏配会让限流退化为全站共用额度。
+- **验收**：`config/config_test.go` 覆盖监听地址两种写法、生产环境不产生开发告警、
+  默认密钥/默认库密码必须被点名、生成方式必须出现。`deploy/validate.py` 可复验配置。
 
 ---
 

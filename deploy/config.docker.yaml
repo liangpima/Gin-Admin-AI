@@ -19,6 +19,20 @@ server:
   mode: release
   read_timeout: 60
   write_timeout: 60
+  # 本部署**确定**在 nginx 之后（见 deploy/nginx/default.conf 的 proxy_pass），
+  # 因此必须声明可信代理网段，否则 X-Forwarded-For 一律不被采信，
+  # c.ClientIP() 会退化成 nginx 容器的地址 —— 表现为：
+  #   · 登录失败限频变成全站共用计数：任意 5 次失败即锁死所有人 15 分钟
+  #   · 验证码生成限流（10 次/分钟）变成全站共用额度
+  #   · 登录日志/操作日志里的来源 IP 全是 nginx 容器地址，审计失效
+  #
+  # 172.16.0.0/12 覆盖 docker 默认的 bridge/compose 网络网段
+  # （172.16.0.0/12 = 172.16.0.0 ~ 172.31.255.255）。
+  # 若 compose 显式指定了其它 subnet，请改成对应网段。
+  # 切勿写 0.0.0.0/0：那等于信任任意客户端伪造的 X-Forwarded-For，
+  # config.Validate 会直接拒绝启动。
+  trusted_proxies:
+    - "172.16.0.0/12"
 
 database:
   host: mysql

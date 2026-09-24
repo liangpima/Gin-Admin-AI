@@ -64,10 +64,18 @@ func main() {
 	defer logger.Log.Sync()
 
 	// 开发模式下 Swagger 与 gin 调试输出是开启的（见 router.Setup）。
-	// 这里显式告警：生产部署若忘记改 mode，这些调试入口会直接暴露。
-	if !config.IsProduction() {
-		logger.Log.Warnf("当前为开发模式(mode=%s)：Swagger 文档与调试信息已开启，生产环境请设置 mode=release",
-			config.Cfg.Server.Mode)
+	// 逐条打印风险点：这些项叠加时（监听所有网卡 + 调试入口开放 + 默认密钥）
+	// 同网段任何人都能伪造 token 登录，必须让它在启动日志里一眼可见。
+	for _, w := range config.DevelopmentWarnings() {
+		logger.Log.Warnf("[启动告警] %s", w)
+	}
+
+	// 明确告知 IP 计数依据，避免「部署在代理后却按代理 IP 计数」这类问题
+	// 只能靠排查才发现（表现为 5 次登录失败锁全站、验证码限流全站共用额度）。
+	if len(config.Cfg.Server.TrustedProxies) == 0 {
+		logger.Log.Infof("[启动] IP 计数依据：连接对端地址（server.trusted_proxies 为空，不采信 X-Forwarded-For）")
+	} else {
+		logger.Log.Infof("[启动] IP 计数依据：可信代理 %v 转发的 X-Forwarded-For", config.Cfg.Server.TrustedProxies)
 	}
 
 	if err := database.Init(); err != nil {
@@ -139,7 +147,7 @@ func main() {
 	}
 	task.Start()
 
-	addr := fmt.Sprintf(":%d", config.Cfg.Server.Port)
+	addr := config.Cfg.Server.ListenAddr()
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      r,
