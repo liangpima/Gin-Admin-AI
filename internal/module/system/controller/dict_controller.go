@@ -63,11 +63,13 @@ func (ctl *DictController) DeleteType(c *gin.Context) {
 func (ctl *DictController) FindTypeList(c *gin.Context) {
 	var req struct {
 		Name     string `form:"name"`
-		Page     int    `form:"page"`
-		PageSize int    `form:"pageSize"`
+		// 分页参数统一内嵌：绑定与归一化走 common.BindPage
+		common.PageQuery
 	}
-	c.ShouldBindQuery(&req)
-	req.Page, req.PageSize = common.NormalizePageParams(req.Page, req.PageSize)
+	if err := common.BindPage(c, &req); err != nil {
+		common.Error(c, common.CodeBadRequest, err.Error())
+		return
+	}
 	list, total, err := ctl.dictService.FindTypeList(req.Name, req.Page, req.PageSize)
 	if err != nil {
 		common.FailWith(c, err)
@@ -143,13 +145,15 @@ func (ctl *DictController) FindDataByType(c *gin.Context) {
 func (ctl *DictController) FindDataList(c *gin.Context) {
 	var req struct {
 		DictType string `form:"dictType"`
-		Page     int    `form:"page"`
-		PageSize int    `form:"pageSize"`
+		// 分页参数统一内嵌：绑定与归一化走 common.BindPage
+		common.PageQuery
 	}
-	c.ShouldBindQuery(&req)
+	if err := common.BindPage(c, &req); err != nil {
+		common.Error(c, common.CodeBadRequest, err.Error())
+		return
+	}
 	// 分页参数必须取自请求：此前这里硬编码 page=1/pageSize=10，
 	// 前端传 pageSize=100 被静默忽略，字典数据超过 10 条就再也看不到。
-	req.Page, req.PageSize = common.NormalizePageParams(req.Page, req.PageSize)
 
 	list, total, err := ctl.dictService.FindDataList(req.DictType, req.Page, req.PageSize)
 	if err != nil {

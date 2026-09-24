@@ -94,7 +94,7 @@ func (ctl *MemberTagController) Delete(c *gin.Context) {
 // @Router /member/tag/list [get]
 func (ctl *MemberTagController) FindList(c *gin.Context) {
 	var req dto.MemberTagListRequest
-	if err := c.ShouldBindQuery(&req); err != nil {
+	if err := common.BindPage(c, &req); err != nil {
 		common.Error(c, common.CodeBadRequest, err.Error())
 		return
 	}

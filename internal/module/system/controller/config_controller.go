@@ -75,11 +75,13 @@ func (ctl *ConfigController) Delete(c *gin.Context) {
 func (ctl *ConfigController) FindList(c *gin.Context) {
 	var req struct {
 		Name     string `form:"name"`
-		Page     int    `form:"page"`
-		PageSize int    `form:"pageSize"`
+		// 分页参数统一内嵌：绑定与归一化走 common.BindPage
+		common.PageQuery
 	}
-	c.ShouldBindQuery(&req)
-	req.Page, req.PageSize = common.NormalizePageParams(req.Page, req.PageSize)
+	if err := common.BindPage(c, &req); err != nil {
+		common.Error(c, common.CodeBadRequest, err.Error())
+		return
+	}
 	list, total, err := ctl.configService.FindList(req.Name, req.Page, req.PageSize)
 	if err != nil {
 		common.FailWith(c, err)

@@ -1,5 +1,7 @@
 package dto
 
+import "go-admin/internal/common"
+
 type CreateRoleRequest struct {
 	Name      string `json:"name" binding:"required,min=2,max=64"`
 	Code      string `json:"code" binding:"required,min=2,max=64"`
@@ -33,6 +35,6 @@ type RoleListRequest struct {
 	Name   string `json:"name" form:"name"`
 	Code   string `json:"code" form:"code"`
 	Status *int8  `json:"status" form:"status"`
-	Page   int    `json:"page" form:"page"`
-	PageSize int  `json:"pageSize" form:"pageSize"`
+	// 分页参数统一内嵌：绑定与归一化走 common.BindPage
+	common.PageQuery
 }

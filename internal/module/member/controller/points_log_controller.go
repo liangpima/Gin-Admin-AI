@@ -28,7 +28,7 @@ func NewPointsLogController() *PointsLogController {
 // @Router /member/points/list [get]
 func (ctl *PointsLogController) FindList(c *gin.Context) {
 	var req dto.PointsLogListRequest
-	if err := c.ShouldBindQuery(&req); err != nil {
+	if err := common.BindPage(c, &req); err != nil {
 		common.Error(c, common.CodeBadRequest, err.Error())
 		return
 	}

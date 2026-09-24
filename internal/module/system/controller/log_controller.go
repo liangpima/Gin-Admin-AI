@@ -27,11 +27,13 @@ func NewLogController() *LogController {
 func (ctl *LogController) FindOperationLogList(c *gin.Context) {
 	var req struct {
 		Title    string `form:"title"`
-		Page     int    `form:"page"`
-		PageSize int    `form:"pageSize"`
+		// 分页参数统一内嵌：绑定与归一化走 common.BindPage
+		common.PageQuery
 	}
-	c.ShouldBindQuery(&req)
-	req.Page, req.PageSize = common.NormalizePageParams(req.Page, req.PageSize)
+	if err := common.BindPage(c, &req); err != nil {
+		common.Error(c, common.CodeBadRequest, err.Error())
+		return
+	}
 	tenantID := common.GetTenantID(c)
 	list, total, err := ctl.logService.FindOperationLogList(tenantID, req.Title, nil, req.Page, req.PageSize)
 	if err != nil {
@@ -53,11 +55,13 @@ func (ctl *LogController) FindOperationLogList(c *gin.Context) {
 func (ctl *LogController) FindLoginLogList(c *gin.Context) {
 	var req struct {
 		Username string `form:"username"`
-		Page     int    `form:"page"`
-		PageSize int    `form:"pageSize"`
+		// 分页参数统一内嵌：绑定与归一化走 common.BindPage
+		common.PageQuery
 	}
-	c.ShouldBindQuery(&req)
-	req.Page, req.PageSize = common.NormalizePageParams(req.Page, req.PageSize)
+	if err := common.BindPage(c, &req); err != nil {
+		common.Error(c, common.CodeBadRequest, err.Error())
+		return
+	}
 	tenantID := common.GetTenantID(c)
 	list, total, err := ctl.logService.FindLoginLogList(tenantID, req.Username, nil, req.Page, req.PageSize)
 	if err != nil {

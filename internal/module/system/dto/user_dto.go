@@ -1,5 +1,7 @@
 package dto
 
+import "go-admin/internal/common"
+
 type CreateUserRequest struct {
 	Username string `json:"username" binding:"required,min=2,max=64"`
 	Password string `json:"password" binding:"required,min=6,max=128"`
@@ -55,6 +57,6 @@ type UserListRequest struct {
 	Phone    string `json:"phone" form:"phone"`
 	Status   *int8  `json:"status" form:"status"`
 	DeptID   uint   `json:"deptId" form:"deptId"`
-	Page     int    `json:"page" form:"page"`
-	PageSize int    `json:"pageSize" form:"pageSize"`
+	// 分页参数统一内嵌：绑定与归一化走 common.BindPage
+	common.PageQuery
 }

@@ -1,5 +1,7 @@
 package dto
 
+import "go-admin/internal/common"
+
 type CreateMemberRequest struct {
 	Username string `json:"username" binding:"max=64"`
 	Nickname string `json:"nickname" binding:"max=64"`
@@ -42,8 +44,8 @@ type MemberListRequest struct {
 	Nickname string `json:"nickname" form:"nickname"`
 	LevelID  uint   `json:"levelId" form:"levelId"`
 	Status   *int8  `json:"status" form:"status"`
-	Page     int    `json:"page" form:"page"`
-	PageSize int    `json:"pageSize" form:"pageSize"`
+	// 分页参数统一内嵌：绑定与归一化走 common.BindPage
+	common.PageQuery
 }
 
 type UpdateMemberStatusRequest struct {
@@ -84,8 +86,8 @@ type UpdateMemberLevelRequest struct//
 
 type MemberLevelListRequest struct {
 	Name     string `json:"name" form:"name"`
-	Page     int    `json:"page" form:"page"`
-	PageSize int    `json:"pageSize" form:"pageSize"`
+	// 分页参数统一内嵌：绑定与归一化走 common.BindPage
+	common.PageQuery
 }
 
 type CreateMemberTagRequest struct {
@@ -110,13 +112,13 @@ type UpdateMemberTagRequest struct//
 
 type MemberTagListRequest struct {
 	Name     string `json:"name" form:"name"`
-	Page     int    `json:"page" form:"page"`
-	PageSize int    `json:"pageSize" form:"pageSize"`
+	// 分页参数统一内嵌：绑定与归一化走 common.BindPage
+	common.PageQuery
 }
 
 type PointsLogListRequest struct {
 	MemberID uint `json:"memberId" form:"memberId"`
 	Type     int8 `json:"type" form:"type"`
-	Page     int  `json:"page" form:"page"`
-	PageSize int  `json:"pageSize" form:"pageSize"`
+	// 分页参数统一内嵌：绑定与归一化走 common.BindPage
+	common.PageQuery
 }

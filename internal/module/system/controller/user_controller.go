@@ -131,7 +131,7 @@ func (ctl *UserController) FindByID(c *gin.Context) {
 // @Router /api/v1/system/user/list [get]
 func (ctl *UserController) FindList(c *gin.Context) {
 	var req dto.UserListRequest
-	if err := c.ShouldBindQuery(&req); err != nil {
+	if err := common.BindPage(c, &req); err != nil {
 		common.Error(c, common.CodeBadRequest, err.Error())
 		return
 	}
@@ -158,7 +158,7 @@ func (ctl *UserController) FindList(c *gin.Context) {
 // @Router /api/v1/system/user/export [get]
 func (ctl *UserController) Export(c *gin.Context) {
 	var req dto.UserListRequest
-	if err := c.ShouldBindQuery(&req); err != nil {
+	if err := common.BindPage(c, &req); err != nil {
 		common.Error(c, common.CodeBadRequest, err.Error())
 		return
 	}

@@ -74,11 +74,13 @@ func (ctl *AgreementController) FindList(c *gin.Context) {
 		Name     string `form:"name"`
 		Type     string `form:"type"`
 		Status   *int8  `form:"status"`
-		Page     int    `form:"page"`
-		PageSize int    `form:"pageSize"`
+		// 分页参数统一内嵌：绑定与归一化走 common.BindPage
+		common.PageQuery
 	}
-	c.ShouldBindQuery(&req)
-	req.Page, req.PageSize = common.NormalizePageParams(req.Page, req.PageSize)
+	if err := common.BindPage(c, &req); err != nil {
+		common.Error(c, common.CodeBadRequest, err.Error())
+		return
+	}
 	list, total, err := ctl.agreementService.FindList(common.GetTenantID(c), req.Name, req.Type, req.Status, req.Page, req.PageSize)
 	if err != nil {
 		common.FailWith(c, err)

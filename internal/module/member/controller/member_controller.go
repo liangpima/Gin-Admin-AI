@@ -84,7 +84,7 @@ func (ctl *MemberController) FindByID(c *gin.Context) {
 
 func (ctl *MemberController) FindList(c *gin.Context) {
 	var req dto.MemberListRequest
-	if err := c.ShouldBindQuery(&req); err != nil {
+	if err := common.BindPage(c, &req); err != nil {
 		common.Error(c, common.CodeBadRequest, err.Error())
 		return
 	}
