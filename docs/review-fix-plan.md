@@ -16,9 +16,9 @@
 | P1-3 租户 0 旁路 | ✅ 已完成 | `0e7d72d` 平台级身份需持有 admin 角色 |
 | P1-1 dept 租户隔离 | ✅ 已完成 | 模型/仓储/服务/控制器 + 迁移（两步回填）+ BuildTreeForest |
 | P1-2 全局表语义 | ✅ 已完成 | dict 显式声明全局；config 写权限收窄为 admin；agreement 加 tenant_id |
-| P2-1 测试补齐 | 🚧 进行中 | 49.2% → **54.9%**（目标 60%）；已完成 payment/upload/middleware/controller 两批 |
-| P2-2 lint 转阻断 | ⏳ 未开始 | |
-| P2-3 消除样板 | ⏳ 未开始 | |
+| P2-1 测试补齐 | 🚧 进行中 | 49.2% → **56.9%**（目标 60%）；已补 payment/upload/middleware/controller 三批 |
+| P2-2 lint 转阻断 | ✅ 已完成 | 基线 29 → **0**，`e15142b`；顺带修掉「观察项本身失效」 |
+| P2-3 消除样板 | 🚧 进行中 | 后端已完成（BindPage 收口 + 忽略错误）；前端 useCrud 与类型去重未做 |
 | P2-4 前端工程 | ⏳ 未开始 | |
 
 **⚠️ 升级须知（P0-2/P0-3 带来的部署影响）**
@@ -238,16 +238,38 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   `internal/database` 28.6%、`cmd/migrate` 50%。
   其中 controller 层缺口最大（约 12 个控制器只测了 3 个），是达到 60% 的关键。
 
-### P2-2 golangci-lint 转阻断
-- `ci.yml:76-89` 现为 `continue-on-error: true`，注释已写明"基线清理干净后去掉"。
-- 动作：本地跑一轮 golangci-lint → 修掉/豁免现有告警 → 删 `continue-on-error`。
+### P2-2 golangci-lint 转阻断 ✅ 已完成
+- **先发现了一个被掩盖的问题**：CI 用 `golangci-lint-action@v6` + `version: latest`，
+  而 latest 解析到 **v1.64.8**（用 go1.24 构建）；本仓库 go.mod 要求 go 1.25，
+  v1 会在**加载阶段**直接失败。也就是说这个任务一直没在检查代码，
+  而 `continue-on-error: true` 让它连失败都不显眼 ——
+  **观察项在观察项失效时是最危险的组合**。
+- **实施结果**：本地改用 v2（v2.13.2）跑通，真实基线 **29 项**
+  （errcheck 24 / staticcheck 4 / unused 1）→ 逐项修掉或豁免 → 现在 **0 项**。
+  - 新增 `.golangci.yml`：显式 `default: standard`，并写明为什么**不开** gofmt
+    （Windows 的 core.autocrlf 会检出 CRLF，而 gofmt 把 CRLF 视为格式错误，
+    开了之后每个 Windows 开发者本地 lint 都会红；实测确认转 LF 后零抱怨）。
+  - `ci.yml`：删掉 `continue-on-error`，action 升到 v8（v7 起支持 lint v2），
+    版本从 `latest` 改为**钉死 v2.13.2**（版本漂移正是那个坑的成因）。
+  - `Makefile` 的 `lint` 目标补上 golangci-lint 并给出缺失时的安装指引，
+    否则「make check 等价于 CI」会在本地悄悄失效。
+- **修的不只是 `_ =`**：其中 8 处是真的吞掉了有后果的错误，已改为正确处理，
+  详见提交 `e15142b` 的信息（member 查重把 DB 故障当成「未注册」、
+  验证码作废失败导致 token 可重复提交、`png.Encode` 失败返回空白图、
+  `payCtx()` 写好了却从未被调用等）。
 
-### P2-3 消除样板与忽略错误
-- `_ =` 忽略错误 8 处 → 逐一评估，至少降为日志 + 注释说明为何可忽略。
-- 后端 14 处 `ShouldBindQuery` + 分页 3 种写法（`NormalizePageSize`/`NormalizePage`/`GetPageParams`）
-  → 统一为一个 `common.BindPage(c, &req)`；前端 13 份 CRUD 样板 → 抽
-  `useCrud` hook（`loadData/handleAdd/handleEdit/handleDelete/pagination` 收口）。
-- 前端 `Result`/`PageResult` 在 `api/index.ts` 与 `types/api.ts` 双份定义 → 删一处。
+### P2-3 消除样板与忽略错误 🚧 后端已完成
+- ✅ `_ =` 忽略错误：逐处评估完毕。其中 8 处是真的吞掉了有后果的错误（已改为正确处理，
+  见 P2-2 的说明），其余是 `defer x.Close()` / `logger.Sync()` 这类无处上报的，
+  显式写成 `_ =` 表明是有意忽略。
+- ✅ 后端分页收口：**核实后发现「3 种写法」早已统一**（都走 `NormalizePageParams`，
+  旧的 `NormalizePageSize`/`GetPageParams` 已不存在），真正的缺口是别的东西：
+  14 处 `ShouldBindQuery` 里有 **7 处直接丢掉绑定错误**（`?page=abc` 不报错，
+  被当成「没传」按默认分页返回），另有一处曾把 page/pageSize 硬编码成 1/10。
+  已新增 `common.PageQuery` + `common.Paged` + `common.BindPage(c, req)`，
+  14 处全部收口（提交 `658a41d`）。
+- ⏳ 前端 13 份 CRUD 样板 → 抽 `useCrud` hook（`loadData/handleAdd/handleEdit/handleDelete/pagination`）。
+- ⏳ 前端 `Result`/`PageResult` 在 `api/index.ts` 与 `types/api.ts` 双份定义 → 删一处。
 
 ### P2-4 前端工程设施
 - 引入 ESLint（`eslint-plugin-vue` + `@typescript-eslint`）+ Prettier，先以
