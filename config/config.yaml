@@ -3,6 +3,11 @@ server:
   mode: debug
   read_timeout: 60
   write_timeout: 60
+  # 反向代理的 IP / CIDR 白名单，决定 X-Forwarded-For 是否可信。
+  # 留空 [] 表示不信任任何代理头，ClientIP() 取连接对端地址（推荐默认）。
+  # 部署在 nginx / SLB 之后时填其内网网段，例如 ["10.0.0.0/8"]；
+  # 切勿填 0.0.0.0/0，那会让客户端可伪造 IP，绕过登录失败限频。
+  trusted_proxies: []
 
 database:
   host: 127.0.0.1
@@ -65,3 +70,10 @@ cors:
     - "Content-Length"
     - "Content-Disposition"
   allow_credentials: true
+
+security:
+  # 登录限频在 Redis 不可用时的策略：
+  #   true（默认）= 拒绝本次登录（fail-closed），与 token 吊销检查一致；
+  #   false       = 放行（可用性优先，但限频会静默失效，仅日志留痕）。
+  # 省略该项即为 true。
+  login_fail_closed: true

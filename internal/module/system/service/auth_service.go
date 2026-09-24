@@ -74,7 +74,14 @@ func (s *authService) Login(req *dto.LoginRequest, lc *dto.LoginContext) (*vo.Lo
 	}
 	keys := loginRateLimitKeys(ip, req.Username)
 
-	if loginLocked(ctx, keys...) {
+	locked, err := checkLoginRateLimit(ctx, keys...)
+	if err != nil {
+		// 限频设施不可用（fail-closed）：这是系统错误，对外由 FailWith 统一
+		// 归为 500 + 通用文案，不泄漏 Redis 拓扑；日志侧已记录真实原因。
+		s.saveLoginLog(0, req.Username, 0, "登录限频服务不可用", lc)
+		return nil, err
+	}
+	if locked {
 		s.saveLoginLog(0, req.Username, 0, "登录频率过高", lc)
 		return nil, loginLockedError()
 	}

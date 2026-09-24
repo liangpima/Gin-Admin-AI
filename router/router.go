@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"go-admin/config"
 	"go-admin/internal/cache"
 	"go-admin/internal/database"
 	"go-admin/internal/logger"
@@ -108,6 +109,20 @@ func Setup(mode string) *gin.Engine {
 	gin.SetMode(mode)
 
 	r := gin.New()
+
+	// 代理信任列表必须在注册任何路由之前设定。
+	//
+	// gin 默认信任所有代理头（X-Forwarded-For / X-Real-IP），而 c.ClientIP()
+	// 是登录失败限频、登录日志、操作日志的 IP 来源。默认值下客户端只要每次
+	// 伪造一个新的 X-Forwarded-For，就能把「单 IP 5 次失败即锁定」变成无限次尝试。
+	// 列表为空（默认）表示不信任任何代理头，ClientIP() 直接取连接对端地址。
+	//
+	// 校验已在 config.Validate 完成（含拒绝 0.0.0.0/0），此处失败属配置绕过校验，
+	// 但仍不能静默忽略：gin 解析失败会保留旧的「信任一切」，那正是要避免的状态。
+	if err := r.SetTrustedProxies(config.Cfg.Server.TrustedProxies); err != nil {
+		logger.Log.Errorf("[router] 设置可信代理失败，IP 限频可能可被 X-Forwarded-For 绕过: %v", err)
+	}
+
 	r.Use(middleware.Recovery())
 	r.Use(middleware.Logger())
 	r.Use(middleware.Cors())

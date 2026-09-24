@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strings"
 
@@ -17,6 +18,31 @@ type Config struct {
 	Upload   UploadConfig   `mapstructure:"upload"`
 	Casbin   CasbinConfig   `mapstructure:"casbin"`
 	CORS     CORSConfig     `mapstructure:"cors"`
+	Security SecurityConfig `mapstructure:"security"`
+}
+
+// SecurityConfig 安全相关的可调开关。
+//
+// 这些开关的共同点是「默认值即安全值」，配置项只是给确有需要的部署留出例外通道，
+// 因此都必须能区分「没配」与「显式配成不安全的值」—— 用指针或 *bool 实现。
+type SecurityConfig struct {
+	// LoginFailClosed 决定登录限频在 Redis 不可用时如何取舍（默认 true）。
+	//
+	// true（默认）：拒绝本次登录。与 middleware/auth.go 的 token 吊销检查
+	//   （fail-closed）保持一致 —— 限频失效期间正是暴力破解成本最低的窗口。
+	// false：放行，可用性优先。此时限频会静默失效，日志里保留 Error 级痕迹。
+	LoginFailClosed *bool `mapstructure:"login_fail_closed"`
+}
+
+// IsLoginFailClosed 返回登录限频的失败策略。
+//
+// 用指针的原因：Go 的零值 false 恰好等于「不安全的那一侧」。
+// 若用普通 bool，漏配该项就等于关掉防护，而且没有任何迹象 —— 默认必须由代码给出。
+func (c *SecurityConfig) IsLoginFailClosed() bool {
+	if c.LoginFailClosed == nil {
+		return true
+	}
+	return *c.LoginFailClosed
 }
 
 type CORSConfig struct {
@@ -36,6 +62,16 @@ type ServerConfig struct {
 	// 攻击者保持连接、每次只发几个字节的头，ReadTimeout 会被不断刷新，
 	// 连接可被无限占用。缺省（<=0）时由 Validate 填默认值。
 	ReadHeaderTimeout int `mapstructure:"read_header_timeout"`
+	// TrustedProxies 反向代理的 IP 或 CIDR 列表，决定 X-Forwarded-For 是否可信。
+	//
+	// 必须显式配置，且**默认空**：gin 默认信任所有代理头，于是 c.ClientIP()
+	// 直接取 X-Forwarded-For，攻击者每次伪造一个新 IP 就能重置登录失败计数，
+	// 使 IP 维度的锁定完全失效。空列表表示「不信任任何代理头」，
+	// ClientIP() 退化为连接对端地址，伪造失效。
+	//
+	// 部署在 nginx / SLB 之后时填其内网网段（如 10.0.0.0/8、172.16.0.0/12），
+	// 不要填 0.0.0.0/0 —— 那等于恢复成「信任一切」，gin 也会直接拒绝。
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
 }
 
 type DatabaseConfig struct {
@@ -162,6 +198,8 @@ func Validate() error {
 			Cfg.Server.ReadHeaderTimeout, maxReadHeaderTimeout))
 	}
 
+	problems = append(problems, validateTrustedProxies(Cfg.Server.TrustedProxies)...)
+
 	if Cfg.Database.Host == "" {
 		problems = append(problems, "database.host 不能为空")
 	}
@@ -210,6 +248,37 @@ func Validate() error {
 		return fmt.Errorf("配置校验未通过：\n  - %s", strings.Join(problems, "\n  - "))
 	}
 	return nil
+}
+
+// validateTrustedProxies 校验 server.trusted_proxies 的每一项。
+//
+// 为什么在启动时校验而不是留给 r.SetTrustedProxies 报错：gin 在解析失败时
+// 会**保留上一份（初始的「信任一切」）配置**，也就是「配错了反而比不配更危险」。
+// 只有把校验前移到配置阶段，才能保证「要么按预期生效，要么起不来」。
+//
+// 同时显式拒绝 0.0.0.0/0 与 ::/0：写这两项的人通常是想表达「信任所有代理」，
+// 但那等于让 X-Forwarded-For 重新变成可任意伪造的输入。
+func validateTrustedProxies(proxies []string) []string {
+	var problems []string
+	for _, p := range proxies {
+		trimmed := strings.TrimSpace(p)
+		if trimmed == "" {
+			problems = append(problems, "server.trusted_proxies 含空项（留空请直接写 []）")
+			continue
+		}
+		if _, _, err := net.ParseCIDR(trimmed); err != nil {
+			if net.ParseIP(trimmed) == nil {
+				problems = append(problems, fmt.Sprintf(
+					"server.trusted_proxies 项 %q 既不是合法 IP 也不是合法 CIDR", trimmed))
+				continue
+			}
+		}
+		if trimmed == "0.0.0.0/0" || trimmed == "::/0" {
+			problems = append(problems, fmt.Sprintf(
+				"server.trusted_proxies 项 %q 会让 X-Forwarded-For 完全可信（可被伪造），请填具体代理网段", trimmed))
+		}
+	}
+	return problems
 }
 
 // GetJWTSecret returns JWT secret, preferring env var

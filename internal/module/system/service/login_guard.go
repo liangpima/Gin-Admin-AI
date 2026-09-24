@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"go-admin/config"
 	"go-admin/internal/cache"
 	"go-admin/internal/common"
 	"go-admin/internal/logger"
@@ -42,29 +43,45 @@ func loginRateLimitKeys(ip, username string) []string {
 	}
 }
 
-// loginLocked 判断任一维度的失败次数是否已达上限。
-// Redis 不可用（读取报错）时不做限制，避免缓存故障导致正常用户无法登录。
+// checkLoginRateLimit 判断任一维度的失败次数是否已达上限。
 //
-// 这个 fail-open 是刻意的可用性取舍，但**必须留下痕迹**：
-// 否则「Redis 抖动期间限频静默失效」会长期无人察觉，
-// 而这段时间恰恰是暴力破解成本最低的窗口。
-func loginLocked(ctx context.Context, keys ...string) bool {
+// 返回 (locked, err)：
+//   - locked=true  ：失败次数已达上限，应拒绝本次登录
+//   - err != nil   ：限频设施不可用且策略为 fail-closed，应拒绝本次登录（系统错误）
+//   - 两者均为零值 ：放行
+//
+// 为什么把「不可用」也纳入拒绝：限频是登录链路上唯一的暴力破解闸门，
+// 它依赖的 Redis 一旦抖动就放行，等于把「缓存故障」放大成「可无限撞库」，
+// 而攻击者完全可以主动制造或等待这个窗口。因此默认 fail-closed，
+// 与 middleware/auth.go 的 token 吊销检查（同样 fail-closed）保持一致。
+//
+// 可用性优先的部署可以显式配 security.login_fail_closed: false 退回 fail-open，
+// 此时仍留 Error 级日志，避免「限频静默失效」长期无人察觉。
+func checkLoginRateLimit(ctx context.Context, keys ...string) (bool, error) {
+	failClosed := config.Cfg.Security.IsLoginFailClosed()
+
 	for _, key := range keys {
 		v, err := cache.Get(ctx, key)
 		if err != nil {
-			logger.Log.Warnf("[auth] 登录限频查询失败，本次不做限制（fail-open）: key=%s err=%v", key, err)
+			if failClosed {
+				logger.Log.Errorf("[auth] 登录限频查询失败，按 fail-closed 拒绝本次登录: key=%s err=%v", key, err)
+				return false, fmt.Errorf("登录限频服务不可用: %w", err)
+			}
+			logger.Log.Warnf("[auth] 登录限频查询失败，本次不做限制（fail-open，已显式配置）: key=%s err=%v", key, err)
 			continue
 		}
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			logger.Log.Warnf("[auth] 登录失败计数不是整数，按 0 处理: key=%s value=%q", key, v)
-			continue
+			// 计数被写坏（如人为改动、类型冲突）时不能当作「没有失败」：
+			// 这属于数据异常，按已达上限处理更安全，且错误计数本身极少出现。
+			logger.Log.Warnf("[auth] 登录失败计数不是整数，按已达上限处理: key=%s value=%q", key, v)
+			return true, nil
 		}
 		if n >= maxLoginAttempts {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // recordLoginFailure 记录一次登录失败。
