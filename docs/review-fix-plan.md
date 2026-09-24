@@ -24,7 +24,7 @@
 | P2-1b system 两包 | ✅ 已完成 | `f84dea1` system/service 39.6%→79.4%、controller 35.0%→84.8%；包均 70.5%→75.5% |
 | P2-1c middleware/member | ✅ 已完成 | middleware 61.8%→93.3%、member/service 44.2%→88.5%；包均 75.5%→**79.7%**；顺带修 CORS 启动 panic |
 | P3-2 路由收尾 | ✅ 已完成 | `60e472d` pathMatch 404 兜底 + 6 个用例；`else { next() }` 复核后结案 |
-| P0-5 会员编号冲突 | ⏸ 待决策 | **新发现**：`uk_member_no` 全局唯一 vs 按租户发号 → 第二租户建会员必失败；两方案见 P2-1d |
+| P0-5 会员编号冲突 | ✅ 已完成 | **新发现**：`uk_member_no` 全局唯一 vs 按租户发号 → 第二租户建会员必失败；按方案 ①（发号改全局）修复，见 P2-1d |
 | 附：真 bug 修复 | ✅ 已完成 | `f5159fa` 登录限频把 redis.Nil 误判为故障（任何干净登录 500）；`bc67715` 仪表盘部门数按租户统计 |
 
 **⚠️ 升级须知（P0-2/P0-3 带来的部署影响）**
@@ -331,7 +331,7 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   以及需要伪造 Redis 故障才能触达的 `cache.Set`/`cache.Del` 失败分支。
   前者只是错误透传、后者需要注入假的 Redis 客户端，投入产出比低，暂不补。
 
-### P2-1d 【P0】会员编号全局唯一索引与「按租户发号」冲突 ✅ 已确认，待决策
+### P2-1d 【P0】会员编号全局唯一索引与「按租户发号」冲突 ✅ 已修复
 - **补 `member/service` 测试时发现，不是既有清单里的项。**
 - 现象：租户 A 建第一个会员成功后，**租户 B 建第一个会员直接失败**：
   `Error 1062: Duplicate entry '100001' for key 'uk_member_no'`。
@@ -344,19 +344,51 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   - 于是两个租户在各自空库上都会推出起始值 `100001`，第二个租户必然撞唯一索引。
 - 影响：**多租户部署下除第一个租户外，其余租户完全无法创建会员**（功能性中断）。
   单租户部署不受影响，所以一直没暴露。
-- 两种改法，需要产品侧先定语义（**未执行**）：
-  1. **发号改全局**：Redis 键去掉 tenantID、`FindMaxMemberNo` 不再按租户过滤。
-     与 `uk_phone` 全局唯一的既定取舍一致（一个手机号全平台只能注册一次，
-     说明「会员」本身被当作平台级实体）；无需迁移。代价是 Repository 方法
-     不再接收 tenantID，需要在接口上写明这是**有意**的例外
-     （参照 `CountByUsername` 的既有做法）。
-  2. **索引改复合**：`uk_member_no` → `uk_tenant_member_no (tenant_id, member_no)`。
-     与「按租户发号」的现有实现一致，且 `sys_tenant` 已有
-     `uk_tenant_code (tenant_id, code)` 的同类先例。代价是要改模型、
-     `init.sql` 与新增迁移脚本（并同步 `deleted_at` 软删除下的唯一性行为）。
-- 建议：倾向方案 1 —— 它不改表结构，且与同表 `uk_phone` 的全局语义自洽。
-- 回归用例：`TestMemberServiceFindList` 里原本就靠「两个租户各建一个会员」
-  触发，现已在注释中标注原因并绕开，避免用例本身被这个缺陷带红。
+
+**修复：采用方案 ①「发号改全局」**（与 `uk_phone` 的既有语义对齐，不动表结构）。
+
+选它的理由：`pay_member` 同表的 `uk_phone` 也是**全局**唯一索引 ——
+「一个手机号全平台只能注册一次」说明「会员」本身被当作平台级实体。
+既然约束是全局的，推导（取最大值）就必须是全局的，否则两者永远对不上。
+方案 ②（索引改 `(tenant_id, member_no)` 复合）虽然更"符合直觉"，
+但它要改模型 + `init.sql` + 新增迁移脚本，还要重新想清楚
+`deleted_at` 软删除下的唯一性行为（本项目软删除会改写唯一键，
+复合索引会让"释放"逻辑变成 `(tenant_id, member_no_del_<id>)`，语义更绕），
+为一个可以零迁移解决的冲突不值得。若将来产品决定「会员编号要按租户独立编号」，
+再走方案 ②，届时改动点是索引 + 迁移脚本。
+
+改动清单：
+- `member_repository.go`：`FindMaxMemberNo(tenantID uint)` → **`FindMaxMemberNo()`**，
+  去掉 `TenantScope`，并在实现上方写明「**没有 tenantID 参数是有意的，不要『补』上**」
+  （与 `CountByUsername(username, excludeID)` 刻意不带 tenantID 是同一取舍）。
+- `member_service.go`：`generateMemberNo(digits int)` / `memberNoFromDB(digits int)`
+  去掉 tenantID；Redis 计数器键 `member:no:<tenantID>` → **`member:no`**；
+  日志里的 `tenant=%d` 一并去掉（否则每次发号都打印一个已经没有意义的租户号）。
+- 未改的部分：`site.memberIdDigits`（位数配置）只是**值**，与「按租户发号」无关，
+  Go / SQL / Vue 三处引用都不需要动。全仓已确认只剩 `member_service.go` 一处
+  `key := "member:no"`，**无按租户分键的残留**。
+
+回归用例（都在 `member/service`、`member/repository`）：
+- **`TestCreateMemberAcrossTenantsDoesNotCollide`**（新增）：直接复现缺陷场景 ——
+  甲租户建 → 乙租户建，**必须都成功**且编号为 `100001`/`100002`。这就是 P0-5 的守门用例。
+- `TestMemberNoFromDBIsGlobal`（由 `...IsTenantScoped` 改名）：库里塞一个
+  乙租户的更大编号 `900001`，断言甲租户推导出的也是 `900001` ——
+  若退回按租户取最大值，只会拿到甲租户的 `100001`，用例转红。
+- `TestGenerateMemberNoWithRedis` 新增两个子用例：`计数器写在全平台共用的键上`
+  （`cache.Exists("member:no")` 必须为真、`member:no:1` 必须为假）、
+  `两个租户共用同一个序列`。
+- `repository` 侧子用例改名 `FindMaxMemberNo 取全平台最大值`，断言由 `000001` 改为 `000002`。
+- `TestMemberServiceFindList` 撤掉「用 `seedMember` 绕开 Create」的临时写法，
+  恢复真实 `s.Create(..., tenantB)` 路径 —— 这个用例原本就是缺陷的触发点。
+
+变异验证（2/2 转红，脚本 `runtime/cov/mutate_p0.sh`，`runtime/` 已 gitignore）：
+1. `FindMaxMemberNo` 退回 `TenantScope(..., tenantID)` 且只取 `tenant_id = 1`
+   → `TestMemberNoFromDBIsGlobal` + `TestCreateMemberAcrossTenantsDoesNotCollide` 转红
+2. 计数器键退回 `member:no:1` → `TestGenerateMemberNoWithRedis` 两个新子用例转红
+
+边界说明：**`pay_member` 无种子数据**，所以「历史编号能否解析成整数」这条边界
+（`memberNoFromDB` 里 `strconv.Atoi` 失败时回退起始值）不在本轮范围，
+现有用例已覆盖该分支本身。
 
 ### P2-2 golangci-lint 转阻断 ✅ 已完成
 - **先发现了一个被掩盖的问题**：CI 用 `golangci-lint-action@v6` + `version: latest`，
@@ -513,6 +545,7 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
 | P2-1 后 | 70.5% | 超出 60% 目标 |
 | P2-1b 后 | 75.5% | system 两包 |
 | P2-1c 后 | **79.7%** | middleware + member/service |
+| P0-5 后 | **79.7%** | 只改语义不改覆盖面（发号全局化 + 4 处用例改名/新增） |
 | CI 门槛 | 74.0% | 留 1.5 点缓冲（CI ubuntu 与本地 Windows 的差异） |
 
 **为什么门槛不设 100%**：覆盖率会骗人 —— P2-1b 的变异验证里就有一条

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"testing"
 
 	"go-admin/internal/cache"
@@ -155,7 +154,7 @@ func TestMemberNoFromDB(t *testing.T) {
 				seedMember(t, tenantA, "13000000001", c.seedNo)
 			}
 
-			got, err := s.memberNoFromDB(tenantA, 6)
+			got, err := s.memberNoFromDB(6)
 			if err != nil {
 				t.Fatalf("推导编号失败: %v", err)
 			}
@@ -166,20 +165,22 @@ func TestMemberNoFromDB(t *testing.T) {
 	}
 }
 
-// TestMemberNoFromDBIsTenantScoped 最大值必须按租户取。
+// TestMemberNoFromDBIsGlobal 最大值必须**跨租户**取（P0-5 回归护栏）。
 //
-// 漏掉租户过滤时，B 租户的大编号会抬高 A 租户的起始值 —— 编号跳号还只是表象，
-// 更糟的是它泄露了「其他租户发过多少号」这一信息。
-func TestMemberNoFromDBIsTenantScoped(t *testing.T) {
+// 断言方向与直觉相反，但这是正确的一侧：`uk_member_no` 是全局唯一索引，
+// 若按租户推导，每个租户在空库上都会从 100001 起号 ——
+// 第二个租户建会员必然撞唯一索引，多租户部署下除首个租户外完全无法创建会员。
+// 所以「乙租户的 900000 抬高了甲租户的起始值」不是串号，而是必须的行为。
+func TestMemberNoFromDBIsGlobal(t *testing.T) {
 	s := newTestMemberService(t)
 	seedMember(t, tenantB, "13000000002", "900000")
 
-	got, err := s.memberNoFromDB(tenantA, 6)
+	got, err := s.memberNoFromDB(6)
 	if err != nil {
 		t.Fatalf("推导编号失败: %v", err)
 	}
-	if got != 100001 {
-		t.Errorf("不应受其他租户编号影响: 期望 100001 实际 %d", got)
+	if got != 900001 {
+		t.Errorf("必须取全平台最大值 +1（否则会发到乙租户已占用的号段）: 期望 900001 实际 %d", got)
 	}
 }
 
@@ -188,7 +189,7 @@ func TestMemberNoFromDBPropagatesError(t *testing.T) {
 	s := newTestMemberService(t)
 	s.memberRepo = &stubMemberRepo{findMaxNoErr: errors.New("db down")}
 
-	if _, err := s.memberNoFromDB(tenantA, 6); err == nil {
+	if _, err := s.memberNoFromDB(6); err == nil {
 		t.Fatal("仓储故障时必须上抛，不能臆测一个起始值")
 	}
 }
@@ -199,7 +200,7 @@ func TestGenerateMemberNoWithoutRedis(t *testing.T) {
 	testsupport.WithNilRedis(t)
 
 	t.Run("空库发出位数下限", func(t *testing.T) {
-		no, err := s.generateMemberNo(tenantA, 6)
+		no, err := s.generateMemberNo(6)
 		if err != nil {
 			t.Fatalf("生成编号失败: %v", err)
 		}
@@ -211,7 +212,7 @@ func TestGenerateMemberNoWithoutRedis(t *testing.T) {
 	t.Run("库内已有更大编号时顺延", func(t *testing.T) {
 		seedMember(t, tenantA, "13000000003", "900000")
 
-		no, err := s.generateMemberNo(tenantA, 6)
+		no, err := s.generateMemberNo(6)
 		if err != nil {
 			t.Fatalf("生成编号失败: %v", err)
 		}
@@ -225,7 +226,7 @@ func TestGenerateMemberNoWithoutRedis(t *testing.T) {
 		testsupport.WithNilRedis(t)
 		broken.memberRepo = &stubMemberRepo{findMaxNoErr: errors.New("db down")}
 
-		if _, err := broken.generateMemberNo(tenantA, 6); err == nil {
+		if _, err := broken.generateMemberNo(6); err == nil {
 			t.Fatal("两处都不可用时必须报错：用臆测的起始值发号会撞唯一索引，变成难懂的 500")
 		}
 	})
@@ -240,17 +241,17 @@ func TestGenerateMemberNoWithRedis(t *testing.T) {
 	s := newTestMemberService(t)
 	testsupport.WithTestRedis(t)
 
-	// 用独立的租户号，避免与其它用例共用计数器
-	const tenant uint = 9201
+	// 计数器是**全平台共用一个键**（见 generateMemberNo 注释）。
+	// 必须先清掉，否则起点取决于上一次运行留下的值。
 	ctx := context.Background()
-	key := fmt.Sprintf("member:no:%d", tenant)
+	key := "member:no"
 	if err := cache.Del(ctx, key); err != nil {
 		t.Fatalf("清理计数器失败: %v", err)
 	}
 	t.Cleanup(func() { _ = cache.Del(ctx, key) })
 
 	t.Run("首次发号按位数下限对齐", func(t *testing.T) {
-		no, err := s.generateMemberNo(tenant, 6)
+		no, err := s.generateMemberNo(6)
 		if err != nil {
 			t.Fatalf("生成编号失败: %v", err)
 		}
@@ -264,7 +265,7 @@ func TestGenerateMemberNoWithRedis(t *testing.T) {
 		// 这样下一次 INCR 恰好是下一个编号。
 		// 若把计数器对齐成 startNum+1，这里会拿到 100003 —— 编号凭空跳一位，
 		// 用户会以为有会员数据丢失。
-		no, err := s.generateMemberNo(tenant, 6)
+		no, err := s.generateMemberNo(6)
 		if err != nil {
 			t.Fatalf("生成编号失败: %v", err)
 		}
@@ -274,16 +275,13 @@ func TestGenerateMemberNoWithRedis(t *testing.T) {
 	})
 
 	t.Run("库内已有更大编号时对齐到库内最大值", func(t *testing.T) {
-		const tenant2 uint = 9202
-		key2 := fmt.Sprintf("member:no:%d", tenant2)
-		if err := cache.Del(ctx, key2); err != nil {
+		// 删掉计数器以强制走「首次初始化」分支
+		if err := cache.Del(ctx, key); err != nil {
 			t.Fatalf("清理计数器失败: %v", err)
 		}
-		t.Cleanup(func() { _ = cache.Del(ctx, key2) })
+		seedMember(t, tenantA, "13000000009", "700000")
 
-		seedMember(t, tenant2, "13000000009", "700000")
-
-		no, err := s.generateMemberNo(tenant2, 6)
+		no, err := s.generateMemberNo(6)
 		if err != nil {
 			t.Fatalf("生成编号失败: %v", err)
 		}
@@ -291,6 +289,78 @@ func TestGenerateMemberNoWithRedis(t *testing.T) {
 			t.Errorf("期望 700001（库内最大值 +1）实际 %q", no)
 		}
 	})
+
+	t.Run("计数器写在全平台共用的键上", func(t *testing.T) {
+		// 直接钉住键名。按租户分键（`member:no:<tenantID>`）是 P0-5 的一半成因：
+		// 每个租户的计数器各自从 1 开始，各自去推起始号。
+		if err := cache.Del(ctx, key); err != nil {
+			t.Fatalf("清理计数器失败: %v", err)
+		}
+		if _, err := s.generateMemberNo(6); err != nil {
+			t.Fatalf("生成编号失败: %v", err)
+		}
+		exists, err := cache.Exists(ctx, key)
+		if err != nil {
+			t.Fatalf("查询计数器失败: %v", err)
+		}
+		if !exists {
+			t.Errorf("计数器应写在全平台共用键 %q 上", key)
+		}
+	})
+
+	t.Run("两个租户共用同一个序列", func(t *testing.T) {
+		if err := cache.Del(ctx, key); err != nil {
+			t.Fatalf("清理计数器失败: %v", err)
+		}
+		if err := s.Create(baseCreateReq("13922220001"), 1, tenantA); err != nil {
+			t.Fatalf("甲租户建会员失败: %v", err)
+		}
+		if err := s.Create(baseCreateReq("13922220002"), 1, tenantB); err != nil {
+			t.Fatalf("乙租户建会员失败: %v", err)
+		}
+
+		a, _ := s.memberRepo.FindByPhone(tenantA, "13922220001")
+		b, _ := s.memberRepo.FindByPhone(tenantB, "13922220002")
+		if a == nil || b == nil {
+			t.Fatal("两个租户的会员都应创建成功")
+		}
+		if a.MemberNo == b.MemberNo {
+			t.Errorf("两个租户拿到了同一个编号: %q", a.MemberNo)
+		}
+	})
+}
+
+// TestCreateMemberAcrossTenantsDoesNotCollide P0-5 的直接回归用例。
+//
+// 这是本次修复暴露出来的缺陷：`uk_member_no` 是全局唯一索引，
+// 而发号曾按租户（Redis 键 `member:no:<tenantID>` + `FindMaxMemberNo(tenantID)`）——
+// 两个租户在各自空库上都推出 100001，第二个租户建第一个会员就 1062 冲突。
+// 多租户部署下除首个租户外**完全无法创建会员**，且单租户部署不会暴露。
+//
+// 用例必须让两个租户在**同一个库**里各建一个会员：只建一个租户是测不出来的。
+func TestCreateMemberAcrossTenantsDoesNotCollide(t *testing.T) {
+	s := newTestMemberService(t)
+
+	if err := s.Create(baseCreateReq("13911110001"), 1, tenantA); err != nil {
+		t.Fatalf("甲租户建会员失败: %v", err)
+	}
+	// 修复前这里必然失败：Duplicate entry '100001' for key 'uk_member_no'
+	if err := s.Create(baseCreateReq("13911110002"), 1, tenantB); err != nil {
+		t.Fatalf("乙租户建会员失败（编号发到了甲租户已占用的号段）: %v", err)
+	}
+
+	a, _ := s.memberRepo.FindByPhone(tenantA, "13911110001")
+	b, _ := s.memberRepo.FindByPhone(tenantB, "13911110002")
+	if a == nil || b == nil {
+		t.Fatal("两个租户的会员都应创建成功")
+	}
+	if a.MemberNo == b.MemberNo {
+		t.Errorf("两个租户的会员编号重复: %q", a.MemberNo)
+	}
+	// 编号必须连续（同一个全平台序列），顺带钉住「不是各租户从 100001 起」
+	if a.MemberNo != "100001" || b.MemberNo != "100002" {
+		t.Errorf("编号应来自同一个全平台序列: 甲=%q 乙=%q", a.MemberNo, b.MemberNo)
+	}
 }
 
 // ─────────────────────────── 只读与透传 ───────────────────────────
@@ -336,16 +406,13 @@ func TestMemberServiceFindList(t *testing.T) {
 	if err := s.Create(disabled, 1, tenantA); err != nil {
 		t.Fatalf("创建会员失败: %v", err)
 	}
-	// 其他租户：用 seedMember 直接落库，而不是走 s.Create。
-	//
-	// 因为 Create 会经 generateMemberNo 发号，而编号是**按租户**推导的
-	// （Redis 键 member:no:<tenantID> + FindMaxMemberNo(tenantID)），
-	// pay_member 上的 uk_member_no 却是**全局**唯一 —— 两个租户在空库上
-	// 都会推出 100001，第二个租户必然撞唯一索引。
-	// 这是本次补测试时发现的独立缺陷（已记录在 docs/review-fix-plan.md），
-	// 与本用例要验证的「FindList 是否按租户过滤」无关，所以在这里绕开它，
-	// 让本用例只对一件事负责。
-	seedMember(t, tenantB, "13000000023", "100023")
+	// 其他租户：走真实 Create 路径。
+	// 这里曾经必须用 seedMember 绕开，因为发号按租户、索引却全局，
+	// 第二个租户建会员必然撞 uk_member_no（P0-5）。修复后已恢复正常调用 ——
+	// 换句话说，这个用例现在同时守着「FindList 按租户过滤」和「跨租户建会员不冲突」。
+	if err := s.Create(baseCreateReq("13000000023"), 1, tenantB); err != nil {
+		t.Fatalf("创建会员失败: %v", err)
+	}
 
 	t.Run("status 缺省时不过滤状态", func(t *testing.T) {
 		// 缺省用 -1 表示「不按状态过滤」。若被写成 `status = 0`，

@@ -116,15 +116,17 @@ func TestMemberRepositoryTenantIsolation(t *testing.T) {
 		}
 	})
 
-	t.Run("FindMaxMemberNo 只看本租户", func(t *testing.T) {
-		// 发号器按库内最大值推导起始号，跨租户串号会让编号失序，
-		// 更糟的是对不上号段后可能发出重复编号（撞 uk_member_no）
-		got, err := repo.FindMaxMemberNo(memberTenantA)
+	t.Run("FindMaxMemberNo 取全平台最大值", func(t *testing.T) {
+		// 这里**必须**跨租户取最大值：`uk_member_no` 是全局唯一索引，
+		// 若按租户推导，每个租户在空库上都会从 100001 起号，
+		// 第二个租户建会员就会撞唯一索引（P0-5）。
+		// 本用例里乙租户的编号更大，租户 A 也必须看到它。
+		got, err := repo.FindMaxMemberNo()
 		if err != nil {
 			t.Fatalf("查询失败: %v", err)
 		}
-		if got != "000001" {
-			t.Errorf("应只看本租户的编号，实际 %q", got)
+		if got != "000002" {
+			t.Errorf("应取全平台最大编号 000002，实际 %q", got)
 		}
 	})
 }

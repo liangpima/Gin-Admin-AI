@@ -20,7 +20,7 @@ type MemberRepository interface {
 	ReplaceTags(tenantID, memberID uint, tagIDs []uint) error
 	FindTagIDsByMemberID(tenantID, memberID uint) ([]uint, error)
 	UpdatePoints(tenantID, memberID uint, points int64) error
-	FindMaxMemberNo(tenantID uint) (string, error)
+	FindMaxMemberNo() (string, error)
 }
 
 type memberRepository struct{}
@@ -171,9 +171,21 @@ func (r *memberRepository) UpdatePoints(tenantID, memberID uint, points int64) e
 	return common.TenantScope(database.DB, tenantID).Model(&model.Member{}).Where("id = ?", memberID).UpdateColumn("points", points).Error
 }
 
-func (r *memberRepository) FindMaxMemberNo(tenantID uint) (string, error) {
+// FindMaxMemberNo 取**全平台**最大的会员编号，刻意不做租户过滤。
+//
+// 与 CountByUsername 是同一个取舍：**约束是全局的，推导就必须是全局的**。
+//
+// pay_member 的 `uk_member_no` 是全局唯一索引（`sql/init.sql`），同表的
+// `uk_phone` 也一样 ——「一个手机号全平台只能注册一次」说明会员本身被当作
+// 平台级实体。早前这里按租户取最大值，于是每个租户在空库上都从 100001 起号，
+// 第二个租户建第一个会员就撞 `uk_member_no`，对外是 1062 唯一键冲突：
+// **多租户部署下除首个租户外完全无法创建会员**（单租户部署不暴露，所以长期没被发现）。
+//
+// 因此这里没有 tenantID 参数是**有意**的，不要"补"上 ——
+// 补上就会退回「每个租户各自从 100001 开始」的冲突状态。
+func (r *memberRepository) FindMaxMemberNo() (string, error) {
 	var memberNo string
-	err := common.TenantScope(database.DB.Model(&model.Member{}), tenantID).
+	err := database.DB.Model(&model.Member{}).
 		Select("member_no").
 		Where("member_no != ''").
 		Order("member_no DESC").

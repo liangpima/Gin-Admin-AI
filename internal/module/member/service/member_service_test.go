@@ -501,7 +501,7 @@ func (s *stubMemberRepo) FindByPhone(tenantID uint, phone string) (*model.Member
 	return &model.Member{}, s.findByPhoneErr
 }
 
-func (s *stubMemberRepo) FindMaxMemberNo(tenantID uint) (string, error) {
+func (s *stubMemberRepo) FindMaxMemberNo() (string, error) {
 	return s.maxMemberNo, s.findMaxNoErr
 }
 

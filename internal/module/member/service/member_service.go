@@ -168,7 +168,7 @@ func (s *memberService) Create(req *dto.CreateMemberRequest, operatorID, tenantI
 		return err
 	}
 
-	memberNo, err := s.generateMemberNo(tenantID, digits)
+	memberNo, err := s.generateMemberNo(digits)
 	if err != nil {
 		return fmt.Errorf("生成会员编号失败: %v", err)
 	}
@@ -344,9 +344,13 @@ func (s *memberService) UpdateStatus(tenantID uint, req *dto.UpdateMemberStatusR
 	return s.memberRepo.UpdateStatus(tenantID, req.ID, req.Status)
 }
 
-func (s *memberService) generateMemberNo(tenantID uint, digits int) (string, error) {
+func (s *memberService) generateMemberNo(digits int) (string, error) {
 	ctx := context.Background()
-	key := fmt.Sprintf("member:no:%d", tenantID)
+	// 计数器必须是**全平台**的，不能带 tenantID：
+	// pay_member 的 uk_member_no 是全局唯一索引，按租户发号会让每个租户
+	// 都从 100001 起号，第二个租户建会员必然撞索引。
+	// 详见 memberRepository.FindMaxMemberNo 的注释。
+	key := "member:no"
 	format := fmt.Sprintf("%%0%dd", digits)
 
 	// 使用 Redis INCR 原子递增，避免并发重复
@@ -355,12 +359,12 @@ func (s *memberService) generateMemberNo(tenantID uint, digits int) (string, err
 		// Redis 不可用时回退到数据库查询（有竞态风险，但可接受降级）。
 		// 数据库也查不到时必须让调用方知道 —— 用臆测的起始值发号，
 		// 撞上唯一索引只会变成一条难以理解的 500。
-		startNum, dbErr := s.memberNoFromDB(tenantID, digits)
+		startNum, dbErr := s.memberNoFromDB(digits)
 		if dbErr != nil {
-			logger.Log.Errorf("[member] Redis 与数据库均不可用，无法生成会员编号: tenant=%d err=%v", tenantID, dbErr)
+			logger.Log.Errorf("[member] Redis 与数据库均不可用，无法生成会员编号: err=%v", dbErr)
 			return "", fmt.Errorf("生成会员编号失败: %w", dbErr)
 		}
-		logger.Log.Warnf("[member] Redis 不可用，会员编号降级为按库内最大值推导: tenant=%d", tenantID)
+		logger.Log.Warnf("[member] Redis 不可用，会员编号降级为按库内最大值推导")
 		return fmt.Sprintf(format, startNum), nil
 	}
 
@@ -371,10 +375,10 @@ func (s *memberService) generateMemberNo(tenantID uint, digits int) (string, err
 	// 写成 startNum+1 会让编号凭空跳一位（100001 之后直接发 100003），
 	// 用户看到跳号会以为有会员数据丢失。
 	if seq == 1 {
-		startNum, dbErr := s.memberNoFromDB(tenantID, digits)
+		startNum, dbErr := s.memberNoFromDB(digits)
 		if dbErr != nil {
-			// 无法确认库内最大值时不能发号：可能与本租户已有编号冲突
-			logger.Log.Errorf("[member] 读取会员编号最大值失败，拒绝发号: tenant=%d err=%v", tenantID, dbErr)
+			// 无法确认库内最大值时不能发号：可能与已有编号冲突
+			logger.Log.Errorf("[member] 读取会员编号最大值失败，拒绝发号: err=%v", dbErr)
 			return "", fmt.Errorf("生成会员编号失败: %w", dbErr)
 		}
 
@@ -383,9 +387,9 @@ func (s *memberService) generateMemberNo(tenantID uint, digits int) (string, err
 			// 于是把 000002 这种与历史编号冲突的值发出去。
 			// 处理方式是删掉计数器，让下次调用重新走初始化分支；
 			// 本次返回的 startNum 本身是按库内最大值推导的，是正确的。
-			logger.Log.Errorf("[member] 会员编号计数器对齐失败: tenant=%d err=%v", tenantID, setErr)
+			logger.Log.Errorf("[member] 会员编号计数器对齐失败: err=%v", setErr)
 			if delErr := cache.Del(ctx, key); delErr != nil {
-				logger.Log.Errorf("[member] 清理失效的编号计数器也失败，下次发号可能冲突: tenant=%d err=%v", tenantID, delErr)
+				logger.Log.Errorf("[member] 清理失效的编号计数器也失败，下次发号可能冲突: err=%v", delErr)
 			}
 		}
 		return fmt.Sprintf(format, startNum), nil
@@ -398,8 +402,10 @@ func (s *memberService) generateMemberNo(tenantID uint, digits int) (string, err
 //
 // 起始值取 10^(digits-1)+1（如 digits=6 → 100001），保证编号位数符合配置；
 // 库内已有更大的编号时以库内为准，避免发号回退到已被占用的区间。
-func (s *memberService) memberNoFromDB(tenantID uint, digits int) (int, error) {
-	maxNo, err := s.memberRepo.FindMaxMemberNo(tenantID)
+//
+// 与 FindMaxMemberNo 一致：这里也**不按租户**推导（uk_member_no 是全局索引）。
+func (s *memberService) memberNoFromDB(digits int) (int, error) {
+	maxNo, err := s.memberRepo.FindMaxMemberNo()
 	if err != nil {
 		return 0, err
 	}
