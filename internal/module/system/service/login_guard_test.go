@@ -54,6 +54,108 @@ func TestCheckLoginRateLimitFailOpenWhenConfigured(t *testing.T) {
 	}
 }
 
+// withLoginFailureLookup 替换失败计数的读取，返回被查询过的键。
+//
+// 为什么需要它：测试环境不初始化 Redis，cache.GetString 只会走 ErrNotReady
+// 分支，「键不存在」这条分支拿不到 —— 而那正是线上最常见的情形。
+func withLoginFailureLookup(t *testing.T, values map[string]string, err error) *[]string {
+	t.Helper()
+	var asked []string
+	prev := loginFailureLookup
+	loginFailureLookup = func(_ context.Context, key string) (string, bool, error) {
+		asked = append(asked, key)
+		if err != nil {
+			return "", false, err
+		}
+		v, ok := values[key]
+		return v, ok, nil
+	}
+	t.Cleanup(func() { loginFailureLookup = prev })
+	return &asked
+}
+
+// TestCheckLoginRateLimitAllowsWhenNoFailureRecorded 「键不存在」必须放行。
+//
+// 这是本项修复的核心回归用例。redis 的 GET 在键不存在时返回 redis.Nil，
+// 而 cache.Get 把它当普通 error 透出；限频侧又把「任何 error」当成
+// 「Redis 不可用」并按 fail-closed 拒绝 —— 结果是**任何一次干净登录都返回 500**。
+// 键不存在对失败计数而言是最常见的正常状态（还没失败过），绝不能算故障。
+func TestCheckLoginRateLimitAllowsWhenNoFailureRecorded(t *testing.T) {
+	withLoginFailClosed(t, nil) // 默认策略（fail-closed）下也必须放行
+	withLoginFailureLookup(t, nil, nil)
+
+	locked, err := checkLoginRateLimit(context.Background(), "login:fail:ip:203.0.113.9")
+	if err != nil {
+		t.Fatalf("键不存在不是故障，不应报错: %v", err)
+	}
+	if locked {
+		t.Error("没有任何失败记录时不应判定为已锁定")
+	}
+}
+
+// TestCheckLoginRateLimitLocksAtThreshold 达到阈值即锁定。
+func TestCheckLoginRateLimitLocksAtThreshold(t *testing.T) {
+	withLoginFailClosed(t, nil)
+	withLoginFailureLookup(t, map[string]string{"login:fail:account:admin": "5"}, nil)
+
+	locked, err := checkLoginRateLimit(context.Background(), "login:fail:account:admin")
+	if err != nil {
+		t.Fatalf("正常读取不应报错: %v", err)
+	}
+	if !locked {
+		t.Errorf("失败次数达到 %d 应判定为已锁定", maxLoginAttempts)
+	}
+}
+
+// TestCheckLoginRateLimitBelowThreshold 未达阈值放行。
+func TestCheckLoginRateLimitBelowThreshold(t *testing.T) {
+	withLoginFailClosed(t, nil)
+	withLoginFailureLookup(t, map[string]string{"login:fail:ip:203.0.113.9": "4"}, nil)
+
+	locked, err := checkLoginRateLimit(context.Background(), "login:fail:ip:203.0.113.9")
+	if err != nil {
+		t.Fatalf("正常读取不应报错: %v", err)
+	}
+	if locked {
+		t.Error("未达阈值不应锁定")
+	}
+}
+
+// TestCheckLoginRateLimitTreatsCorruptCounterAsLocked 计数被写坏时按已锁定处理。
+//
+// 不能当作「没有失败」：那等于让一次数据异常直接关掉防护。
+func TestCheckLoginRateLimitTreatsCorruptCounterAsLocked(t *testing.T) {
+	withLoginFailClosed(t, nil)
+	withLoginFailureLookup(t, map[string]string{"login:fail:ip:203.0.113.9": "not-a-number"}, nil)
+
+	locked, err := checkLoginRateLimit(context.Background(), "login:fail:ip:203.0.113.9")
+	if err != nil {
+		t.Fatalf("不应报错: %v", err)
+	}
+	if !locked {
+		t.Error("计数不是整数时应按已达上限处理")
+	}
+}
+
+// TestCheckLoginRateLimitChecksEveryDimension 任一维度超限都要拒绝。
+//
+// 只查第一个维度的话，攻击者只要绕开 IP 维度（换 IP）就能无限撞同一个账号。
+func TestCheckLoginRateLimitChecksEveryDimension(t *testing.T) {
+	withLoginFailClosed(t, nil)
+	asked := withLoginFailureLookup(t, map[string]string{"login:fail:account:admin": "5"}, nil)
+
+	locked, err := checkLoginRateLimit(context.Background(), loginRateLimitKeys("203.0.113.9", "admin")...)
+	if err != nil {
+		t.Fatalf("不应报错: %v", err)
+	}
+	if !locked {
+		t.Error("账号维度已达上限时必须拒绝")
+	}
+	if len(*asked) != 2 {
+		t.Errorf("应查询 IP 与账号两个维度，实际查询了 %v", *asked)
+	}
+}
+
 // TestLoginRateLimitKeysCoverBothDimensions 限频必须同时按 IP 与账号计数。
 //
 // 单维度都可被绕过：只按 IP 计数则攻击者换 IP 即可；只按账号计数则

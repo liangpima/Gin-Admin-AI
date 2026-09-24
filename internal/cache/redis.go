@@ -63,6 +63,35 @@ func Get(ctx context.Context, key string) (string, error) {
 	return c.Get(ctx, key).Result()
 }
 
+// GetString 读取字符串键，并把「键不存在」与「Redis 读不到」区分开。
+//
+// 为什么必须有这个函数：Get 会把 go-redis 的 redis.Nil 原样透出，而调用方
+// 很容易把「任何 err」都当成「Redis 不可用」。对「失败计数」这类键来说，
+// **不存在恰恰是最常见的情况**（还没失败过），一旦被误判成故障，
+// fail-closed 就会把每一次干净登录都拒掉 —— 这不是假设：
+// 登录限频曾因此让所有正常登录返回 500，且单测发现不了（单测里 Redis
+// 未初始化，走的是 ErrNotReady 那条分支，redis.Nil 这条从没被覆盖）。
+//
+// 语义：found=false 时 err 必为 nil，调用方按「值不存在」处理；
+// err != nil 才是真的读不到（未初始化 / 连接故障）。
+//
+// 注意：Get 的语义**不能**直接改成这样。captcha 的「一次性凭证」正是靠
+// err != nil 判定「凭证不存在」而拒绝的，改成 found 语义会把它变成放行。
+func GetString(ctx context.Context, key string) (value string, found bool, err error) {
+	c, err := client()
+	if err != nil {
+		return "", false, err
+	}
+	value, err = c.Get(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return value, true, nil
+}
+
 func Del(ctx context.Context, keys ...string) error {
 	c, err := client()
 	if err != nil {

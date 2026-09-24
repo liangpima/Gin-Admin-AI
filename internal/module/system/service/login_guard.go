@@ -43,6 +43,12 @@ func loginRateLimitKeys(ip, username string) []string {
 	}
 }
 
+// loginFailureLookup 读取某维度的失败计数。
+//
+// 做成变量是为了可测：Redis 未初始化时 cache.GetString 只会返回 ErrNotReady，
+// 拿不到「键不存在」这一分支 —— 而它恰恰是最常见、也最容易写错的分支。
+var loginFailureLookup = cache.GetString
+
 // checkLoginRateLimit 判断任一维度的失败次数是否已达上限。
 //
 // 返回 (locked, err)：
@@ -57,17 +63,25 @@ func loginRateLimitKeys(ip, username string) []string {
 //
 // 可用性优先的部署可以显式配 security.login_fail_closed: false 退回 fail-open，
 // 此时仍留 Error 级日志，避免「限频静默失效」长期无人察觉。
+//
+// ⚠️ 必须用 cache.GetString 而不是 cache.Get：后者的 err 里混着
+// redis.Nil（键不存在）。而「键不存在」对失败计数来说是最常见的正常状态
+// （还没失败过），把它当成故障会让 fail-closed 拒掉每一次干净登录。
 func checkLoginRateLimit(ctx context.Context, keys ...string) (bool, error) {
 	failClosed := config.Cfg.Security.IsLoginFailClosed()
 
 	for _, key := range keys {
-		v, err := cache.Get(ctx, key)
+		v, found, err := loginFailureLookup(ctx, key)
 		if err != nil {
 			if failClosed {
 				logger.Log.Errorf("[auth] 登录限频查询失败，按 fail-closed 拒绝本次登录: key=%s err=%v", key, err)
 				return false, fmt.Errorf("登录限频服务不可用: %w", err)
 			}
 			logger.Log.Warnf("[auth] 登录限频查询失败，本次不做限制（fail-open，已显式配置）: key=%s err=%v", key, err)
+			continue
+		}
+		if !found {
+			// 该维度还没有失败记录，计数视为 0，直接放行这一维度
 			continue
 		}
 		n, err := strconv.Atoi(v)
