@@ -54,44 +54,6 @@ definitions:
     required:
     - name
     type: object
-  dto.CreateMemberRequest:
-    properties:
-      avatar:
-        maxLength: 512
-        type: string
-      birthday:
-        type: string
-      gender:
-        enum:
-        - 0
-        - 1
-        - 2
-        type: integer
-      levelId:
-        type: integer
-      nickname:
-        maxLength: 64
-        type: string
-      phone:
-        type: string
-      remark:
-        maxLength: 500
-        type: string
-      status:
-        enum:
-        - 0
-        - 1
-        type: integer
-      tagIds:
-        items:
-          type: integer
-        type: array
-      username:
-        maxLength: 64
-        type: string
-    required:
-    - phone
-    type: object
   dto.CreateMemberTagRequest:
     properties:
       color:
@@ -152,20 +114,36 @@ definitions:
     type: object
   dto.LoginRequest:
     properties:
+      captchaToken:
+        description: |-
+          CaptchaToken /captcha/verify 校验通过后返回的一次性凭证。
+          必填：留空意味着攻击者可直接 POST /auth/login 绕过人机校验。
+        type: string
       password:
         type: string
       username:
         type: string
     required:
+    - captchaToken
     - password
     - username
     type: object
   dto.RefreshTokenRequest:
     properties:
       refreshToken:
+        description: |-
+          RefreshToken 待刷新的 refresh token。
+
+          **刻意不是 `binding:"required"`**（P3-B2 起）：浏览器路径下它由 HttpOnly
+          cookie 携带，而前端 JS 读不到 HttpOnly cookie，也就**不可能**把它放进请求体 ——
+          请求体是空的。真正「有没有凭据」的判定在 Controller 里用
+          authcookie.RefreshFromRequest 统一做（请求体优先、其次 cookie，
+          两者都取不到才拒绝）。
+
+          保留该字段是为了不破坏 Swagger / curl / 第三方这类显式传参的调用方。
+          若哪天有人"顺手"把 required 加回来，现象是「浏览器端 token 一过期就被
+          踢到登录页」—— 与 B4 要修的那个缺陷一模一样，极难怀疑到参数绑定这一层。
         type: string
-    required:
-    - refreshToken
     type: object
   dto.ResetPasswordRequest:
     properties:
@@ -184,17 +162,22 @@ definitions:
       id:
         type: integer
       status:
+        description: |-
+          注意：不能用 required —— int8 的零值(0)会被 required 判为「未提供」，
+          导致「停用」操作被参数校验直接拦下（返回 400）。
         enum:
         - 0
         - 1
         type: integer
     required:
     - id
-    - status
     type: object
   dto.UpdateMemberLevelRequest:
     properties:
       discount:
+        description: |-
+          折扣率仍用浮点：它在库里就是浮点列，改整数需要迁移，
+          且不参与金额计算（只作为展示与换算系数），风险低于改动面。
         maximum: 10
         minimum: 1
         type: number
@@ -209,59 +192,6 @@ definitions:
         maxLength: 64
         type: string
       sort:
-        type: integer
-      status:
-        enum:
-        - 0
-        - 1
-        type: integer
-    required:
-    - id
-    - name
-    type: object
-  dto.UpdateMemberRequest:
-    properties:
-      avatar:
-        maxLength: 512
-        type: string
-      birthday:
-        type: string
-      gender:
-        enum:
-        - 0
-        - 1
-        - 2
-        type: integer
-      id:
-        type: integer
-      levelId:
-        type: integer
-      nickname:
-        maxLength: 64
-        type: string
-      phone:
-        type: string
-      remark:
-        maxLength: 500
-        type: string
-      status:
-        enum:
-        - 0
-        - 1
-        type: integer
-      tagIds:
-        items:
-          type: integer
-        type: array
-      username:
-        maxLength: 64
-        type: string
-    required:
-    - id
-    type: object
-  dto.UpdateMemberStatusRequest:
-    properties:
-      id:
         type: integer
       status:
         enum:
@@ -288,18 +218,6 @@ definitions:
         - 0
         - 1
         type: integer
-    required:
-    - id
-    - name
-    type: object
-  dto.UpdateMemberTagsRequest:
-    properties:
-      id:
-        type: integer
-      tagIds:
-        items:
-          type: integer
-        type: array
     required:
     - id
     type: object
@@ -458,7 +376,7 @@ info:
   title: Gin-Admin API
   version: 1.0.0
 paths:
-  /api/v1/auth/login:
+  /auth/login:
     post:
       consumes:
       - application/json
@@ -484,7 +402,7 @@ paths:
       summary: 用户登录
       tags:
       - 认证
-  /api/v1/auth/logout:
+  /auth/logout:
     post:
       produces:
       - application/json
@@ -498,15 +416,14 @@ paths:
       summary: 退出登录
       tags:
       - 认证
-  /api/v1/auth/refresh:
+  /auth/refresh:
     post:
       consumes:
       - application/json
       parameters:
-      - description: RefreshToken
+      - description: RefreshToken（浏览器路径下可省略，凭据在 HttpOnly cookie 里）
         in: body
         name: body
-        required: true
         schema:
           $ref: '#/definitions/dto.RefreshTokenRequest'
       produces:
@@ -524,7 +441,7 @@ paths:
       summary: 刷新Token
       tags:
       - 认证
-  /api/v1/auth/userInfo:
+  /auth/userInfo:
     get:
       produces:
       - application/json
@@ -543,7 +460,7 @@ paths:
       summary: 获取用户信息
       tags:
       - 认证
-  /api/v1/dashboard/stats:
+  /dashboard/stats:
     get:
       produces:
       - application/json
@@ -560,359 +477,6 @@ paths:
       summary: 获取统计数据
       tags:
       - 仪表盘
-  /api/v1/pay/notify/alipay:
-    post:
-      consumes:
-      - application/x-www-form-urlencoded
-      parameters:
-      - description: 支付宝回调数据
-        in: body
-        name: body
-        required: true
-        schema:
-          type: object
-      produces:
-      - text/plain
-      responses:
-        "200":
-          description: success or fail
-          schema:
-            type: string
-      summary: 支付宝回调
-      tags:
-      - 支付回调
-  /api/v1/pay/notify/wechat:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: 微信回调数据
-        in: body
-        name: body
-        required: true
-        schema:
-          type: object
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: object
-      summary: 微信支付回调
-      tags:
-      - 支付回调
-  /api/v1/system/user:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: 用户信息
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/dto.CreateUserRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      summary: 创建用户
-      tags:
-      - 管理员
-    put:
-      consumes:
-      - application/json
-      parameters:
-      - description: 用户信息
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/dto.UpdateUserRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      summary: 更新用户
-      tags:
-      - 管理员
-  /api/v1/system/user/{id}:
-    delete:
-      parameters:
-      - description: 用户ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      summary: 删除用户
-      tags:
-      - 管理员
-    get:
-      parameters:
-      - description: 用户ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      summary: 获取用户详情
-      tags:
-      - 管理员
-  /api/v1/system/user/changePwd:
-    put:
-      consumes:
-      - application/json
-      parameters:
-      - description: 密码信息
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/dto.ChangePasswordRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - ApiKeyAuth: []
-      summary: 修改密码
-      tags:
-      - 管理员
-  /api/v1/system/user/dept:
-    put:
-      consumes:
-      - application/json
-      parameters:
-      - description: 部门
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/dto.UpdateUserDeptRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      summary: 修改用户部门
-      tags:
-      - 管理员
-  /api/v1/system/user/list:
-    get:
-      parameters:
-      - description: 用户名
-        in: query
-        name: username
-        type: string
-      - description: 手机号
-        in: query
-        name: phone
-        type: string
-      - description: 状态
-        in: query
-        name: status
-        type: integer
-      - description: 部门ID
-        in: query
-        name: deptId
-        type: integer
-      - description: 页码
-        in: query
-        name: page
-        required: true
-        type: integer
-      - description: 每页条数
-        in: query
-        name: pageSize
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            allOf:
-            - $ref: '#/definitions/common.Response'
-            - properties:
-                data:
-                  $ref: '#/definitions/common.PageData'
-              type: object
-      summary: 用户列表
-      tags:
-      - 管理员
-  /api/v1/system/user/resetPwd:
-    put:
-      consumes:
-      - application/json
-      parameters:
-      - description: 新密码
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/dto.ResetPasswordRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      summary: 重置密码
-      tags:
-      - 管理员
-  /api/v1/system/user/roles:
-    put:
-      consumes:
-      - application/json
-      parameters:
-      - description: 角色
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/dto.UpdateUserRolesRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      summary: 修改用户角色
-      tags:
-      - 管理员
-  /api/v1/system/user/status:
-    put:
-      consumes:
-      - application/json
-      parameters:
-      - description: 状态
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/dto.StatusRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      summary: 修改用户状态
-      tags:
-      - 管理员
-  /member:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: 会员信息
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/dto.CreateMemberRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - BearerAuth: []
-      summary: 创建会员
-      tags:
-      - 会员管理
-    put:
-      consumes:
-      - application/json
-      parameters:
-      - description: 会员信息
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/dto.UpdateMemberRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - BearerAuth: []
-      summary: 更新会员
-      tags:
-      - 会员管理
-  /member/{id}:
-    delete:
-      parameters:
-      - description: 会员ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - BearerAuth: []
-      summary: 删除会员
-      tags:
-      - 会员管理
-    get:
-      parameters:
-      - description: 会员ID
-        in: path
-        name: id
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - BearerAuth: []
-      summary: 会员详情
-      tags:
-      - 会员管理
   /member/level:
     post:
       consumes:
@@ -978,20 +542,6 @@ paths:
       summary: 删除会员等级
       tags:
       - 会员等级
-  /member/level/all:
-    get:
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - BearerAuth: []
-      summary: 全部等级
-      tags:
-      - 会员等级
   /member/level/list:
     get:
       parameters:
@@ -1021,47 +571,6 @@ paths:
       summary: 等级列表
       tags:
       - 会员等级
-  /member/list:
-    get:
-      parameters:
-      - description: 手机号
-        in: query
-        name: phone
-        type: string
-      - description: 昵称
-        in: query
-        name: nickname
-        type: string
-      - description: 等级ID
-        in: query
-        name: levelId
-        type: integer
-      - description: 状态
-        in: query
-        name: status
-        type: integer
-      - description: 页码
-        in: query
-        name: page
-        required: true
-        type: integer
-      - description: 每页条数
-        in: query
-        name: pageSize
-        required: true
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - BearerAuth: []
-      summary: 会员列表
-      tags:
-      - 会员管理
   /member/points/list:
     get:
       parameters:
@@ -1095,29 +604,6 @@ paths:
       summary: 积分明细列表
       tags:
       - 积分明细
-  /member/status:
-    put:
-      consumes:
-      - application/json
-      parameters:
-      - description: 状态
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/dto.UpdateMemberStatusRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - BearerAuth: []
-      summary: 修改会员状态
-      tags:
-      - 会员管理
   /member/tag:
     post:
       consumes:
@@ -1183,20 +669,6 @@ paths:
       summary: 删除会员标签
       tags:
       - 会员标签
-  /member/tag/all:
-    get:
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - BearerAuth: []
-      summary: 全部标签
-      tags:
-      - 会员标签
   /member/tag/list:
     get:
       parameters:
@@ -1226,52 +698,6 @@ paths:
       summary: 标签列表
       tags:
       - 会员标签
-  /member/tags:
-    put:
-      consumes:
-      - application/json
-      parameters:
-      - description: 标签
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/dto.UpdateMemberTagsRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - BearerAuth: []
-      summary: 修改会员标签
-      tags:
-      - 会员管理
-  /member/visit:
-    put:
-      consumes:
-      - application/json
-      parameters:
-      - description: 会员ID
-        in: body
-        name: body
-        required: true
-        schema:
-          type: object
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - BearerAuth: []
-      summary: 最后访问时间
-      tags:
-      - 会员管理
   /system/file/{id}:
     delete:
       parameters:
@@ -1360,86 +786,26 @@ paths:
       summary: 上传文件
       tags:
       - 文件
-  /system/pay/order:
+  /system/log/login:
+    delete:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 清空登录日志
+      tags:
+      - 日志
     get:
       parameters:
-      - description: 订单号
+      - description: 用户名
         in: query
-        name: orderNo
-        required: true
+        name: username
         type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - BearerAuth: []
-      summary: 查询支付订单
-      tags:
-      - 支付
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: 创建订单参数
-        in: body
-        name: body
-        required: true
-        schema:
-          type: object
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - BearerAuth: []
-      summary: 创建支付订单
-      tags:
-      - 支付
-  /system/pay/order/close:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: 关闭订单参数
-        in: body
-        name: body
-        required: true
-        schema:
-          type: object
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/common.Response'
-      security:
-      - BearerAuth: []
-      summary: 关闭支付订单
-      tags:
-      - 支付
-  /system/pay/order/list:
-    get:
-      parameters:
-      - description: 订单标题
-        in: query
-        name: subject
-        type: string
-      - description: 支付渠道
-        in: query
-        name: channel
-        type: string
-      - description: 订单状态
-        in: query
-        name: status
-        type: integer
       - description: 页码
         in: query
         name: page
@@ -1457,17 +823,11 @@ paths:
             $ref: '#/definitions/common.Response'
       security:
       - BearerAuth: []
-      summary: 支付订单列表
+      summary: 登录日志列表
       tags:
-      - 支付
-  /system/pay/order/query:
-    get:
-      parameters:
-      - description: 订单号
-        in: query
-        name: orderNo
-        required: true
-        type: string
+      - 日志
+  /system/log/operation:
+    delete:
       produces:
       - application/json
       responses:
@@ -1477,20 +837,122 @@ paths:
             $ref: '#/definitions/common.Response'
       security:
       - BearerAuth: []
-      summary: 查询支付状态
+      summary: 清空操作日志
       tags:
-      - 支付
-  /system/pay/order/refund:
+      - 日志
+    get:
+      parameters:
+      - description: 模块标题
+        in: query
+        name: title
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 操作日志列表
+      tags:
+      - 日志
+  /system/user:
     post:
       consumes:
       - application/json
       parameters:
-      - description: 退款参数
+      - description: 用户信息
         in: body
         name: body
         required: true
         schema:
-          type: object
+          $ref: '#/definitions/dto.CreateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: 创建用户
+      tags:
+      - 管理员
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 用户信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateUserRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: 更新用户
+      tags:
+      - 管理员
+  /system/user/{id}:
+    delete:
+      parameters:
+      - description: 用户ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: 删除用户
+      tags:
+      - 管理员
+    get:
+      parameters:
+      - description: 用户ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: 获取用户详情
+      tags:
+      - 管理员
+  /system/user/changePwd:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 密码信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.ChangePasswordRequest'
       produces:
       - application/json
       responses:
@@ -1499,10 +961,169 @@ paths:
           schema:
             $ref: '#/definitions/common.Response'
       security:
-      - BearerAuth: []
-      summary: 申请退款
+      - ApiKeyAuth: []
+      summary: 修改密码
       tags:
-      - 支付
+      - 管理员
+  /system/user/dept:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 部门
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateUserDeptRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: 修改用户部门
+      tags:
+      - 管理员
+  /system/user/export:
+    get:
+      parameters:
+      - description: 用户名
+        in: query
+        name: username
+        type: string
+      - description: 手机号
+        in: query
+        name: phone
+        type: string
+      - description: 状态
+        in: query
+        name: status
+        type: integer
+      - description: 部门ID
+        in: query
+        name: deptId
+        type: integer
+      produces:
+      - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+      security:
+      - BearerApiAuth: []
+      summary: 导出用户列表
+      tags:
+      - 管理员
+  /system/user/list:
+    get:
+      parameters:
+      - description: 用户名
+        in: query
+        name: username
+        type: string
+      - description: 手机号
+        in: query
+        name: phone
+        type: string
+      - description: 状态
+        in: query
+        name: status
+        type: integer
+      - description: 部门ID
+        in: query
+        name: deptId
+        type: integer
+      - description: 页码
+        in: query
+        name: page
+        required: true
+        type: integer
+      - description: 每页条数
+        in: query
+        name: pageSize
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/common.Response'
+            - properties:
+                data:
+                  $ref: '#/definitions/common.PageData'
+              type: object
+      summary: 用户列表
+      tags:
+      - 管理员
+  /system/user/resetPwd:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 新密码
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.ResetPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: 重置密码
+      tags:
+      - 管理员
+  /system/user/roles:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 角色
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateUserRolesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: 修改用户角色
+      tags:
+      - 管理员
+  /system/user/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 状态
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.StatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: 修改用户状态
+      tags:
+      - 管理员
 schemes:
 - http
 - https

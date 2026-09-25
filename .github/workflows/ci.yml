@@ -49,6 +49,40 @@ jobs:
         run: go vet ./...
 
       # ────────────────────────────────────────────────────────
+      # swagger 文档一致性：**阻断项**。
+      #
+      # 为什么要这一步：`docs/` 是 `swag init` 的**生成物**，但它必须入库
+      # （`cmd/server/main.go` 用 `_ "go-admin/docs"` 注册 swagger，
+      # `.dockerignore` 也明确不能排除它），于是它成了典型的
+      # 「没人会主动重新生成、改了接口也不报错」的东西。
+      #
+      # 这不是假设 —— 加这道门禁时实测：入库的文档已漂移到 38 个 path，
+      # 其中 15 个指向**早已不存在的接口**（member 模块重构后的旧路径、
+      # payment 的旧路径），而期间新增的接口一个都没进去。
+      # 这类失效不会报错，只会让 swagger 页面越用越不可信。
+      #
+      # 用 `make swagger` 而不是手写命令：与本地跑的是同一条，
+      # 避免「CI 绿了但本地其实是另一回事」（同前端构建那条注释）。
+      #
+      # 版本必须钉死：swag 不同版本生成的 docs.go 有差异，用 latest 会让 CI
+      # 随上游发布随机变红 —— 与 golangci-lint 那次「观察项本身失效」同源。
+      # 生成物是 LF（swag 在 Windows 与 Linux 都写 LF，仓库里存的也是 LF），
+      # 因此不存在 Windows 本地与 Linux CI 因换行符差异而永久报红的问题。
+      # ────────────────────────────────────────────────────────
+      - name: 安装 swag
+        run: |
+          go install github.com/swaggo/swag/cmd/swag@v1.16.4
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: swagger 文档一致性
+        run: |
+          make swagger
+          if ! git diff --exit-code -- docs/; then
+            echo "::error::docs/ 与代码不一致。请在本地执行 make swagger 并提交生成的文档。"
+            exit 1
+          fi
+
+      # ────────────────────────────────────────────────────────
       # 单元测试 + 覆盖率门槛：**阻断项**。
       #
       # 门槛防的是「静默倒退」，不是「数字不够高」—— 此前 CI 只跑 go test，

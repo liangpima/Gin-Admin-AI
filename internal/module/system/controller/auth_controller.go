@@ -30,7 +30,7 @@ func NewAuthController() *AuthController {
 // @Produce json
 // @Param body body dto.LoginRequest true "登录参数"
 // @Success 200 {object} common.Response{data=vo.LoginResponse}
-// @Router /api/v1/auth/login [post]
+// @Router /auth/login [post]
 func (ctl *AuthController) Login(c *gin.Context) {
 	var req dto.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -64,7 +64,7 @@ func (ctl *AuthController) Login(c *gin.Context) {
 // @Produce json
 // @Param body body dto.RefreshTokenRequest false "RefreshToken（浏览器路径下可省略，凭据在 HttpOnly cookie 里）"
 // @Success 200 {object} common.Response{data=vo.LoginResponse}
-// @Router /api/v1/auth/refresh [post]
+// @Router /auth/refresh [post]
 func (ctl *AuthController) RefreshToken(c *gin.Context) {
 	var req dto.RefreshTokenRequest
 	// 浏览器路径下请求体是**空**的（refresh token 在 HttpOnly cookie 里，
@@ -110,7 +110,7 @@ func (ctl *AuthController) RefreshToken(c *gin.Context) {
 // @Produce json
 // @Security ApiKeyAuth
 // @Success 200 {object} common.Response
-// @Router /api/v1/auth/logout [post]
+// @Router /auth/logout [post]
 func (ctl *AuthController) Logout(c *gin.Context) {
 	// 旧客户端不传请求体，绑定失败属预期，忽略
 	var req dto.LogoutRequest
@@ -144,7 +144,7 @@ func (ctl *AuthController) Logout(c *gin.Context) {
 // @Produce json
 // @Security ApiKeyAuth
 // @Success 200 {object} common.Response{data=vo.UserInfoResponse}
-// @Router /api/v1/auth/userInfo [get]
+// @Router /auth/userInfo [get]
 func (ctl *AuthController) GetUserInfo(c *gin.Context) {
 	userID := common.GetCurrentUserID(c)
 	if userID == 0 {

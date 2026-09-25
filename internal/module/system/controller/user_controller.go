@@ -31,7 +31,7 @@ func NewUserController() *UserController {
 // @Produce json
 // @Param body body dto.CreateUserRequest true "用户信息"
 // @Success 200 {object} common.Response
-// @Router /api/v1/system/user [post]
+// @Router /system/user [post]
 func (ctl *UserController) Create(c *gin.Context) {
 	var req dto.CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -55,7 +55,7 @@ func (ctl *UserController) Create(c *gin.Context) {
 // @Produce json
 // @Param body body dto.UpdateUserRequest true "用户信息"
 // @Success 200 {object} common.Response
-// @Router /api/v1/system/user [put]
+// @Router /system/user [put]
 func (ctl *UserController) Update(c *gin.Context) {
 	var req dto.UpdateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -78,7 +78,7 @@ func (ctl *UserController) Update(c *gin.Context) {
 // @Produce json
 // @Param id path int true "用户ID"
 // @Success 200 {object} common.Response
-// @Router /api/v1/system/user/{id} [delete]
+// @Router /system/user/{id} [delete]
 func (ctl *UserController) Delete(c *gin.Context) {
 	id, err := common.GetUintParam(c, "id")
 	if err != nil {
@@ -100,7 +100,7 @@ func (ctl *UserController) Delete(c *gin.Context) {
 // @Produce json
 // @Param id path int true "用户ID"
 // @Success 200 {object} common.Response
-// @Router /api/v1/system/user/{id} [get]
+// @Router /system/user/{id} [get]
 func (ctl *UserController) FindByID(c *gin.Context) {
 	id, err := common.GetUintParam(c, "id")
 	if err != nil {
@@ -128,7 +128,7 @@ func (ctl *UserController) FindByID(c *gin.Context) {
 // @Param page query int true "页码"
 // @Param pageSize query int true "每页条数"
 // @Success 200 {object} common.Response{data=common.PageData}
-// @Router /api/v1/system/user/list [get]
+// @Router /system/user/list [get]
 func (ctl *UserController) FindList(c *gin.Context) {
 	var req dto.UserListRequest
 	if err := common.BindPage(c, &req); err != nil {
@@ -155,7 +155,7 @@ func (ctl *UserController) FindList(c *gin.Context) {
 // @Param status query int false "状态"
 // @Param deptId query int false "部门ID"
 // @Success 200 {file} binary
-// @Router /api/v1/system/user/export [get]
+// @Router /system/user/export [get]
 func (ctl *UserController) Export(c *gin.Context) {
 	var req dto.UserListRequest
 	if err := common.BindPage(c, &req); err != nil {
@@ -232,7 +232,7 @@ func (ctl *UserController) Export(c *gin.Context) {
 // @Produce json
 // @Param body body dto.StatusRequest true "状态"
 // @Success 200 {object} common.Response
-// @Router /api/v1/system/user/status [put]
+// @Router /system/user/status [put]
 func (ctl *UserController) UpdateStatus(c *gin.Context) {
 	var req dto.StatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -255,7 +255,7 @@ func (ctl *UserController) UpdateStatus(c *gin.Context) {
 // @Produce json
 // @Param body body dto.ResetPasswordRequest true "新密码"
 // @Success 200 {object} common.Response
-// @Router /api/v1/system/user/resetPwd [put]
+// @Router /system/user/resetPwd [put]
 func (ctl *UserController) ResetPassword(c *gin.Context) {
 	var req dto.ResetPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -284,7 +284,7 @@ func (ctl *UserController) ResetPassword(c *gin.Context) {
 // @Produce json
 // @Param body body dto.UpdateUserRolesRequest true "角色"
 // @Success 200 {object} common.Response
-// @Router /api/v1/system/user/roles [put]
+// @Router /system/user/roles [put]
 func (ctl *UserController) UpdateRoles(c *gin.Context) {
 	var req dto.UpdateUserRolesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -308,7 +308,7 @@ func (ctl *UserController) UpdateRoles(c *gin.Context) {
 // @Produce json
 // @Param body body dto.UpdateUserDeptRequest true "部门"
 // @Success 200 {object} common.Response
-// @Router /api/v1/system/user/dept [put]
+// @Router /system/user/dept [put]
 func (ctl *UserController) UpdateDept(c *gin.Context) {
 	var req dto.UpdateUserDeptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -332,7 +332,7 @@ func (ctl *UserController) UpdateDept(c *gin.Context) {
 // @Security ApiKeyAuth
 // @Param body body dto.ChangePasswordRequest true "密码信息"
 // @Success 200 {object} common.Response
-// @Router /api/v1/system/user/changePwd [put]
+// @Router /system/user/changePwd [put]
 func (ctl *UserController) ChangePassword(c *gin.Context) {
 	var req dto.ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

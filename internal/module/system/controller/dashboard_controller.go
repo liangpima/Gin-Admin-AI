@@ -21,7 +21,7 @@ func NewDashboardController() *DashboardController {
 // @Tags 仪表盘
 // @Produce json
 // @Success 200 {object} common.Response{data=model.DashboardStats}
-// @Router /api/v1/dashboard/stats [get]
+// @Router /dashboard/stats [get]
 func (ctl *DashboardController) GetStats(c *gin.Context) {
 	tenantID := common.GetTenantID(c)
 	stats, err := ctl.dashboardService.GetStats(tenantID)

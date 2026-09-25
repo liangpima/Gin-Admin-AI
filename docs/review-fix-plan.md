@@ -574,19 +574,40 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
 - `MobileAction` 只 1 处用（user 页）→ 推广到所有带操作列的表格，或删；
   `DictTag` 3 处用，保留。**这一条并进 P3-1 一起做**（推广 MobileAction 本就是
   P3-1 的一部分）。
-- `docs/docs.go`（2413 行生成物）已入库、未 gitignore，CI 也无 `swag` 校验
-  → 加 `.gitignore` + CI 里 `swag init --diff` 校验一致性。
-  **2026-09-25 复核：仍未做，但「加 .gitignore」这一步不能照做** ——
+- ✅ **swagger 文档一致性 CI 门禁已接入（2026-09-25，走方案 ①）**
+  `docs/docs.go`（2413 行生成物）已入库、未 gitignore，CI 原无 `swag` 校验
+  → 原计划写的是「加 `.gitignore`」，**这一步不能照做**：
   `cmd/server/main.go:14` 有 `_ "go-admin/docs"`（swagger 靠这个空白导入注册），
   `.dockerignore:51` 也明确写着「**不能排除 docs/**」。
   一旦把 `docs.go` 从仓库移除，`go build ./cmd/server` 与 Docker 构建会直接失败。
-  可行的两条路（择一）：
-  ① **保留入库 + CI 查漂移**（改动最小）：CI 装 `swag`，跑
-     `swag init -g cmd/server/main.go -o docs` 后 `git diff --exit-code docs/`，
-     注释与接口不一致就红；
-  ② 不入库 + 在 Dockerfile 的 builder 阶段与 CI 构建前先跑 `swag init`
-     （要多维护一条生成链，且本地不跑 swag 就无法编译）。
-  倾向 ①。
+  最终按方案 ①：**保留入库 + CI 查漂移**（`.github/workflows/ci.yml` 的
+  「安装 swag」+「swagger 文档一致性」两步：`go install ...@v1.16.4` 钉版本 →
+  `make swagger` → `git diff --exit-code -- docs/`）。
+  版本钉死是刻意的：swag 不同版本生成的 `docs.go` 有差异，用 latest 会让 CI
+  随上游发布随机变红（与 golangci-lint 那次「观察项本身失效」同源）。
+  **核实过没有换行符陷阱**：swag 在 Windows 与 Linux 都写 LF，仓库里存的也是 LF，
+  不存在「Windows 本地生成、Linux CI 一跑就整文件报红」。
+
+  **加这道门禁时，实测撞出两处真实缺陷**（都已修）：
+  1. **入库的文档已严重漂移**：旧文档有 38 个 path，其中 **15 个指向早已不存在的
+     接口**（member 模块重构前的 `/member/list`、`/member/status`、`/member/tags`、
+     `/member/visit` 等，以及 payment 的 `/system/pay/order*`、`/pay/notify/*`），
+     而期间新增的接口一个都没进去。重新生成后 26 个 path，全部对得上真实路由。
+  2. **16 处 `@Router` 多写了 `/api/v1` 前缀**（`auth_controller` 4 处、
+     `dashboard_controller` 1 处、`user_controller` 11 处）。
+     而 `cmd/server/main.go:29` 已声明 `@BasePath /api/v1`，**Swagger UI 会自动
+     把它拼在每个 path 前面** —— 于是这 14 个接口在文档里看着正常，
+     点「Try it out」实际请求的是 `/api/v1/api/v1/...`，必然 404。
+     已全部改为相对路径（与 member / file / log 控制器的写法统一）。
+     验证方式：`runtime/cov/check_swagger_routes.py` 把 swagger 的
+     `basePath + path` 与启动日志里 gin 的真实路由逐条比对 ——
+     **33 个文档接口全部命中真实路由**（同时把 gin 的 `:id` 与 OpenAPI 的 `{id}`
+     归一化，否则会得到 6 条假阳性）。
+
+  **遗留（本次未做，属「文档不全」而非「文档不对」）**：实测 **64 条业务路由
+  没有任何 swagger 注解**（payment 与 captcha 两个控制器是 0 注解，
+  system 各模块也只注了一部分）。这不会造成误导，只是文档覆盖不全，
+  且补注解需要逐个确认请求/响应类型，属独立内容工作。
 - ~~`views/system/post/index.vue:105` handleDelete 无 try/catch~~
   ~~11 处空 catch 吞错~~
   —— **2026-09-24 复核后已失效，两条都不用做了**：post 页已改走 `useCrud`
