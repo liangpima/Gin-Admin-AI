@@ -1,6 +1,5 @@
 import { createApp } from 'vue'
 import ElementPlus from 'element-plus'
-import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import 'element-plus/dist/index.css'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 
@@ -8,6 +7,7 @@ import App from './App.vue'
 import router from './router'
 import { createPinia } from 'pinia'
 import { getSiteInfo } from './api/config'
+import { registerAppIcons } from './utils/icons'
 
 import './assets/styles/tokens/light.scss'
 import './assets/styles/tokens/dark.scss'
@@ -22,9 +22,9 @@ app.use(createPinia())
 app.use(router)
 app.use(ElementPlus, { locale: zhCn, size: 'default' })
 
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
-  app.component(key, component)
-}
+// 只注册白名单里的图标，不是全量 293 个。
+// 为什么要白名单、以及哪些站点靠全局注册才能渲染，见 utils/icons.ts 的注释。
+registerAppIcons(app)
 
 app.mount('#app')
 
