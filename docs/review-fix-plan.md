@@ -555,20 +555,25 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   实测 4/12 → **12/12**。详见 **`docs/plan-p3-optional.md` 项目 B**。
 
 ### P3-3 清理项
-- **5 个孤儿组件**（`SvgIcon`/`TableSkeleton`/`PageHeader`/`RightPanel`/`Upload`）：
-  实测 `<Tag>` 形式引用数均为 0 → 删除或接入使用。
-  `MobileAction` 只 1 处用（user 页）→ 推广到所有带操作列的表格，或删；
-  `DictTag` 3 处用，保留。
-  **2026-09-25 复核（结论不变，补上实测数据）**：五个组件仍是 0 引用，
-  共 **380 行**（SvgIcon 61 / TableSkeleton 22 / PageHeader 55 / RightPanel 129 /
-  Upload 113）；同批核实的其余组件都在用 —— `FormDialog` 11 处、`Pagination` 12 处、
-  `DictTag` 3 处、`ImagePicker` 3 处、`ClickCaptcha` 1 处、`WangEditor` 1 处、
-  `MobileAction` 1 处。
-  ⚠️ **`Upload` 的功能已被 `ImagePicker` 覆盖**（会员头像、等级图标、
-  wangEditor 插图都走 ImagePicker），倾向**删除**而不是接入。
-  ⚠️ 另需注意：B2 与 B3 两次改造都顺手改了 `Upload` 组件
-  （去掉手写 `Authorization` 头、补 `X-CSRF-Token`），**这些改动全部落在死代码上** ——
-  不是错，但决定「删还是接」时要知道这部分工作量会随之作废。
+- ✅ **5 个孤儿组件已删除（2026-09-25，共 380 行）**：
+  `SvgIcon` 61 / `TableSkeleton` 22 / `PageHeader` 55 / `RightPanel` 129 / `Upload` 113。
+  删除前复核：`<Tag>` 与短横线两种写法在全仓（含 `layout/`、`.md`）均 0 引用；
+  同批核实其余组件都在用 —— `FormDialog` 11 处、`Pagination` 12 处、`DictTag` 3 处、
+  `ImagePicker` 3 处、`ClickCaptcha` 1 处、`WangEditor` 1 处、`MobileAction` 1 处。
+  决定删而非接入的理由：**`Upload` 的功能已被 `ImagePicker` 覆盖**
+  （会员头像、等级图标、wangEditor 插图都走 ImagePicker）。
+  连带更新了 `AGENTS.md` 与两份 README 的组件清单
+  （`AGENTS.md` 原写「11 个」且漏了 `DictTag`，实为 12 个目录，已一并修正为 7 个）。
+  ⚠️ 记录一条教训：B2 与 B3 两次改造都顺手改了 `Upload`
+  （去掉手写 `Authorization` 头、补 `X-CSRF-Token`），**那些改动全部落在死代码上**。
+  改一个组件前先确认它被引用。
+  **验证**：`typecheck` / `lint` / `format:check` / vitest 110 用例 /
+  `npm run build` + 体积门禁全绿；`components.d.ts` 重新生成后只剩 7 个自研组件；
+  **21 页控制台+渲染巡检全绿**，并做了变异验证（故意在 dashboard 引用已删的
+  `TableSkeleton` → 巡检必须转红，实测转红，证明巡检真的在检查）。
+- `MobileAction` 只 1 处用（user 页）→ 推广到所有带操作列的表格，或删；
+  `DictTag` 3 处用，保留。**这一条并进 P3-1 一起做**（推广 MobileAction 本就是
+  P3-1 的一部分）。
 - `docs/docs.go`（2413 行生成物）已入库、未 gitignore，CI 也无 `swag` 校验
   → 加 `.gitignore` + CI 里 `swag init --diff` 校验一致性。
   **2026-09-25 复核：仍未做，但「加 .gitignore」这一步不能照做** ——

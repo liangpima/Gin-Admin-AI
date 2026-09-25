@@ -358,7 +358,7 @@ internal/module/<模块名>/
 web/src/
 ├── api/<模块名>.ts      # API 接口定义（与后端路由一一对应）
 ├── views/<模块名>/      # 页面组件（支持响应式）
-├── components/          # 公共组件（11个：ClickCaptcha, FormDialog, ImagePicker, MobileAction, PageHeader, Pagination, RightPanel, SvgIcon, TableSkeleton, Upload, WangEditor）
+├── components/          # 公共组件（7个：ClickCaptcha, DictTag, FormDialog, ImagePicker, MobileAction, Pagination, WangEditor）
 ├── hooks/               # useResponsive, useTheme
 ├── store/modules/       # app/permission/tagsView/user
 ├── utils/               # auth.ts, format.ts, request.ts

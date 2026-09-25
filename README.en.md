@@ -113,17 +113,13 @@ go-admin/
 ├── web/                            # Frontend (Vue3 + Element Plus)
 │   └── src/
 │       ├── api/                    # API definitions (16 modules)
-│       ├── components/             # Shared components (11)
+│       ├── components/             # Shared components (7)
 │       │   ├── ClickCaptcha/       # Click captcha
+│       │   ├── DictTag/            # Dictionary tag
 │       │   ├── FormDialog/         # Form dialog
 │       │   ├── ImagePicker/        # Image picker
 │       │   ├── MobileAction/       # Mobile action buttons
-│       │   ├── PageHeader/         # Page header
 │       │   ├── Pagination/         # Pagination
-│       │   ├── RightPanel/         # Right panel
-│       │   ├── SvgIcon/            # SVG icon
-│       │   ├── TableSkeleton/      # Table skeleton
-│       │   ├── Upload/             # File upload
 │       │   └── WangEditor/         # Rich text editor
 │       ├── hooks/                  # Composables
 │       │   ├── useResponsive.ts    # Responsive breakpoints

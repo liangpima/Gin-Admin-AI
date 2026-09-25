@@ -114,17 +114,13 @@ go-admin/
 ├── web/                            # 前端 (Vue3 + Element Plus)
 │   └── src/
 │       ├── api/                    # API 接口定义（16个模块）
-│       ├── components/             # 公共组件（11个）
+│       ├── components/             # 公共组件（7个）
 │       │   ├── ClickCaptcha/       # 点击验证码
+│       │   ├── DictTag/            # 字典标签
 │       │   ├── FormDialog/         # 表单弹窗
 │       │   ├── ImagePicker/        # 图片选择器
 │       │   ├── MobileAction/       # 移动端操作按钮
-│       │   ├── PageHeader/         # 页面头部
 │       │   ├── Pagination/         # 分页组件
-│       │   ├── RightPanel/         # 右侧面板
-│       │   ├── SvgIcon/            # SVG 图标
-│       │   ├── TableSkeleton/      # 表格骨架屏
-│       │   ├── Upload/             # 文件上传
 │       │   └── WangEditor/         # 富文本编辑器
 │       ├── hooks/                  # 组合式函数
 │       │   ├── useResponsive.ts    # 响应式断点
