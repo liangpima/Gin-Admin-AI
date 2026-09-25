@@ -492,14 +492,48 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
 - 动作：以 `views/system` 5 页 + `member` + `payment` 为第一批，补
   表格→卡片式折叠（<768px）、筛选区抽屉化、`MobileAction` 推广到所有带操作列的表格；
   每页在 375px 宽实测（用 CDP Emulation 方式，见工作日志）。
-- **2026-09-25 复核（仍未开工，补上实测口径）**：
+- **2026-09-25 复核（当时仍未开工，补上实测口径）**：
   · `views/` 共 **23** 个 `.vue`，其中 **14** 个含 `el-table` —— 这就是「表格→卡片」
     改造的实际规模；
-  · 全仓 4 条 `@media` **全部**在 `assets/styles/responsive.scss`（全局 mixin），
-    即**没有任何视图页面有自己的断点**；
+  · ~~全仓 4 条 `@media` 全部在 `assets/styles/responsive.scss`，
+    即没有任何视图页面有自己的断点~~ ← **这条是错的，见下方更正**；
   · `useResponsive` 只被 4 处引用，全在布局壳内
     （`layout/index.vue`、`Navbar`、`Sidebar`、`MobileAction`）；
   · `MobileAction` 只 1 处使用（`views/system/user/index.vue`）。
+- ⚠️ **2026-09-25 更正**：上面那条「没有任何视图页面有自己的断点」**是错的**。
+  它来自「数 `@media` 字面量」——而本项目用的是 `@include mobile` 这类 mixin，
+  编译后才变成 `@media`，数源码里的字面量必然漏掉。
+  按 `@include mobile|tablet|desktop` 重数：**16 处、分布在 10 个文件**
+  （全局 `index.scss`、布局 5 处、`ClickCaptcha`，以及 4 个视图：
+  `error/404`、`login`、`settings/sms`、`system/dict`）。
+  也就是说移动端**已有一层全局基线**（弹窗 92% 宽、`.app-container` 去 padding、
+  搜索区紧凑、表格字号与行高压缩），缺的是**逐页的表格折叠**。
+  **教训与「文档会静默失真」同源：数某个模式的出现次数时，
+  要先确认项目里用的是字面量还是编译产物 —— 数错了会得出方向完全相反的结论。**
+
+- ✅ **2026-09-25 试点完成：`ResponsiveTable` + `system/post` 打通**
+  （后续页面按同一套做法铺开，未完成）
+  - 新增 `web/src/components/ResponsiveTable/`（`index.vue` + `types.ts`）：
+    ≥768px 渲染 `el-table`（行为与改造前完全一致），<768px 把同一份数据折叠成卡片。
+    **列定义是唯一来源** —— 表格列与卡片字段都从同一个 `columns` 派生，
+    避免「表格加了列、卡片忘了加，手机上少一个字段而桌面端一切正常」这类
+    只在手机上可见的漂移。
+  - 对行类型做成泛型（`ResponsiveColumn<PostItem>`）：先写成
+    `Record<string, unknown>` 时 `PostItem[]` 传不进 `data`（接口没有字符串索引签名），
+    且页面里 `row.createdAt` 会失去类型。
+  - `system/post` 已接入作为样板（最简单的一页：普通列 + 一个 slot 列 + 操作列）。
+  - **验证**：`runtime/smoke/check_responsive_post.mjs` —— 桌面 1280px 断言
+    「渲染表格、不出现卡片、表头含全部列、有数据行」，手机 375px 断言
+    「渲染卡片、**不**出现表格、卡片字段与表格列一致、操作列不重复、底部有编辑/删除」，
+    并**真的点卡片里的「编辑」确认弹窗打开**（只断言按钮在 DOM 里不够 ——
+    插槽接错时按钮照样在，只是点了没反应）。**17/17 通过**；
+    变异验证 1 组（让卡片分支永不渲染）→ 6 条断言转红。
+    另跑全站 21 页控制台+渲染巡检全绿。
+  - 该脚本自带数据（`sys_post` 实测是**空表**，第一次跑「结构断言全过、有数据行=0」，
+    看着像布局坏了其实是没数据）：用接口造一条、结束再删，可重复执行且不留残留。
+  - **剩余**：其余含 `el-table` 的 13 个页面按同样方式接入；
+    筛选区抽屉化；`MobileAction` 推广（它解决的是 768–1024px 仍显示表格时
+    操作列过窄的问题，与卡片折叠互补）。
 
 ### P3-2 路由与鉴权收尾（前端）
 - ✅ **`pathMatch(.*)*` 404 catch-all 已补**（`web/src/router/routes/static.ts`）。

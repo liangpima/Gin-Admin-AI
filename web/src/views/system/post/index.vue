@@ -7,31 +7,21 @@
           <el-button type="primary" @click="handleAdd()">新增岗位</el-button>
         </div>
       </template>
-      <el-table :data="tableData" v-loading="loading" border>
-        <el-table-column prop="code" label="岗位编码" min-width="100" />
-        <el-table-column prop="name" label="岗位名称" min-width="100" />
-        <el-table-column prop="sort" label="排序" width="60" />
-        <el-table-column prop="status" label="状态" width="70">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{
-              row.status === 1 ? '正常' : '停用'
-            }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="创建时间" width="170">
-          <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="160">
-          <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row as PostItem)"
-              >编辑</el-button
-            >
-            <el-button type="danger" link size="small" @click="handleDelete(row as PostItem)"
-              >删除</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
+      <ResponsiveTable :data="tableData" :columns="columns" :loading="loading">
+        <template #status="{ row }">
+          <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{
+            row.status === 1 ? '正常' : '停用'
+          }}</el-tag>
+        </template>
+        <template #actions="{ row }">
+          <el-button type="primary" link size="small" @click="handleEdit(row as PostItem)"
+            >编辑</el-button
+          >
+          <el-button type="danger" link size="small" @click="handleDelete(row as PostItem)"
+            >删除</el-button
+          >
+        </template>
+      </ResponsiveTable>
       <Pagination
         v-model:page="page"
         v-model:limit="pageSize"
@@ -78,6 +68,8 @@ import {
 } from '@/api/post'
 import { formatDateTime } from '@/utils/format'
 import FormDialog from '@/components/FormDialog/index.vue'
+import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
+import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
 import { useCrud } from '@/hooks/useCrud'
 
 interface PostForm {
@@ -87,6 +79,24 @@ interface PostForm {
   sort: number
   status: number
 }
+
+// 列定义是**唯一来源**：桌面端的表格列与手机端的卡片字段都从这里派生。
+// 在表格里加一列却忘了在卡片里加，手机上就会少一个字段 —— 而桌面端一切正常，
+// 这种问题最容易漏测，所以不让两处各写一份。
+const columns: ResponsiveColumn<PostItem>[] = [
+  { label: '岗位编码', prop: 'code', minWidth: 100 },
+  { label: '岗位名称', prop: 'name', minWidth: 100 },
+  { label: '排序', prop: 'sort', width: 60 },
+  { label: '状态', slot: 'status', width: 70 },
+  {
+    label: '创建时间',
+    prop: 'createdAt',
+    width: 170,
+    formatter: (row) => formatDateTime(row.createdAt as string),
+  },
+  // 操作列在卡片里由 #actions 插槽渲染在底部，不作为字段重复一遍
+  { label: '操作', slot: 'actions', width: 160, hideInCard: true },
+]
 
 // 分页、loading、弹窗开关与增删改查的编排都交给 useCrud；
 // 这里只保留本页特有的东西：表单结构、校验规则、提交载荷。
