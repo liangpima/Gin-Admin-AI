@@ -37,9 +37,13 @@ vi.mock('axios', () => {
       },
     },
     get: vi.fn(),
-    post: vi.fn(),
+    // 续期（POST /auth/refresh）默认**失败**：本文件测的是「响应拦截器如何处理错误」，
+    // 401 用例要固定在「续期也失败 → 清会话」这条分支上，而不是取决于 mock 的偶然返回值。
+    // 续期成功 / 并发单飞那一套在 refresh.spec.ts 里单独覆盖。
+    post: vi.fn(() => Promise.reject(new Error('无凭据可续期'))),
     put: vi.fn(),
     delete: vi.fn(),
+    request: vi.fn(),
   }
   return {
     default: { create: () => instance },
@@ -49,17 +53,11 @@ vi.mock('axios', () => {
 const ElMessage = { error: vi.fn(), success: vi.fn(), warning: vi.fn() }
 vi.mock('element-plus', () => ({ ElMessage }))
 
-const removeToken = vi.fn()
-const getToken = vi.fn()
-const getRefreshToken = vi.fn()
-const setToken = vi.fn()
-const setRefreshToken = vi.fn()
+const clearLoginFlag = vi.fn()
+// 只 mock 这一个导出（P3-B2 之后 @/utils/auth 就只剩登录态标记的读写）。
+// 若实现回退去调 getToken / removeToken，这里会得到 undefined 并直接抛错。
 vi.mock('@/utils/auth', () => ({
-  getToken: () => getToken(),
-  getRefreshToken: () => getRefreshToken(),
-  setToken: (...a: unknown[]) => setToken(...a),
-  setRefreshToken: (...a: unknown[]) => setRefreshToken(...a),
-  removeToken: () => removeToken(),
+  clearLoginFlag: () => clearLoginFlag(),
 }))
 
 const routerPush = vi.fn(() => Promise.resolve())
@@ -114,18 +112,16 @@ describe('响应拦截器：业务错误', () => {
     expect(ElMessage.error).toHaveBeenCalled()
   })
 
-  it('401 且无从续期时清会话并跳登录，而不是弹「请求失败」', async () => {
+  it('401 且续期也失败时清会话并跳登录，而不是弹「请求失败」', async () => {
     // 401 现在的完整语义是「先续期、失败才清会话」（见 refresh.spec.ts）。
-    // 这里刻意让 getRefreshToken 返回空，把用例固定在「无凭据可续 → 清会话」
-    // 这条分支上 —— 否则它是否走续期就取决于 mock 的默认值，属于偶然通过
-    getRefreshToken.mockReturnValue(undefined)
-
+    // 本文件的 axios mock 让续期固定失败，把用例固定在「清会话」这条分支上 ——
+    // 否则它是否走清会话就取决于 mock 的默认返回值，属于偶然通过。
     await expect(
       handlers.response!({ data: { code: 401, message: 'Token已失效', data: null }, config: {} }),
     ).rejects.toBeInstanceOf(BizError)
 
-    expect(removeToken).toHaveBeenCalled()
-    // 跳转是异步的（handleLogout 内部先清 token 再跳）
+    expect(clearLoginFlag).toHaveBeenCalled()
+    // 跳转是异步的（handleLogout 内部先清标记再跳）
     await vi.waitFor(() => expect(routerPush).toHaveBeenCalledWith('/login'))
   })
 
@@ -155,14 +151,12 @@ describe('响应拦截器：网络层错误', () => {
     vi.clearAllMocks()
   })
 
-  it('HTTP 401 且无从续期时也走清会话跳登录', async () => {
-    getRefreshToken.mockReturnValue(undefined)
-
+  it('HTTP 401 且续期也失败时同样清会话跳登录', async () => {
     await expect(
       handlers.responseError!({ response: { status: 401 }, message: 'Unauthorized' }),
     ).rejects.toBeTruthy()
 
-    expect(removeToken).toHaveBeenCalled()
+    expect(clearLoginFlag).toHaveBeenCalled()
     await vi.waitFor(() => expect(routerPush).toHaveBeenCalledWith('/login'))
   })
 
@@ -176,26 +170,24 @@ describe('响应拦截器：网络层错误', () => {
   })
 })
 
-describe('请求拦截器：带 token', () => {
+describe('请求拦截器：不再注入 Authorization 头（P3-B2）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('有 token 时写入 Authorization 头', () => {
-    getToken.mockReturnValue('abc123')
+  it('原样返回 config，不添加任何认证头', () => {
+    // token 现在是 HttpOnly cookie，JS 读不到；凭据由浏览器自动携带，
+    // 拦截器不需要（也无法）做任何事。
+    //
+    // 这条断言还挡住一种退化：有人为了「兼容旧部署」把注入逻辑加回来，
+    // 那时读到的是 undefined，会拼出 "Bearer undefined" ——
+    // 后端会当成「Token格式错误」返回 401，比不传更糟（连 cookie 路径都走不到，
+    // 因为 Authorization 头在 both 模式下是**优先**的）。
     const config = { headers: {} as Record<string, string> }
 
-    handlers.request!(config)
+    const result = handlers.request!(config)
 
-    expect(config.headers.Authorization).toBe('Bearer abc123')
-  })
-
-  it('没有 token 时不写该头（而不是写成 Bearer undefined）', () => {
-    getToken.mockReturnValue(undefined)
-    const config = { headers: {} as Record<string, string> }
-
-    handlers.request!(config)
-
+    expect(result).toBe(config)
     expect(config.headers.Authorization).toBeUndefined()
   })
 })

@@ -1,6 +1,6 @@
 import axios, { type AxiosInstance, type AxiosResponse, type AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
-import { getToken, getRefreshToken, removeToken, setToken, setRefreshToken } from '@/utils/auth'
+import { clearLoginFlag } from '@/utils/auth'
 import router from '@/router'
 
 let isRedirecting = false
@@ -14,12 +14,16 @@ let isRedirecting = false
  * 必须调用 store 的 clearSession 而不是只 reset permission store ——
  * 后者不会 router.removeRoute，上一个高权限会话动态注册的路由会残留在
  * router 里，换个低权限账号登录后直接改 URL 就能打开（详见 clearSession 注释）。
+ *
+ * 这里清的是**登录态标记**（`logged_in`），不是 token（P3-B2）：
+ * token 是 HttpOnly cookie，前端删不掉也不需要删 —— 被 401 踢出时它已经无效了。
+ * 但标记必须清，否则刷新页面会被它骗回「已登录」分支，白拉一次 userInfo 再被踢一次。
  */
 function handleLogout() {
   if (isRedirecting) return
   isRedirecting = true
-  // 先立刻清掉本地 token，保证后续请求不会带上已失效的凭据
-  removeToken()
+  // 先立刻清掉本地登录态标记，保证路由守卫不会再把用户放行到业务页面
+  clearLoginFlag()
 
   void import('@/store/modules/user').then(({ useUserStore }) => {
     useUserStore().clearSession()
@@ -33,14 +37,22 @@ function handleLogout() {
 const service: AxiosInstance = axios.create({
   baseURL: '/api/v1',
   timeout: 30000,
+  // 凭据现在靠 HttpOnly cookie 传递（P3-B2）。同源部署下（dev 走 Vite proxy、
+  // prod 走 nginx /api）浏览器本来就会带上 cookie，这一行不改变行为；
+  // 显式写出来是为了两件事：① 表明「跨域部署时也必须带凭据」这个意图；
+  // ② 避免将来有人改成分域名部署时，因为缺这一行而让 cookie 静默不发 ——
+  // 那种故障的表现是「登录成功但下一个请求就是未登录」，很难联想到配置。
+  withCredentials: true,
 })
 
 service.interceptors.request.use(
   (config) => {
-    const token = getToken()
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
-    }
+    // 这里原本会从 cookie 读 token 塞进 Authorization 头（P3-B2 删除）。
+    // 现在 token 是 HttpOnly，JS 读不到，凭据由浏览器自动携带 —— 不需要注入任何东西。
+    //
+    // 注意这**不是**「回滚开关」：后端 security.token_transport 设成 header 时
+    // 不再下发 cookie，而前端已经不再注入头，两边都拿不到凭据。
+    // B2 之后回滚的粒度是「前后端一起回退到 B2 之前的提交」，不是改一个配置项。
     return config
   },
   (error) => Promise.reject(error),
@@ -139,24 +151,26 @@ let refreshInFlight: Promise<void> | null = null
 
 /** 真正执行一次续期（不含单飞包装） */
 async function doRefreshSession(): Promise<void> {
-  const refreshToken = getRefreshToken()
-  if (!refreshToken) {
-    // 没有 refresh token 就没有续期手段。抛错让调用方走清会话分支，
-    // 而不是发一个注定 401 的请求再绕一圈回来
-    throw new Error('没有可用的 refresh token')
-  }
-
-  const res = await service.post<unknown, Result<{ accessToken: string; refreshToken: string }>>(
+  // 凭据由 HttpOnly cookie 携带（Path=/api/v1/auth，覆盖 /auth/refresh），
+  // 前端读不到也不需要读，所以这里**不传任何凭据**。
+  //
+  // 特别注意不要试图「从 cookie 里读出来再放进 body」：读不到（HttpOnly），
+  // 而且服务端的取值是 body 优先（authcookie.RefreshFromRequest），
+  // 一旦传了空串，反而会把 cookie 里那份有效凭据顶掉 ——
+  // 现象是「每次续期都失败」，而请求看起来明明发了。
+  //
+  // 新 token 同样由服务端 Set-Cookie 下发，前端无需（也无法）保存。
+  //
+  // 与 B2 之前相比这里少了一个「本地没有 refresh token 就直接抛错」的短路：
+  // 前端已经无从判断有没有凭据了。代价是未登录状态下遇到 401 会多打一次
+  // 注定失败的 /auth/refresh —— 但守卫已经拦住了未登录时的业务页面访问，
+  // 实际很难走到；而漏判的代价（明明有凭据却不续期）要大得多。
+  await service.post<unknown, Result<{ accessToken: string; refreshToken: string }>>(
     '/auth/refresh',
-    { refreshToken },
+    {},
     // 打上标记：这次请求自己的 401 不再触发续期
     { skipAuthRefresh: true } as RetryableConfig,
   )
-
-  // 后端刷新时**同时轮换**两个 token，必须都更新 ——
-  // 只更新 access token 的话，下一次续期用的还是已被消费掉的旧 refresh token
-  setToken(res.data.accessToken)
-  setRefreshToken(res.data.refreshToken)
 }
 
 /** 续期（带单飞）。失败时抛出原因，由调用方决定是否清会话 */
@@ -211,7 +225,8 @@ async function refreshAndReplay(
     throw originalError
   }
 
-  // 重放：request 拦截器会重新读 cookie，因此带的是刚换到的新 token
+  // 重放：浏览器会自动带上刚由 Set-Cookie 换新的 access token，
+  // request 拦截器不需要做任何事（它已经不再注入 Authorization 头）
   return service.request(config!)
 }
 

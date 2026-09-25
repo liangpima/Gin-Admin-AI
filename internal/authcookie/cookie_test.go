@@ -152,6 +152,50 @@ func TestRefreshCookiePathCoversLogout(t *testing.T) {
 	}
 }
 
+// TestSetWritesLoginFlag 登录态标记的属性（P3-B2）。
+//
+// 这个 cookie 的存在理由有点绕，值得钉死：token 都 HttpOnly 之后，
+// 前端**没有任何办法**知道"本地有没有凭据"，路由守卫会退化成
+// 「永远未登录 → 死循环跳 /login」。所以服务端要额外发一个**非敏感**标记。
+//
+// 两个断言各自对应一种真实退化：
+//   - HttpOnly 被误设成 true → 前端读不到 → 守卫永远判定未登录（页面打不开）
+//   - MaxAge 跟着 access token 走 → 2 小时后标记先失效，守卫在**发请求之前**
+//     就跳登录页，B4 的自动续期根本没机会跑（用户以为"续期坏了"）
+func TestSetWritesLoginFlag(t *testing.T) {
+	withSecurity(t, config.TokenTransportBoth, config.CookieSameSiteLax, nil, 7200, 604800)
+
+	c, w := newCookieCtx()
+	Set(c, "access-1", "refresh-1")
+	got := cookiesOf(t, w)
+
+	flag, ok := got[LoginFlagCookieName]
+	if !ok {
+		t.Fatalf("应下发 %s，实际只有 %v", LoginFlagCookieName, keysOf(got))
+	}
+	if flag.HttpOnly {
+		t.Error("登录态标记**必须**是 JS 可读的（HttpOnly=false），" +
+			"否则前端守卫永远判定未登录")
+	}
+	if flag.Value != LoginFlagCookieValue {
+		t.Errorf("标记值应为 %q（前端按严格相等比较），实际 %q",
+			LoginFlagCookieValue, flag.Value)
+	}
+	if flag.Path != LoginFlagCookiePath {
+		t.Errorf("标记 Path 应为 %q，实际 %q", LoginFlagCookiePath, flag.Path)
+	}
+	if flag.MaxAge != 604800 {
+		t.Errorf("标记 MaxAge 应取自 jwt.refresh_expire(604800) 而非 access_expire(7200)，实际 %d",
+			flag.MaxAge)
+	}
+
+	// 反过来确认真正的 token 仍是 HttpOnly —— 这条是 B 组改造的**唯一真正收益**，
+	// 加标记 cookie 时最容易顺手把它一起放开
+	if access := got[AccessCookieName]; access != nil && !access.HttpOnly {
+		t.Error("access_token 必须保持 HttpOnly（新增标记 cookie 不应影响它）")
+	}
+}
+
 // TestSetSkipsEmptyToken 空 token 不应写出空 cookie。
 //
 // 写空 cookie 会让浏览器把已有的那个覆盖掉 —— 例如登录响应里只有 access token
@@ -185,6 +229,9 @@ func TestClearExpiresBothCookies(t *testing.T) {
 	for _, tc := range []struct{ name, path string }{
 		{AccessCookieName, AccessCookiePath},
 		{RefreshCookieName, RefreshCookiePath},
+		// 登录态标记也要清：漏了它，用户登出后刷新页面会被标记骗回
+		// 「已登录」分支，白拉一次 userInfo 再被踢一次
+		{LoginFlagCookieName, LoginFlagCookiePath},
 	} {
 		ck, ok := got[tc.name]
 		if !ok {

@@ -1,6 +1,9 @@
 package controller
 
 import (
+	"errors"
+	"io"
+
 	"go-admin/internal/authcookie"
 	"go-admin/internal/common"
 	"go-admin/internal/module/system/dto"
@@ -59,13 +62,27 @@ func (ctl *AuthController) Login(c *gin.Context) {
 // @Tags 认证
 // @Accept json
 // @Produce json
-// @Param body body dto.RefreshTokenRequest true "RefreshToken"
+// @Param body body dto.RefreshTokenRequest false "RefreshToken（浏览器路径下可省略，凭据在 HttpOnly cookie 里）"
 // @Success 200 {object} common.Response{data=vo.LoginResponse}
 // @Router /api/v1/auth/refresh [post]
 func (ctl *AuthController) RefreshToken(c *gin.Context) {
 	var req dto.RefreshTokenRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	// 浏览器路径下请求体是**空**的（refresh token 在 HttpOnly cookie 里，
+	// JS 读不到也就传不了），所以「空 body」不是错误，只有「坏 JSON」才是。
+	// 用 errors.Is(err, io.EOF) 把两者分开：少了这个区分，B2 之后所有浏览器端的
+	// 自动续期都会在这里直接 400，而现象是「token 一过期就被踢出登录」。
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
 		common.Error(c, common.CodeBadRequest, err.Error())
+		return
+	}
+
+	// 凭据来源：请求体优先（Swagger / 脚本显式传参），其次 HttpOnly cookie（浏览器）。
+	// 与 Logout 用同一套取值逻辑，避免两条路径对「凭据从哪来」有不同理解。
+	req.RefreshToken = authcookie.RefreshFromRequest(c, req.RefreshToken)
+	if req.RefreshToken == "" {
+		// 用 Controller 自己的错误出口（而不是 FailWith）：这是参数层面的缺失，
+		// 不是 Service 抛上来的业务错误。
+		common.Error(c, common.CodeBadRequest, "缺少 refresh token")
 		return
 	}
 

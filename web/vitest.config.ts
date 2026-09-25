@@ -21,8 +21,12 @@ export default defineConfig({
     },
   },
   test: {
-    // 目前只测纯逻辑（字典加载、响应拦截器、路由生成），不需要 DOM。
-    // 将来要测组件时再换 jsdom —— 那时才需要引入对应依赖。
+    // 默认用 node 环境：绝大多数用例是纯逻辑（字典加载、响应拦截器、路由生成），
+    // 不需要 DOM，跑起来也更快。
+    //
+    // 需要 DOM 的用例（cookie 读写、路由守卫里改 document.title）在**文件首行**
+    // 加 `// @vitest-environment jsdom` 单独覆盖 —— 这样 jsdom 的启动开销
+    // 只落在真正需要它的文件上，而不是全局（P3-B2 引入 jsdom 时就是这么做的）。
     environment: 'node',
     include: ['src/**/*.spec.ts'],
     // 测试文件与源码同目录：改哪个模块就顺手能看到它的用例

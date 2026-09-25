@@ -334,6 +334,66 @@ func TestAuthControllerLoginAndTokenEndpoints(t *testing.T) {
 	}
 }
 
+// TestAuthControllerRefreshAcceptsCookieCredential 刷新接口要能从 cookie 取凭据（P3-B2）。
+//
+// 这是 B2 阶段**计划之外**补的一处后端改动，也是最容易漏的一处：
+// `RefreshTokenRequest.RefreshToken` 原本带 `binding:"required"`，而 B2 之后
+// 前端拿不到 refresh token（HttpOnly，JS 读不到），浏览器发出的请求体必然为空。
+// 漏改的话，**所有浏览器端的自动续期都会在参数绑定这一步 400**，
+// 现象是「token 一过期就被踢回登录页」—— 与 B4 要修的那个缺陷一模一样，
+// 排查时几乎不会怀疑到参数绑定。
+//
+// 这条用例的区分力在于：cookie 里塞了一个**无效但非空**的凭据。
+// 若 cookie 的值没被取出来填进 req，就会得到 400「缺少 refresh token」；
+// 取出来了才会走到业务层得到 401「凭据无效」。两者一眼可辨。
+func TestAuthControllerRefreshAcceptsCookieCredential(t *testing.T) {
+	newFullSystemDB(t)
+	ctl := NewAuthController()
+
+	// ① 浏览器路径：请求体为空对象，凭据在 cookie 里
+	c, w := newCtx(http.MethodPost, "/api/v1/auth/refresh", 0, 0)
+	withJSONBody(c, `{}`)
+	c.Request.AddCookie(&http.Cookie{Name: authcookie.RefreshCookieName, Value: "not-a-token"})
+	ctl.RefreshToken(c)
+	resp := decodeResp(t, w)
+	if resp["code"].(float64) == float64(common.CodeBadRequest) {
+		t.Errorf("cookie 里带了凭据时不应报「缺少 refresh token」，实际 %v（%v）",
+			resp["code"], resp["message"])
+	}
+	if resp["code"].(float64) != float64(common.CodeUnauthorized) {
+		t.Errorf("无效 refresh token 应返回 401，实际 %v（%v）", resp["code"], resp["message"])
+	}
+
+	// ② 完全没有请求体（axios 不设 data / curl 不带 body）：同样不能卡在绑定上。
+	//    这条单独列出来是因为 gin 的 ShouldBindJSON 对空 body 返回的是 io.EOF，
+	//    与「JSON 语法错误」需要区分对待 —— 只处理其中一种会漏掉另一半调用方。
+	c, w = newCtx(http.MethodPost, "/api/v1/auth/refresh", 0, 0)
+	c.Request.AddCookie(&http.Cookie{Name: authcookie.RefreshCookieName, Value: "not-a-token"})
+	ctl.RefreshToken(c)
+	if resp := decodeResp(t, w); resp["code"].(float64) != float64(common.CodeUnauthorized) {
+		t.Errorf("空 body + cookie 凭据应走到业务层返回 401，实际 %v（%v）",
+			resp["code"], resp["message"])
+	}
+
+	// ③ 坏 JSON 仍然要 400：容忍空 body 不等于吞掉解析错误。
+	//    吞掉的话，「请求体写错了」会静默退化成「按 cookie 处理」，问题被藏起来。
+	c, w = newCtx(http.MethodPost, "/api/v1/auth/refresh", 0, 0)
+	withJSONBody(c, `{"refreshToken":`)
+	c.Request.AddCookie(&http.Cookie{Name: authcookie.RefreshCookieName, Value: "not-a-token"})
+	ctl.RefreshToken(c)
+	if resp := decodeResp(t, w); resp["code"].(float64) != float64(common.CodeBadRequest) {
+		t.Errorf("坏 JSON 应返回 400，实际 %v（%v）", resp["code"], resp["message"])
+	}
+
+	// ④ body 与 cookie 都没有 → 400（原有语义不能因为放宽绑定而丢掉）
+	c, w = newCtx(http.MethodPost, "/api/v1/auth/refresh", 0, 0)
+	withJSONBody(c, `{}`)
+	ctl.RefreshToken(c)
+	if resp := decodeResp(t, w); resp["code"].(float64) != float64(common.CodeBadRequest) {
+		t.Errorf("无任何凭据应返回 400，实际 %v（%v）", resp["code"], resp["message"])
+	}
+}
+
 func TestAuthControllerGetUserInfo(t *testing.T) {
 	newFullSystemDB(t)
 	ctl := NewAuthController()

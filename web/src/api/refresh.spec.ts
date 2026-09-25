@@ -73,17 +73,12 @@ vi.mock('axios', () => {
 const ElMessage = { error: vi.fn(), success: vi.fn(), warning: vi.fn() }
 vi.mock('element-plus', () => ({ ElMessage }))
 
-const getToken = vi.fn()
-const getRefreshToken = vi.fn()
-const setToken = vi.fn()
-const setRefreshToken = vi.fn()
-const removeToken = vi.fn()
+const clearLoginFlag = vi.fn()
+// 只 mock 这一个导出（P3-B2 之后 @/utils/auth 就只剩登录态标记的读写）。
+// 若实现回退去调 getToken / setToken，这里会得到 undefined 并直接抛错 ——
+// 这比断言「调用了新接口」更能防回退：后者不阻止旧接口同时被调用。
 vi.mock('@/utils/auth', () => ({
-  getToken: () => getToken(),
-  getRefreshToken: () => getRefreshToken(),
-  setToken: (...a: unknown[]) => setToken(...a),
-  setRefreshToken: (...a: unknown[]) => setRefreshToken(...a),
-  removeToken: () => removeToken(),
+  clearLoginFlag: () => clearLoginFlag(),
 }))
 
 const routerPush = vi.fn(() => Promise.resolve())
@@ -107,15 +102,14 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-/** 断言「会话被清理」：清 token + 跳登录页 */
+/** 断言「会话被清理」：清登录态标记 + 跳登录页 */
 async function expectSessionCleared() {
-  expect(removeToken).toHaveBeenCalled()
+  expect(clearLoginFlag).toHaveBeenCalled()
   await vi.waitFor(() => expect(routerPush).toHaveBeenCalledWith('/login'))
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
-  getRefreshToken.mockReturnValue('old-refresh')
   servicePost.mockResolvedValue(refreshOk())
   serviceRequest.mockResolvedValue('replayed')
 })
@@ -131,20 +125,22 @@ describe('自动续期：成功路径', () => {
     expect(servicePost.mock.calls[0][0]).toBe('/auth/refresh')
     expect(serviceRequest).toHaveBeenCalledTimes(1)
     // 会话没被清：这正是「续期」相对「直接踢出」的意义
-    expect(removeToken).not.toHaveBeenCalled()
+    expect(clearLoginFlag).not.toHaveBeenCalled()
     expect(routerPush).not.toHaveBeenCalled()
   })
 
-  it('刷新时同时更新 access 与 refresh 两个 token', async () => {
-    // 后端刷新是**轮换**：只更新 access token 的话，
-    // 下一次续期用的还是已被消费掉的旧 refresh token，第二次必然失败
+  it('续期请求不带任何凭据（凭据在 HttpOnly cookie 里，前端读不到）', async () => {
+    // 后端刷新是**轮换**式的，凭据由 cookie 携带、新值由 Set-Cookie 下发。
+    // 这里必须断言「没有 refreshToken 字段」：服务端的取值是 body 优先
+    // （authcookie.RefreshFromRequest），一旦前端传了空串，
+    // 就会把 cookie 里那份有效凭据顶掉 —— 表现为「每次续期都失败」。
     await handlers.responseError!({
       response: { status: 401 },
       config: { url: '/member/list' },
     })
 
-    expect(setToken).toHaveBeenCalledWith('new-access')
-    expect(setRefreshToken).toHaveBeenCalledWith('new-refresh')
+    const [, body] = servicePost.mock.calls[0]
+    expect(body).not.toHaveProperty('refreshToken')
   })
 
   it('HTTP 200 + body code 401 也走续期（不能只在 axios 的 error 分支处理）', async () => {
@@ -157,7 +153,7 @@ describe('自动续期：成功路径', () => {
 
     expect(result).toBe('replayed')
     expect(servicePost).toHaveBeenCalledTimes(1)
-    expect(removeToken).not.toHaveBeenCalled()
+    expect(clearLoginFlag).not.toHaveBeenCalled()
   })
 
   it('续期请求带 skipAuthRefresh 标记，避免它自己的 401 又触发续期', async () => {
@@ -179,18 +175,16 @@ describe('自动续期：成功路径', () => {
     expect(serviceRequest).toHaveBeenCalledWith(config)
   })
 
-  it('重放请求经过 request 拦截器时会带上刚换到的新 token', async () => {
-    // 重放走的是同一个 axios 实例，因此 request 拦截器会重新读 cookie。
-    // 这条断言把「重放拿到的必须是新 token」钉住 —— 若实现改成
-    // 「把旧 config 原样再发一次」，请求头里就还是过期的 token，续期等于白做
-    getToken.mockReturnValue('new-access')
+  it('重放时不再注入 Authorization 头 —— 凭据由浏览器自动携带', () => {
+    // B2 之后 request 拦截器不再读 cookie 拼头（token 是 HttpOnly，读不到）。
+    // 重放之所以能拿到新 token，是因为服务端在续期响应里 Set-Cookie 了新值，
+    // 浏览器会自动带上 —— 这一段在单测里覆盖不到（没有真实浏览器），
+    // 由实机冒烟验证。这里钉住的是「别再注入」这个约定。
     const config = { url: '/member/list', headers: {} as Record<string, string> }
 
-    await handlers.responseError!({ response: { status: 401 }, config })
-    // 手动跑一遍 request 拦截器，模拟重放时 axios 的真实行为
     handlers.request!(config)
 
-    expect(config.headers.Authorization).toBe('Bearer new-access')
+    expect(config.headers.Authorization).toBeUndefined()
   })
 })
 
@@ -213,7 +207,7 @@ describe('自动续期：并发只发一次', () => {
     expect(results).toEqual(['replayed', 'replayed', 'replayed'])
     expect(servicePost).toHaveBeenCalledTimes(1)
     expect(serviceRequest).toHaveBeenCalledTimes(3)
-    expect(removeToken).not.toHaveBeenCalled()
+    expect(clearLoginFlag).not.toHaveBeenCalled()
   })
 
   it('一次续期失败后，下一次 401 会重新发起续期（而不是复用那个失败的 Promise）', async () => {
@@ -224,10 +218,9 @@ describe('自动续期：并发只发一次', () => {
     await expect(
       handlers.responseError!({ response: { status: 401 }, config: { url: '/a' } }),
     ).rejects.toBeTruthy()
-    expect(removeToken).toHaveBeenCalledTimes(1)
+    expect(clearLoginFlag).toHaveBeenCalledTimes(1)
 
     vi.clearAllMocks()
-    getRefreshToken.mockReturnValue('old-refresh')
     servicePost.mockResolvedValue(refreshOk())
     serviceRequest.mockResolvedValue('replayed')
 
@@ -284,16 +277,20 @@ describe('自动续期：这些情况必须直接清会话，不能再续期', (
     await expectSessionCleared()
   })
 
-  it('本地没有 refresh token（无从续期）', async () => {
-    getRefreshToken.mockReturnValue(undefined)
+  it('前端已无从判断有没有凭据，所以仍会尝试一次续期', async () => {
+    // B2 之后前端读不到 refresh token（HttpOnly），无法再做「本地没凭据就别白跑
+    // 一次」的短路。这是刻意接受的代价：漏判的代价（明明有凭据却不续期，
+    // 用户照样被踢出去）比多发一次注定失败的请求大得多。
+    // 这里把新行为钉住，防止有人「顺手」用 logged_in 标记加回一个短路 ——
+    // 那个标记不代表会话有效，用它做判断就会漏续期。
+    const result = await handlers.responseError!({
+      response: { status: 401 },
+      config: { url: '/member/list' },
+    })
 
-    await expect(
-      handlers.responseError!({ response: { status: 401 }, config: { url: '/member/list' } }),
-    ).rejects.toBeTruthy()
-
-    // 不该白跑一次注定失败的请求
-    expect(servicePost).not.toHaveBeenCalled()
-    await expectSessionCleared()
+    expect(result).toBe('replayed')
+    expect(servicePost).toHaveBeenCalledTimes(1)
+    expect(clearLoginFlag).not.toHaveBeenCalled()
   })
 
   it('登录接口的 401 不触发续期（此时去续期只会拿陈旧凭据白跑一次）', async () => {
@@ -324,7 +321,7 @@ describe('自动续期：失败与其它错误', () => {
   })
 
   it('body code 401 续期失败时抛的仍是 BizError（调用方按码分支的写法不受影响）', async () => {
-    getRefreshToken.mockReturnValue(undefined)
+    servicePost.mockRejectedValue(new Error('refresh token 已失效'))
 
     await expect(
       handlers.response!({
@@ -342,7 +339,7 @@ describe('自动续期：失败与其它错误', () => {
     ).rejects.toBeTruthy()
 
     expect(servicePost).not.toHaveBeenCalled()
-    expect(removeToken).not.toHaveBeenCalled()
+    expect(clearLoginFlag).not.toHaveBeenCalled()
     expect(routerPush).not.toHaveBeenCalled()
     expect(ElMessage.error).toHaveBeenCalled()
   })

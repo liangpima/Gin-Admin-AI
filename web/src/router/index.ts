@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
-import { getToken } from '@/utils/auth'
+import { isLoggedIn } from '@/utils/auth'
 import { useUserStore } from '@/store/modules/user'
 import { usePermissionStore } from '@/store/modules/permission'
 import { constantRoutes } from './routes/static'
@@ -19,8 +19,12 @@ router.beforeEach(async (to, _from, next) => {
   NProgress.start()
   document.title = (to.meta?.title as string) || 'Gin-Admin'
 
-  const token = getToken()
-  if (token) {
+  // 判定依据是服务端下发的**非敏感**登录态标记，不是本地 token ——
+  // token 现在是 HttpOnly，JS 根本读不到（P3-B2）。
+  // 这个标记只回答「要不要去拉用户信息」：它可能已过期或已在服务端被吊销，
+  // 所以下面的 getInfo 失败分支（catch）才是真正的兜底。
+  const loggedIn = isLoggedIn()
+  if (loggedIn) {
     if (to.path === '/login') {
       next('/')
       NProgress.done()

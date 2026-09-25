@@ -45,9 +45,35 @@ const (
 	// `/api/v1/auth` 已经排除了全部业务接口（/system、/member、/payment…），
 	// 相对 Path=/ 仍是显著收窄。
 	RefreshCookiePath = "/api/v1/auth"
+
+	// LoginFlagCookieName 供前端路由守卫判断「要不要去拉用户信息」的**非敏感**标记。
+	//
+	// 为什么必须额外下发它：access / refresh token 都是 HttpOnly，JS 读不到 ——
+	// 于是前端失去了「本地有没有凭据」这个判断依据。若不做补偿，
+	// 路由守卫会退化成「永远判定未登录 → 死循环跳 /login」
+	// （docs/plan-p3-optional.md 的 B.2 第 ① 条讲的就是这件事）。
+	//
+	// 为什么它可以**不是** HttpOnly：它不含任何凭据，读走或伪造都没有价值 ——
+	// 伪造它最多让前端多发一次 /auth/userInfo，随后 401 回来清会话。
+	// 鉴权永远只看真正的 token（这一点前端注释里也重复了一遍，因为它是
+	// 最容易被后人「顺手加强」成鉴权依据的地方）。
+	LoginFlagCookieName = "logged_in"
+
+	// LoginFlagCookieValue 标记的取值。
+	//
+	// 前端用**严格相等**比较（`Cookies.get(...) === '1'`），不是 truthy ——
+	// 所以这里不能改成 `true` / `yes` 之类，改了两端会静默不一致，
+	// 现象是「登录成功但刷新页面就回到登录页」。
+	LoginFlagCookieValue = "1"
+
+	// LoginFlagCookiePath 与 access token 一致（全站可见）。
+	//
+	// 守卫在任意业务页面上都会读它，收窄 Path 会让部分页面读不到 ——
+	// 那会表现成「在这个页面刷新会掉登录，在另一个页面不会」，极难定位。
+	LoginFlagCookiePath = "/"
 )
 
-// Set 按当前配置下发 access / refresh cookie。
+// Set 按当前配置下发 access / refresh cookie，以及供前端守卫使用的登录态标记。
 //
 // 当 security.token_transport = header 时**什么都不做** —— 那是回滚开关，
 // 回到「只认 Authorization 头」的改造前行为，连 cookie 都不该发出去。
@@ -56,10 +82,24 @@ func Set(c *gin.Context, accessToken, refreshToken string) {
 		return
 	}
 	if accessToken != "" {
-		writeCookie(c, AccessCookieName, accessToken, AccessCookiePath, config.Cfg.JWT.AccessExpire)
+		writeCookie(c, AccessCookieName, accessToken, AccessCookiePath, config.Cfg.JWT.AccessExpire, true)
 	}
 	if refreshToken != "" {
-		writeCookie(c, RefreshCookieName, refreshToken, RefreshCookiePath, config.Cfg.JWT.RefreshExpire)
+		writeCookie(c, RefreshCookieName, refreshToken, RefreshCookiePath, config.Cfg.JWT.RefreshExpire, true)
+
+		// 登录态标记的有效期必须跟着 **refresh** token 走，不能跟着 access token。
+		//
+		// 理由是它与 B4 自动续期的配合：access token 只有 2 小时
+		// （jwt.access_expire: 7200），若标记也 2 小时就失效，用户刷新页面时
+		// 路由守卫会在**发出任何请求之前**就判定「未登录」并跳登录页 ——
+		// B4 那套「401 → 续期 → 重放」根本没有机会执行。
+		// 跟着 refresh token（7 天）走，守卫才会放行到 /auth/userInfo，
+		// 由那里的 401 触发续期，用户全程无感。
+		//
+		// 代价是「标记还在但 access token 已过期」成为常态 —— 这是设计允许的：
+		// 标记本来就不代表会话有效（见 LoginFlagCookieName 的注释）。
+		writeCookie(c, LoginFlagCookieName, LoginFlagCookieValue,
+			LoginFlagCookiePath, config.Cfg.JWT.RefreshExpire, false)
 	}
 }
 
@@ -67,9 +107,16 @@ func Set(c *gin.Context, accessToken, refreshToken string) {
 //
 // MaxAge 用 -1（等价于 Max-Age=0 + 立即过期）。Path 必须与下发时**完全一致**，
 // 否则浏览器会认为这是另一个 cookie，旧的仍然留着。
+//
+// 这里**不判断** IssuesCookies()：header 模式下也照发清除指令。
+// 回滚到 header 时，浏览器里可能残留着上一版发出的 cookie，
+// 让登出把它们一并清掉比留着更安全（清一个不存在的 cookie 无副作用）。
 func Clear(c *gin.Context) {
-	clearCookie(c, AccessCookieName, AccessCookiePath)
-	clearCookie(c, RefreshCookieName, RefreshCookiePath)
+	clearCookie(c, AccessCookieName, AccessCookiePath, true)
+	clearCookie(c, RefreshCookieName, RefreshCookiePath, true)
+	// 登录态标记也必须清 —— 漏了它，用户登出后刷新页面会被标记骗回
+	// 「已登录」分支，白拉一次 userInfo 再被踢一次，且中间会闪一下空白布局。
+	clearCookie(c, LoginFlagCookieName, LoginFlagCookiePath, false)
 }
 
 // RefreshFromRequest 取出本次请求携带的 refresh token。
@@ -91,7 +138,12 @@ func RefreshFromRequest(c *gin.Context, fromBody string) string {
 // MaxAge 一律从 jwt.access_expire / jwt.refresh_expire 换算，**不写死**：
 // 写死会让「改了 token 有效期但 cookie 还是老时长」这种不一致只能靠用户
 // 莫名其妙被登出/拿到过期 cookie 才发现。
-func writeCookie(c *gin.Context, name, value, path string, maxAgeSeconds int64) {
+//
+// httpOnly 由调用方决定，且**只有登录态标记会传 false**：
+// token 传 true（这是本项改造的唯一真正收益），标记传 false（JS 要读它）。
+// 用显式参数而不是「按 cookie 名判断」：后者会在改名时静默失效，
+// 把 token 变成 JS 可读 —— 而这种退化在功能上完全看不出来。
+func writeCookie(c *gin.Context, name, value, path string, maxAgeSeconds int64, httpOnly bool) {
 	sec := config.Cfg.Security
 	c.SetSameSite(sec.SameSite())
 	c.SetCookie(
@@ -101,13 +153,17 @@ func writeCookie(c *gin.Context, name, value, path string, maxAgeSeconds int64) 
 		path,
 		"", // Domain 留空 = 仅当前主机，不扩大到子域
 		sec.CookieSecureEnabled(),
-		true, // HttpOnly：本项改造的**唯一真正收益**，token 从此不在 JS 可达范围内
+		httpOnly,
 	)
 }
 
 // clearCookie 下发一个立即过期的同名同 Path cookie。
-func clearCookie(c *gin.Context, name, path string) {
+//
+// httpOnly 需要与下发时一致才能体现「这是同一个 cookie 的清除指令」，
+// 虽然浏览器匹配 cookie 时并不比较该属性，但保持一致能让读代码的人
+// 一眼看出这两处指的是同一个东西（历史上就出过「用别的 Path 去清」的 bug）。
+func clearCookie(c *gin.Context, name, path string, httpOnly bool) {
 	sec := config.Cfg.Security
 	c.SetSameSite(sec.SameSite())
-	c.SetCookie(name, "", -1, path, "", sec.CookieSecureEnabled(), true)
+	c.SetCookie(name, "", -1, path, "", sec.CookieSecureEnabled(), httpOnly)
 }

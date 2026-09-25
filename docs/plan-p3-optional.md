@@ -21,7 +21,7 @@
 | A4 wangEditor 异步 | ✅ 已完成 | `views/settings/agreement.vue` 改 `defineAsyncComponent(() => import('@/components/WangEditor/index.vue'))`；`agreement` chunk **820.91 kB → 8.41 kB**，wangEditor 被拆到独立的 `vendor-wangeditor`。实机验证：点开「新增协议」弹窗，工具栏 40 个按钮 + 编辑区 + `contenteditable` + 占位符全部正常，控制台无 error |
 | A5 产物体积门禁 | ✅ 已完成 | 新增 `web/scripts/check-bundle.mjs`（读 `dist/index.html` 解析首屏引用 + `gzipSync` 算体积 + 按 `-<hash>.js` 剥名匹配例外表）；接进 `npm run build`（`vue-tsc && vite build && node scripts/check-bundle.mjs`）与 CI 的 `构建 + 产物体积门禁` 步骤。实测首屏 JS gzip **137.9 kB** / CSS **13.1 kB**，通过 |
 | B1 后端双读 cookie | ✅ 已完成（**有一处偏离**） | 新增 `security.token_transport`（header/both/cookie，默认 both）+ `cookie_secure` + `cookie_same_site`；`middleware.Auth` 抽出 `extractToken`（头优先、其次 cookie）；新增 `internal/authcookie` 包负责下发/清除；登录/刷新写 cookie、登出清 cookie 并**吊销 refresh token**；`deploy/config.docker.yaml` 补上**此前完全缺失的 security 段**；启动日志打印 cookie 策略。前端一行未改。**`refresh_token` 的 Path 从计划的 `/api/v1/auth/refresh` 放宽到 `/api/v1/auth`**，理由见 B.3 的注 |
-| B2 前端 cookie-only | ⏳ 待做 | |
+| B2 前端 cookie-only | ✅ 已完成（**有 3 处计划外改动**） | 删 `getToken/setToken/…` 改为非敏感 `logged_in` 标记；守卫改同步判定；`api/index.ts` 加 `withCredentials`、去掉 Authorization 注入、续期不再传 body；`Upload` 组件去掉手写的 `Authorization` 头。新增 `utils/auth.spec.ts`（7）+ `router/index.spec.ts`（9）；后端补 `/auth/refresh` 的 cookie 取值（**计划外**）。实机：B2 冒烟 **27/27**、浏览器端 **13/13**（含「刷新后仍是登录态」）。详见下方「B2 的偏离」 |
 | B3 CSRF | ⏳ 待做 | |
 
 ---
@@ -310,6 +310,63 @@ Lax 会让 cookie 不被携带，必须改 `SameSite=None; Secure` ——
 - `store/modules/user.ts`：`state.token` 不再从 cookie 读；`clearSession()` 去掉 `removeToken()`
 - 验收：登录 → **刷新页面仍是登录态**；DevTools 里 `document.cookie` **看不到任何 token**；
   登出后刷新回到登录页
+
+> **实施时的偏离（2026-09-25 补记）**
+>
+> **① 计划之外必须补的后端改动：`/auth/refresh` 要能「body 为空、凭据在 cookie」。**
+> 计划把 B2 写成纯前端阶段（后端 B1 已改完），但漏了一点：`RefreshTokenRequest.RefreshToken`
+> 带 `binding:"required"`，而 B2 之后前端**读不到** refresh token（HttpOnly），
+> 请求体必然是空的 —— 不改后端的话，浏览器端**所有**自动续期都会在参数绑定这一步 400，
+> 现象是「token 一过期就被踢回登录页」，与 B4 修过的缺陷一模一样，极难怀疑到参数绑定。
+> 因此补了三处：`dto.RefreshTokenRequest` 去掉 `required`；Controller 用
+> `errors.Is(err, io.EOF)` 把「空 body」与「坏 JSON」分开（前者继续走 cookie 取值，后者仍 400）；
+> 取值改走 `authcookie.RefreshFromRequest`（body 优先、其次 cookie），与 Logout 同一套逻辑。
+> 用例：`TestAuthControllerRefreshAcceptsCookieCredential`（4 组场景，含坏 JSON 与无凭据）。
+>
+> **② `logged_in` 标记的有效期跟着 refresh token（7 天），不跟 access token（2 小时）。**
+> 跟 access token 走的话，2 小时后标记先失效，用户刷新页面时会被守卫在
+> **发出任何请求之前**就判定未登录并跳登录页 —— B4 的「401 → 续期 → 重放」根本没机会执行。
+> 跟着 refresh token 走，守卫才会放行到 `/auth/userInfo`，由那里的 401 触发续期。
+> 代价是「标记还在但 access token 已过期」成为常态，这是设计允许的：
+> 标记本来就不代表会话有效（`LoginFlagCookieName` 与前端 `utils/auth.ts` 都写明了这点）。
+>
+> **③ 回滚粒度变了：`token_transport: header` 不再是 B2 之后的一键回滚开关。**
+> 计划里写「注入 `Authorization` 头的逻辑……保留它是回滚开关」，但 B2 删掉 `getToken()`
+> 之后前端**没有数据源**可注入。把后端改回 `header` 会让两边都拿不到凭据
+> （后端不发 cookie、前端不注入头），结果是全站登录不上。
+> 所以 B2 之后回滚的粒度是「前后端一起回退到 B2 之前的提交」。
+> 这一点写进了 `api/index.ts` 的注释 —— 否则后人会以为改个配置就能回滚。
+>
+> **另外两处顺带的决定：**
+> - `api/auth.ts` 的 `refreshToken()` 封装**删掉**了（B4 之后自动续期直接调 `/auth/refresh`，
+>   那个封装需要调用方自己传 token，而 B2 之后前端根本拿不到）。留着会重演 B4 修过的
+>   「定义了但没人用」的坑。
+> - `components/Upload/index.vue` 去掉手动塞的 `Authorization: Bearer ${getToken()}`
+>   （JS 读不到 HttpOnly cookie，只会拼出 `Bearer undefined`，后端当成「Token格式错误」
+>   返回 401 —— 比不传更糟，因为 `Authorization` 头在 both 模式下是**优先**的）；
+>   el-upload 的 XHR 在同源下会自动带 cookie。
+>
+> **测试基础设施的两处补强：**
+> - vitest 引入 `jsdom`，用**文件级** `// @vitest-environment jsdom` 覆盖（默认仍是 node）。
+>   新增 `utils/auth.spec.ts`（7 用例）与 `router/index.spec.ts`（9 用例）。
+>   守卫用例的 `@/utils/auth` mock **只导出 `isLoggedIn`** —— 实现若回退去调 `getToken()`，
+>   会直接抛 `is not a function`，这比「断言调用了新接口」更能防回退
+>   （变异验证里这一处让 8 个用例同时转红）。
+> - 本地联调用的 `runtime/smoke/serve.mjs` 修了一个 bug：它用 `headers.forEach` 转发
+>   `Set-Cookie`，而 undici 会把**多个 Set-Cookie 合并成逗号分隔的一个**，浏览器无法可靠拆回，
+>   导致只有部分 cookie 被保存（现象是「登录返回 200 但下一个请求 401」）。
+>   改用 `getSetCookie()` 逐个转发。**这是本地脚本的问题，不是产品代码的问题** ——
+>   直连 8080 一直是 3 个 Set-Cookie，只有经这个自建代理才变成 1 个。
+>
+> **实机验证的另外两个坑（都记在脚本注释里，避免下次重踩）：**
+> - 浏览器端验证必须用 `http://localhost:3000` 而不是 `127.0.0.1:3000`：
+>   `cors.allow_origins` 里写的是前者，Origin 对不上时浏览器发的 POST
+>   （`Content-Type: application/json` 属非简单请求）会先发 OPTIONS 预检，
+>   后端 CORS 直接回 **403 且 body 为空** —— 看起来像「登录静默失败」。
+>   GET 请求不受影响（简单请求不发预检），所以问题只在登录/登出这类 POST 上暴露。
+> - 「导航后是否仍在目标页」的判据**不能只看 `location.pathname`**：
+>   导航瞬间 pathname 就已经是目标值了，守卫的重定向还没发生 ——
+>   第一版据此报「停在 /dashboard」，而实际上登录是 403 失败的。
 
 **B3 · CSRF 防护**
 

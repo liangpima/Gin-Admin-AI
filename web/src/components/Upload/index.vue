@@ -2,7 +2,6 @@
   <el-upload
     ref="uploadRef"
     :action="action"
-    :headers="uploadHeaders"
     :multiple="multiple"
     :limit="limit"
     :accept="accept"
@@ -22,9 +21,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { ElMessage, type UploadFile, type UploadUserFile } from 'element-plus'
-import { getToken } from '@/utils/auth'
 
 const props = withDefaults(
   defineProps<{
@@ -56,9 +54,10 @@ const emit = defineEmits<{
 
 const uploadRef = ref()
 
-const uploadHeaders = computed(() => ({
-  Authorization: `Bearer ${getToken()}`,
-}))
+// 这里原本会手动塞一个 `Authorization: Bearer <token>` 头（P3-B2 删除）。
+// 现在凭据是 HttpOnly cookie，el-upload 内部的 XHR 在同源下会自动携带它 ——
+// 手动传反而传不出东西（JS 读不到 HttpOnly cookie，只会拼出 "Bearer undefined"，
+// 那会被后端当成「头格式错误」而 401，比不传更糟）。
 
 function handleBeforeUpload(file: File) {
   const isLt = file.size / 1024 / 1024 < props.maxSize

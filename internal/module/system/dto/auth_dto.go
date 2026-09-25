@@ -20,7 +20,18 @@ type LoginContext struct {
 }
 
 type RefreshTokenRequest struct {
-	RefreshToken string `json:"refreshToken" binding:"required"`
+	// RefreshToken 待刷新的 refresh token。
+	//
+	// **刻意不是 `binding:"required"`**（P3-B2 起）：浏览器路径下它由 HttpOnly
+	// cookie 携带，而前端 JS 读不到 HttpOnly cookie，也就**不可能**把它放进请求体 ——
+	// 请求体是空的。真正「有没有凭据」的判定在 Controller 里用
+	// authcookie.RefreshFromRequest 统一做（请求体优先、其次 cookie，
+	// 两者都取不到才拒绝）。
+	//
+	// 保留该字段是为了不破坏 Swagger / curl / 第三方这类显式传参的调用方。
+	// 若哪天有人"顺手"把 required 加回来，现象是「浏览器端 token 一过期就被
+	// 踢到登录页」—— 与 B4 要修的那个缺陷一模一样，极难怀疑到参数绑定这一层。
+	RefreshToken string `json:"refreshToken"`
 }
 
 type LogoutRequest struct {
