@@ -16,7 +16,7 @@
 | B4 自动续期 | ✅ 已完成 | 拆出来先做（修的是正在发生的缺陷）。`web/src/api/index.ts` 实现 401 → 续期 → 重放；新增 `web/src/api/refresh.spec.ts`（17 用例）；变异验证 5/5 转红。提交 `765a90f` |
 | A1 图标白名单 | ✅ 已完成 | 主包 1267.9 → **1133.1 kB**（gzip 412.6 → 367.4）。新增 `web/src/utils/icons.ts` + `icons.spec.ts`（7 用例）；变异验证 5/5 转红；CDP 实机确认侧边栏 21/21 菜单图标都在。提交 `3067556` |
 | — 前置修复：404 兜底回归 | ✅ 已完成 | A2 建视觉基线时发现**所有动态路由都渲染 404**（P3-2 的 catch-all 用了 `redirect`，它在 `beforeEach` 之前被解析）。兜底改 `component` + 守卫改按路径重导航；`static.spec.ts` 6 → 8 用例。详见 `docs/review-fix-plan.md` P3-2 段 |
-| A2 去全量 EP 注册 | 🔄 进行中 | 基线已记录：`index-*.js` **1133.16 kB**（gzip 377.16）、`agreement-*.js` 820.66 kB、EP 全量 CSS 373 kB |
+| A2 去全量 EP 注册 | ✅ 已完成 | 首屏 **1506 kB → 473.6 kB**（JS 1133.16 → 385.08 kB、CSS 373 → 88.49 kB），约 **−69%**；dist 3.0M → 2.3M。`main.ts` 去 `app.use(ElementPlus)` + 全量 CSS；`App.vue` 补 `<el-config-provider>` 顶 locale/size；`role/index.vue` 的 `ElTree` 改 type-only import（显式 import 会让解析器跳过 `<el-tree>`，连带丢样式）。验证：22 页像素级对比无回归、48 项样式完整性校验、21 页控制台无解析失败、`v-loading` 实测生效 |
 | A3 manualChunks | ⏳ 待做 | |
 | A4 wangEditor 异步 | ⏳ 待做 | |
 | A5 产物体积门禁 | ⏳ 待做 | |

@@ -129,7 +129,8 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { ElMessage, ElTree } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import type { TreeInstance } from 'element-plus'
 import {
   getRoleList,
   createRole,
@@ -160,8 +161,13 @@ const permLoading = ref(false)
 const menuTree = ref<MenuItem[]>([])
 const checkedMenuIds = ref<number[]>([])
 const currentRoleId = ref(0)
-// el-tree 实例类型：直接用 InstanceType 取，避免手写一份不完整的接口
-const menuTreeRef = ref<InstanceType<typeof ElTree>>()
+// el-tree 实例类型：用 Element Plus 导出的 TreeInstance，避免手写一份不完整的接口。
+//
+// ⚠️ 这里必须是 **type-only** import。写成 `import { ElTree } from 'element-plus'`
+// 会让 unplugin-vue-components 认为该组件已在本文件引入，从而跳过对模板里
+// <el-tree> 的解析 —— 连带丢掉 tree 的样式（症状是权限树没有连接线、勾选框错位，
+// 而且**不报错**）。P3-A2 去掉全量 CSS 后才暴露出来。
+const menuTreeRef = ref<TreeInstance>()
 
 const {
   loading,
