@@ -571,8 +571,17 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   不是错，但决定「删还是接」时要知道这部分工作量会随之作废。
 - `docs/docs.go`（2413 行生成物）已入库、未 gitignore，CI 也无 `swag` 校验
   → 加 `.gitignore` + CI 里 `swag init --diff` 校验一致性。
-  **2026-09-25 复核：仍未做**（`git check-ignore docs/docs.go` 无输出，
-  `ci.yml` 里只有 vet / 覆盖率 / 构建 / lint，没有 swag 步骤）。
+  **2026-09-25 复核：仍未做，但「加 .gitignore」这一步不能照做** ——
+  `cmd/server/main.go:14` 有 `_ "go-admin/docs"`（swagger 靠这个空白导入注册），
+  `.dockerignore:51` 也明确写着「**不能排除 docs/**」。
+  一旦把 `docs.go` 从仓库移除，`go build ./cmd/server` 与 Docker 构建会直接失败。
+  可行的两条路（择一）：
+  ① **保留入库 + CI 查漂移**（改动最小）：CI 装 `swag`，跑
+     `swag init -g cmd/server/main.go -o docs` 后 `git diff --exit-code docs/`，
+     注释与接口不一致就红；
+  ② 不入库 + 在 Dockerfile 的 builder 阶段与 CI 构建前先跑 `swag init`
+     （要多维护一条生成链，且本地不跑 swag 就无法编译）。
+  倾向 ①。
 - ~~`views/system/post/index.vue:105` handleDelete 无 try/catch~~
   ~~11 处空 catch 吞错~~
   —— **2026-09-24 复核后已失效，两条都不用做了**：post 页已改走 `useCrud`
