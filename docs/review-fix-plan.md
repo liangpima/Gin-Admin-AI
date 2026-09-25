@@ -492,6 +492,14 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
 - 动作：以 `views/system` 5 页 + `member` + `payment` 为第一批，补
   表格→卡片式折叠（<768px）、筛选区抽屉化、`MobileAction` 推广到所有带操作列的表格；
   每页在 375px 宽实测（用 CDP Emulation 方式，见工作日志）。
+- **2026-09-25 复核（仍未开工，补上实测口径）**：
+  · `views/` 共 **23** 个 `.vue`，其中 **14** 个含 `el-table` —— 这就是「表格→卡片」
+    改造的实际规模；
+  · 全仓 4 条 `@media` **全部**在 `assets/styles/responsive.scss`（全局 mixin），
+    即**没有任何视图页面有自己的断点**；
+  · `useResponsive` 只被 4 处引用，全在布局壳内
+    （`layout/index.vue`、`Navbar`、`Sidebar`、`MobileAction`）；
+  · `MobileAction` 只 1 处使用（`views/system/user/index.vue`）。
 
 ### P3-2 路由与鉴权收尾（前端）
 - ✅ **`pathMatch(.*)*` 404 catch-all 已补**（`web/src/router/routes/static.ts`）。
@@ -551,8 +559,20 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   实测 `<Tag>` 形式引用数均为 0 → 删除或接入使用。
   `MobileAction` 只 1 处用（user 页）→ 推广到所有带操作列的表格，或删；
   `DictTag` 3 处用，保留。
+  **2026-09-25 复核（结论不变，补上实测数据）**：五个组件仍是 0 引用，
+  共 **380 行**（SvgIcon 61 / TableSkeleton 22 / PageHeader 55 / RightPanel 129 /
+  Upload 113）；同批核实的其余组件都在用 —— `FormDialog` 11 处、`Pagination` 12 处、
+  `DictTag` 3 处、`ImagePicker` 3 处、`ClickCaptcha` 1 处、`WangEditor` 1 处、
+  `MobileAction` 1 处。
+  ⚠️ **`Upload` 的功能已被 `ImagePicker` 覆盖**（会员头像、等级图标、
+  wangEditor 插图都走 ImagePicker），倾向**删除**而不是接入。
+  ⚠️ 另需注意：B2 与 B3 两次改造都顺手改了 `Upload` 组件
+  （去掉手写 `Authorization` 头、补 `X-CSRF-Token`），**这些改动全部落在死代码上** ——
+  不是错，但决定「删还是接」时要知道这部分工作量会随之作废。
 - `docs/docs.go`（2413 行生成物）已入库、未 gitignore，CI 也无 `swag` 校验
   → 加 `.gitignore` + CI 里 `swag init --diff` 校验一致性。
+  **2026-09-25 复核：仍未做**（`git check-ignore docs/docs.go` 无输出，
+  `ci.yml` 里只有 vet / 覆盖率 / 构建 / lint，没有 swag 步骤）。
 - ~~`views/system/post/index.vue:105` handleDelete 无 try/catch~~
   ~~11 处空 catch 吞错~~
   —— **2026-09-24 复核后已失效，两条都不用做了**：post 页已改走 `useCrud`
