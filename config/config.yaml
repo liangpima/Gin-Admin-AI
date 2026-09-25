@@ -81,3 +81,27 @@ security:
   #   false       = 放行（可用性优先，但限频会静默失效，仅日志留痕）。
   # 省略该项即为 true。
   login_fail_closed: true
+
+  # token 的传输方式（P3-B1 引入）：
+  #   header = 只认 Authorization 头，不下发 cookie（改造前的行为，也是回滚开关）
+  #   both   = 头优先、其次 cookie（**默认**；省略该项即为此值）
+  #   cookie = 只认 cookie（Swagger / curl 等不带 cookie 的调用方会失效）
+  #
+  # 取值写错会**拒绝启动**，不会静默回退 —— 静默回退会让
+  # 「配了 cookie 却仍在读头」这类问题查很久。
+  token_transport: both
+
+  # cookie 是否带 Secure 属性（HTTPS 部署必须为 true）。
+  #
+  # 默认 false：本地开发走 http://localhost，带上 Secure 浏览器就不会保存 cookie，
+  # 表现成「登录接口成功但下一次请求就是未登录」。
+  # 上 HTTPS 后务必改成 true —— 启动日志会打印当前取值并附风险提示。
+  cookie_secure: false
+
+  # cookie 的 SameSite 属性，同时是 CSRF 的**主防线**：
+  #   lax（默认）= 同源部署够用且最安全；跨站请求不带 cookie
+  #   strict     = 最严，但会让「从外部链接点进来」丢掉登录态（本项目不推荐）
+  #   none       = 跨站会携带 cookie，**必须**同时 cookie_secure: true，
+  #                否则浏览器直接丢弃 cookie（配置校验会拒绝启动）
+  # 只有前后端分域名部署时才需要 none，那时必须确认 B3 的 double-submit 已启用。
+  cookie_same_site: lax

@@ -1,7 +1,7 @@
 package controller
 
 import (
-
+	"go-admin/internal/authcookie"
 	"go-admin/internal/common"
 	"go-admin/internal/module/system/dto"
 	"go-admin/internal/module/system/service"
@@ -45,6 +45,13 @@ func (ctl *AuthController) Login(c *gin.Context) {
 		common.FailWith(c, err)
 		return
 	}
+
+	// 登录成功顺手把两个 token 写进 HttpOnly cookie（B1：前端一行不改，
+	// 两条路径并存，靠 security.token_transport 决定发不发）。
+	// 响应体里照旧返回 token —— Swagger / curl / 第三方调用方不会自动带 cookie，
+	// 那条路径不能断。
+	authcookie.Set(c, resp.AccessToken, resp.RefreshToken)
+
 	common.Success(c, resp)
 }
 
@@ -73,6 +80,11 @@ func (ctl *AuthController) RefreshToken(c *gin.Context) {
 		return
 	}
 
+	// 刷新时后端是**轮换式**的（旧 refresh token 已从 Redis 删掉），
+	// 所以 cookie 必须一起换新 —— 只更新响应体的话，浏览器手里还是旧的那个，
+	// 下次续期就会拿着已被消费的 token 换来 401。
+	authcookie.Set(c, resp.AccessToken, resp.RefreshToken)
+
 	common.Success(c, resp)
 }
 
@@ -87,18 +99,26 @@ func (ctl *AuthController) Logout(c *gin.Context) {
 	var req dto.LogoutRequest
 	_ = c.ShouldBindJSON(&req)
 
-	// 只负责取 header 与 body；拉黑与吊销都在 Service。
-	// 注：历史上这里曾把 access token 当 refresh token 去删（键名对不上），
-	// 导致登出后 refresh token 仍可换发新 access token —— 该修复在 Service 内保留。
-	accessToken := ""
-	if authHeader := c.GetHeader("Authorization"); len(authHeader) > 7 {
-		accessToken = authHeader[7:]
-	}
+	// access token 由 Auth 中间件取好放进上下文 —— 不能再切 Authorization 头，
+	// 因为 cookie 认证的请求根本没有那个头（那样会变成「拉黑空串」，
+	// 看着登出成功，实际什么都没吊销）。
+	accessToken, _ := c.Get(common.ContextKeyAccessToken)
+	accessTokenStr, _ := accessToken.(string)
 
-	if err := ctl.authService.LogoutByToken(accessToken, req.RefreshToken); err != nil {
+	// refresh token 优先用请求体（Swagger / 脚本显式传参），其次用 cookie（浏览器）。
+	// 必须吊销它 —— 只拉黑 access token 的话，持有 refresh token 的人
+	// 仍可换发新 access token，等于没登出。
+	refreshToken := authcookie.RefreshFromRequest(c, req.RefreshToken)
+
+	if err := ctl.authService.LogoutByToken(accessTokenStr, refreshToken); err != nil {
 		common.FailWith(c, err)
 		return
 	}
+
+	// 服务端吊销完再清 cookie：反过来的话，中途失败会让浏览器以为已登出、
+	// 而服务端的 refresh token 还活着。
+	authcookie.Clear(c)
+
 	common.Success(c, nil)
 }
 

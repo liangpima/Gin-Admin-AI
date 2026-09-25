@@ -20,7 +20,7 @@
 | A3 manualChunks | ✅ 已完成（**有偏离**） | `vite.config.ts` 加 `build.rollupOptions.output.manualChunks`：`vendor-vue` 110.8 kB、`vendor-utils` 50.7 kB、`vendor-wangeditor` 792.9 kB（固定名，供 A5 门禁按名识别）。**计划里的 `vendor-element` 刻意没做** —— 见下方「A3 的偏离」 |
 | A4 wangEditor 异步 | ✅ 已完成 | `views/settings/agreement.vue` 改 `defineAsyncComponent(() => import('@/components/WangEditor/index.vue'))`；`agreement` chunk **820.91 kB → 8.41 kB**，wangEditor 被拆到独立的 `vendor-wangeditor`。实机验证：点开「新增协议」弹窗，工具栏 40 个按钮 + 编辑区 + `contenteditable` + 占位符全部正常，控制台无 error |
 | A5 产物体积门禁 | ✅ 已完成 | 新增 `web/scripts/check-bundle.mjs`（读 `dist/index.html` 解析首屏引用 + `gzipSync` 算体积 + 按 `-<hash>.js` 剥名匹配例外表）；接进 `npm run build`（`vue-tsc && vite build && node scripts/check-bundle.mjs`）与 CI 的 `构建 + 产物体积门禁` 步骤。实测首屏 JS gzip **137.9 kB** / CSS **13.1 kB**，通过 |
-| B1 后端双读 cookie | ⏳ 待做 | |
+| B1 后端双读 cookie | ✅ 已完成（**有一处偏离**） | 新增 `security.token_transport`（header/both/cookie，默认 both）+ `cookie_secure` + `cookie_same_site`；`middleware.Auth` 抽出 `extractToken`（头优先、其次 cookie）；新增 `internal/authcookie` 包负责下发/清除；登录/刷新写 cookie、登出清 cookie 并**吊销 refresh token**；`deploy/config.docker.yaml` 补上**此前完全缺失的 security 段**；启动日志打印 cookie 策略。前端一行未改。**`refresh_token` 的 Path 从计划的 `/api/v1/auth/refresh` 放宽到 `/api/v1/auth`**，理由见 B.3 的注 |
 | B2 前端 cookie-only | ⏳ 待做 | |
 | B3 CSRF | ⏳ 待做 | |
 
@@ -262,16 +262,35 @@ Lax 会让 cookie 不被携带，必须改 `SameSite=None; Secure` ——
   **`Authorization` 头优先，其次 cookie**（`access_token`）。返回 source 便于日志区分
 - 登录 / 刷新成功时 `Set-Cookie`：
   - `access_token`：`HttpOnly; SameSite=Lax; Path=/`
-  - `refresh_token`：`HttpOnly; SameSite=Lax; Path=/api/v1/auth/refresh`
-    （**收窄 Path**：refresh token 只在这一个端点上需要，收窄能显著减少暴露面）
+  - `refresh_token`：`HttpOnly; SameSite=Lax; Path=/api/v1/auth`
+    （**收窄 Path**，但比原计划放宽了一级，见下面的注）
   - `Secure` 由配置决定（HTTPS 部署必须开）；`MaxAge` **从 `jwt.access_expire` /
     `refresh_expire` 读，不写死**
-- 登出时 `Set-Cookie` 清空（`MaxAge=-1`）
+- 登出时 `Set-Cookie` 清空（`MaxAge=-1`），并且**先吊销 refresh token 再清 cookie**
 - **`deploy/config.docker.yaml` 必须同步改** —— 两份模板漏改一处不会报错，
   只会静默行为不一致；`config.TestConfigTemplatesParse` 会**断言取值**，用来兜住这个
 - 验收：`curl` 直接打 `/auth/login` 能看到 `Set-Cookie`；带 cookie 打 `/auth/userInfo` 通过；
   带 `Authorization` 头的老路径照常工作
 - **本阶段前端一行不改，风险为零，可以先上生产**
+
+> **实施时的偏离（2026-09-25 补记）**：`refresh_token` 的 Path 原计划是
+> `/api/v1/auth/refresh`（更窄），实施时改为 **`/api/v1/auth`**。
+> 原因：cookie 的 Path 决定浏览器**会不会把它发到某个路径**，写成
+> `/api/v1/auth/refresh` 就永远发不到 `/auth/logout`，服务端拿不到它去吊销 ——
+> 结果是「登出只拉黑了 access token，手里握着 refresh token 的人仍可换发新的
+> access token」，等于没登出。而这一点在 `auth_service.LogoutByToken` 的注释里
+> **已经踩过一次**（历史上正是把 access token 当 refresh token 去删）。
+> `/api/v1/auth` 已排除全部业务接口（`/system`、`/member`、`/payment`…），
+> 相对 `Path=/` 仍是显著收窄。`internal/authcookie` 里有一条用例专门钉住
+> 「必须覆盖 /auth/logout、且不得覆盖业务接口」。
+>
+> **另一处实施决定**：`cookie_secure` 的**默认值是 `false`**，这与本项目
+> 「默认值即安全值」的惯例相反，是刻意的 —— 自带编排是纯 HTTP
+> （`deploy/nginx/default.conf` 只监听 80），默认 `true` 会让浏览器直接丢弃
+> cookie、登录态完全建立不起来，属于「安全默认值把默认部署打死」。
+> 因此改为：两份模板**显式写出**该值（`TestConfigTemplatesParse` 断言它必须非 nil），
+> 且启动日志打印当前取值并附风险提示。`cookie_same_site=none` 但 `secure=false`
+> 会被 `Validate` **拒绝启动**（浏览器一定丢弃这种组合，属于硬约束）。
 
 **B2 · 前端切换 cookie-only + 重建登录态判定**
 
@@ -327,6 +346,38 @@ Lax 会让 cookie 不被携带，必须改 `SameSite=None; Secure` ——
   也因 `SameSite=Lax` 不带 cookie
 - `token_transport` 三种取值都有用例；两份配置模板断言取值
 - 全量 `make check` 全绿
+
+#### B1 验证记录（2026-09-25 实测）
+
+| 手法 | 位置 | 结果 |
+|---|---|---|
+| 单元：传输方式归一化 / 三种取值的「接受头 / 接受 cookie」组合 / Secure 与 SameSite 默认值 / 非法取值与 `same_site=none` 的启动期拒绝 / 启动日志摘要内容 | `config/config_test.go` | 全绿 |
+| 单元：cookie 属性（HttpOnly、Path、MaxAge 来自 jwt 配置、SameSite、Secure）、header 模式下**一个 cookie 都不发**、登出清空的 Path 与下发一致、refresh token 取值优先级 | `internal/authcookie/cookie_test.go` | 全绿 |
+| 单元：`extractToken` 的 17 组取值（头优先 / header 模式不读 cookie / 坏头不回退 / `Bearer ` 空值 / 大小写） | `internal/middleware/auth_token_test.go` | 全绿 |
+| **端到端中间件**：真 `Auth()` + 真 Redis，7 组「传输方式 × 有头/有 cookie」全部断言到「处理函数是否真的被执行」 | `internal/middleware/auth_cookie_integration_test.go` | 全绿 |
+| Controller 接线：登出是否真的下发清空 cookie（读真实响应头） | `user_auth_controller_test.go` | 全绿 |
+| **实机冒烟**（`runtime/smoke/cookie_smoke.py`，打真服务） | — | **18/18 通过** |
+
+实机冒烟覆盖的关键几条（都是单测覆盖不到「浏览器真实收到什么」的部分）：
+
+- 登录响应里 `Set-Cookie: access_token=…; Path=/; Max-Age=7200; HttpOnly; SameSite=Lax`
+  与 `refresh_token=…; Path=/api/v1/auth; Max-Age=604800; HttpOnly; SameSite=Lax`
+- 只带 cookie 打 `/auth/userInfo` 通过；不带凭据 401；带 `Authorization` 头照常通过
+- 登出下发两个 `Max-Age=0` 的 cookie，**且此后原 refresh token 换不出新 token**
+  （返回 401「refresh token已过期」）—— 这条是「登出是否真的登出」的唯一判据
+
+**变异验证（3/3 转红，均已恢复）**：
+
+1. `extractToken` 去掉 cookie 分支 → `TestExtractToken` 与端到端用例同时转红
+2. `writeCookie` 的 HttpOnly 由 `true` 改 `false` → cookie 属性用例转红
+   （这条退化在功能上完全看不出来：登录照常能用）
+3. `Transport()` 的默认值由 both 改成 header → 归一化用例转红
+
+**顺带修掉的一个既有缺口**：`deploy/config.docker.yaml` **完全没有 `security` 段**
+（`config/config.yaml` 有）。mapstructure 遇到缺失的段会静默留零值，
+表现是「本地开发是对的、容器里行为不一样」且没有任何报错。
+现已补齐，并让 `TestConfigTemplatesParse` 断言 `token_transport` /
+`cookie_same_site` 的取值、以及 `cookie_secure` **必须显式配置**（不得依赖代码默认值）。
 
 ### B.5 风险与回滚
 

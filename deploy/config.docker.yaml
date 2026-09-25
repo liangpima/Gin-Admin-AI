@@ -105,3 +105,26 @@ cors:
     - "Content-Length"
     - "Content-Disposition"
   allow_credentials: true
+
+security:
+  # ⚠️ 本段此前**完全缺失**（2026-09-25 补）：config/config.yaml 有、这里没有，
+  #    而 mapstructure 遇到缺失的段会静默留零值 —— 表现为「本地开发是对的，
+  #    容器里行为不一样」，且没有任何报错。TestConfigTemplatesParse 现在会断言取值。
+  #
+  # 登录限频在 Redis 不可用时的策略（true = 拒绝登录，fail-closed）。
+  login_fail_closed: true
+
+  # token 传输：both = Authorization 头优先、其次 cookie。
+  # 这是 B1（后端双读 cookie）的默认值；出问题改回 header 即回到改造前行为。
+  token_transport: both
+
+  # ⚠️ 本编排是**纯 HTTP**（deploy/nginx/default.conf 只监听 80，
+  #    通过 http://<host>:8080 访问），因此这里必须显式写 false。
+  #    写成 true 会让浏览器直接丢弃 cookie，表现为「登录成功但立刻又是未登录」。
+  #    接入 HTTPS（在 nginx 上终止 TLS）后，这里必须改成 true，
+  #    并同步把 cookie_same_site 按部署形态复核一遍。
+  cookie_secure: false
+
+  # SameSite=lax：本编排前后端同源（nginx 同时托管前端并反代 /api），
+  # 因此 lax 够用且最安全 —— 跨站请求不会带上认证 cookie。
+  cookie_same_site: lax

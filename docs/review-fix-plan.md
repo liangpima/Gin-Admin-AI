@@ -529,7 +529,11 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   分 B1 后端双读 → B2 前端切换 → B3 CSRF → B4 自动续期四个阶段，每阶段独立可回滚。
   **顺带发现一个当前就在发生的缺陷**：`refreshToken()` API 定义了但从未被调用，
   用户 2 小时后（`access_expire: 7200`）会被踢到登录页，而手里有 7 天有效的 refresh token
-  —— B4 建议拆出来单独先做。
+  —— B4 已拆出来单独先做（提交 `765a90f`）。
+  **进度（2026-09-25）**：B4 ✅、**B1 ✅**（后端双读 cookie：新增
+  `security.token_transport` 三态开关 + `internal/authcookie` 包，登录/刷新写
+  HttpOnly cookie、登出清 cookie 并吊销 refresh token；前端一行未改，可独立上线；
+  实机冒烟 18/18 通过，变异验证 3/3 转红）。B2/B3 待做。
   详见 **`docs/plan-p3-optional.md` 项目 B**。
 
 ### P3-3 清理项

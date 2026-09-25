@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"testing"
 
+	"go-admin/config"
+	"go-admin/internal/authcookie"
 	"go-admin/internal/common"
 	"go-admin/internal/module/system/model"
 	"go-admin/internal/testsupport"
@@ -356,5 +358,47 @@ func TestAuthControllerGetUserInfo(t *testing.T) {
 	}
 	if data["username"] != "alice" {
 		t.Errorf("应返回当前登录用户的信息，实际 %v", data["username"])
+	}
+}
+
+// TestAuthControllerLogoutClearsAuthCookies 登出必须把两个认证 cookie 都清掉（P3-B1）。
+//
+// 为什么在 Controller 层再测一次（authcookie 包已有属性级用例）：
+// 这里验证的是**接线**——Controller 有没有真的调用 Clear、有没有在正确的分支上调用。
+// 属性对但没人调用，等于没写。用真实 HTTP 响应头断言，而不是看有没有调函数。
+//
+// 顺带钉住一个容易漏的路径：access token 现在从上下文取（Auth 中间件写入），
+// 不再切 Authorization 头。这条用例不带中间件，取到的是空串 ——
+// 断言「空凭据登出也照样清 cookie」，否则前端会停在「登出失败所以 cookie 还在」
+// 的死状态里。
+func TestAuthControllerLogoutClearsAuthCookies(t *testing.T) {
+	newFullSystemDB(t)
+	ctl := NewAuthController()
+
+	prev := config.Cfg
+	config.Cfg.Security.TokenTransport = config.TokenTransportBoth
+	config.Cfg.Security.CookieSameSite = config.CookieSameSiteLax
+	config.Cfg.JWT.AccessExpire = 7200
+	config.Cfg.JWT.RefreshExpire = 604800
+	t.Cleanup(func() { config.Cfg = prev })
+
+	c, w := newCtx(http.MethodPost, "/api/v1/auth/logout", ctrlTenant, 1)
+	ctl.Logout(c)
+
+	if resp := decodeResp(t, w); resp["code"].(float64) != 0 {
+		t.Fatalf("登出应成功，实际 %v（%v）", resp["code"], resp["message"])
+	}
+
+	cleared := map[string]bool{}
+	for _, ck := range w.Result().Cookies() {
+		if ck.Value == "" && ck.MaxAge < 0 {
+			cleared[ck.Name] = true
+		}
+	}
+	for _, name := range []string{authcookie.AccessCookieName, authcookie.RefreshCookieName} {
+		if !cleared[name] {
+			t.Errorf("登出应下发一个立即过期的 %s cookie，实际响应头 %v",
+				name, w.Header().Values("Set-Cookie"))
+		}
 	}
 }

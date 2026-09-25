@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"strings"
 
@@ -32,7 +33,61 @@ type SecurityConfig struct {
 	//   （fail-closed）保持一致 —— 限频失效期间正是暴力破解成本最低的窗口。
 	// false：放行，可用性优先。此时限频会静默失效，日志里保留 Error 级痕迹。
 	LoginFailClosed *bool `mapstructure:"login_fail_closed"`
+
+	// TokenTransport 决定 token 从哪里**读取**、以及是否**下发** cookie。
+	//
+	//   header —— 只认 Authorization 头，不下发 cookie（改造前的行为，也是回滚开关）
+	//   both   —— 头优先、其次 cookie；两种都接受（**默认**）
+	//   cookie —— 只认 cookie
+	//
+	// 为什么是字符串而不是 bool：这里本质是三态，bool 表达不了。
+	//
+	// 为什么缺省落到 both 而不是 header：both 让新旧两条路径同时可用 ——
+	// 后端先把 cookie 发出去（B1），前端再逐步切换（B2），任何一步出问题
+	// 只要把本项改回 header 就立刻回到改造前的行为。若默认 header，
+	// 后端发了 cookie 却没人用，等于没上线。
+	//
+	// 为什么**拼错的值直接拒绝启动**（见 validateSecurityCookies）而不是静默回退：
+	// 静默回退会让「明明配了 cookie 却仍在读头」这类问题查很久 ——
+	// 与 server.trusted_proxies 的教训同源：配错了比不配更危险。
+	TokenTransport string `mapstructure:"token_transport"`
+
+	// CookieSecure 决定 Set-Cookie 是否带 Secure 属性（默认 false）。
+	//
+	// 默认 false 是刻意的，且**不是**疏忽：本项目自带的 docker 编排是纯 HTTP
+	// （deploy/nginx/default.conf 只监听 80），默认 true 会让浏览器完全不发送
+	// 这些 cookie —— 登录态根本建立不起来，属于「安全默认值把默认部署打死」。
+	// 所以这里的安全责任交给**显式配置 + 启动日志**：CookiePolicySummary()
+	// 会把当前取值连同风险提示一起打进启动日志，上 HTTPS 时必须显式改成 true。
+	CookieSecure *bool `mapstructure:"cookie_secure"`
+
+	// CookieSameSite 决定 cookie 的 SameSite 属性（默认 lax）。
+	//
+	// 它是 CSRF 的**主防线**，而正确取值取决于部署形态：
+	//   · 前后端同源（本项目 dev 走 Vite proxy、prod 走 nginx /api）→ lax 够用且最安全
+	//   · 前后端分域名 → lax 会让 cookie 不被携带，只能改 none + secure，
+	//     而那正是 CSRF 风险最高的配置（因此还需要 double-submit 兜底）
+	// 这个耦合不能藏在默认值里，故写成配置项并打进启动日志。
+	CookieSameSite string `mapstructure:"cookie_same_site"`
 }
+
+// token 传输方式的取值。
+const (
+	// TokenTransportHeader 只认 Authorization 头。改造前的行为，也是回滚开关。
+	TokenTransportHeader = "header"
+	// TokenTransportBoth 头优先、其次 cookie。默认值。
+	TokenTransportBoth = "both"
+	// TokenTransportCookie 只认 cookie。Swagger / curl 这类不会自动带 cookie
+	// 的调用方会因此失效（这也是 Authorization 头不能删的原因）。
+	TokenTransportCookie = "cookie"
+)
+
+// cookie SameSite 的取值。
+const (
+	CookieSameSiteLax    = "lax"
+	CookieSameSiteStrict = "strict"
+	CookieSameSiteNone   = "none"
+)
 
 // IsLoginFailClosed 返回登录限频的失败策略。
 //
@@ -43,6 +98,99 @@ func (c *SecurityConfig) IsLoginFailClosed() bool {
 		return true
 	}
 	return *c.LoginFailClosed
+}
+
+// Transport 返回归一化后的 token 传输方式，未配置或只写了空白时落到 both。
+//
+// 注意：**非法取值在这里也会落到 both**，但它同时会被 Validate 拦下并拒绝启动。
+// 两处都要有是因为调用方（中间件）不该假设配置一定被校验过 ——
+// 测试里直接构造 SecurityConfig 时就走不到 Validate。
+func (c *SecurityConfig) Transport() string {
+	switch strings.ToLower(strings.TrimSpace(c.TokenTransport)) {
+	case TokenTransportHeader:
+		return TokenTransportHeader
+	case TokenTransportCookie:
+		return TokenTransportCookie
+	default:
+		return TokenTransportBoth
+	}
+}
+
+// IssuesCookies 判断是否需要下发认证 cookie。
+func (c *SecurityConfig) IssuesCookies() bool {
+	return c.Transport() != TokenTransportHeader
+}
+
+// AcceptsHeaderToken 判断是否接受 Authorization 头里的 token。
+func (c *SecurityConfig) AcceptsHeaderToken() bool {
+	return c.Transport() != TokenTransportCookie
+}
+
+// AcceptsCookieToken 判断是否接受 cookie 里的 token。
+func (c *SecurityConfig) AcceptsCookieToken() bool {
+	return c.Transport() != TokenTransportHeader
+}
+
+// CookieSecureEnabled 返回 cookie 是否带 Secure 属性（默认 false，理由见字段注释）。
+func (c *SecurityConfig) CookieSecureEnabled() bool {
+	if c.CookieSecure == nil {
+		return false
+	}
+	return *c.CookieSecure
+}
+
+// SameSite 返回 cookie 的 SameSite 取值（默认 lax）。
+func (c *SecurityConfig) SameSite() http.SameSite {
+	switch strings.ToLower(strings.TrimSpace(c.CookieSameSite)) {
+	case CookieSameSiteStrict:
+		return http.SameSiteStrictMode
+	case CookieSameSiteNone:
+		return http.SameSiteNoneMode
+	default:
+		return http.SameSiteLaxMode
+	}
+}
+
+// SameSiteName 返回归一化后的 SameSite 名称，用于日志与断言。
+func (c *SecurityConfig) SameSiteName() string {
+	switch c.SameSite() {
+	case http.SameSiteStrictMode:
+		return CookieSameSiteStrict
+	case http.SameSiteNoneMode:
+		return CookieSameSiteNone
+	default:
+		return CookieSameSiteLax
+	}
+}
+
+// CookiePolicySummary 返回一行可直接打进启动日志的传输策略摘要。
+//
+// 为什么必须打印：SameSite / Secure 的**正确取值取决于部署形态**
+// （同源还是分域名、HTTP 还是 HTTPS），而配错的后果 ——
+// 「登录态建立不起来」或「CSRF 防线失效」—— 都很难从现象反推配置。
+// 与 server.trusted_proxies 的处理方式一致：把当前取值摆到启动日志里，
+// 顺带把该取值下最需要注意的风险写在同一行，省得再翻文档。
+func (c *SecurityConfig) CookiePolicySummary() string {
+	if !c.IssuesCookies() {
+		return "token 传输：仅 Authorization 头（不下发 cookie）"
+	}
+
+	how := "Authorization 头优先、其次 cookie"
+	if c.Transport() == TokenTransportCookie {
+		how = "仅 cookie（Swagger / curl 等不带 cookie 的调用方将失效）"
+	}
+	summary := fmt.Sprintf("token 传输：%s；cookie 属性 SameSite=%s Secure=%t",
+		how, c.SameSiteName(), c.CookieSecureEnabled())
+
+	if !c.CookieSecureEnabled() {
+		summary += "（Secure=false 只适用于 HTTP 部署；上 HTTPS 后必须置 true，" +
+			"否则 cookie 会随明文传输）"
+	}
+	if c.SameSite() == http.SameSiteNoneMode {
+		summary += "（SameSite=None：跨站请求会携带 cookie，CSRF 面最大，" +
+			"必须确认 double-submit 校验已启用）"
+	}
+	return summary
 }
 
 type CORSConfig struct {
@@ -205,6 +353,7 @@ func Validate() error {
 	}
 
 	problems = append(problems, validateTrustedProxies(Cfg.Server.TrustedProxies)...)
+	problems = append(problems, validateSecurityCookies()...)
 
 	if Cfg.Database.Host == "" {
 		problems = append(problems, "database.host 不能为空")
@@ -284,6 +433,45 @@ func validateTrustedProxies(proxies []string) []string {
 				"server.trusted_proxies 项 %q 会让 X-Forwarded-For 完全可信（可被伪造），请填具体代理网段", trimmed))
 		}
 	}
+	return problems
+}
+
+// validateSecurityCookies 校验 security 段里与 token 传输 / cookie 相关的取值。
+//
+// 单独成函数的原因与 validateTrustedProxies 相同：这属于「配错了比不配更危险」
+// 的一类配置，需要能被独立覆盖，也需要在不启动整个服务的前提下断言。
+func validateSecurityCookies() []string {
+	var problems []string
+
+	switch strings.ToLower(strings.TrimSpace(Cfg.Security.TokenTransport)) {
+	case "", TokenTransportHeader, TokenTransportBoth, TokenTransportCookie:
+		// 留空 = both（见 Transport 的注释）
+	default:
+		problems = append(problems, fmt.Sprintf(
+			"security.token_transport 取值非法（%q），只能是 %s / %s / %s（留空 = %s）",
+			Cfg.Security.TokenTransport,
+			TokenTransportHeader, TokenTransportBoth, TokenTransportCookie, TokenTransportBoth))
+	}
+
+	switch strings.ToLower(strings.TrimSpace(Cfg.Security.CookieSameSite)) {
+	case "", CookieSameSiteLax, CookieSameSiteStrict:
+		// 留空 = lax
+	case CookieSameSiteNone:
+		// 浏览器**拒绝**为 SameSite=None 且不带 Secure 的 cookie 建库
+		// （Chrome 起一律丢弃），表现为「登录接口返回成功但下一次请求就是未登录」。
+		// 与其上线后去排查「为什么 cookie 没生效」，不如启动即失败。
+		if !Cfg.Security.CookieSecureEnabled() {
+			problems = append(problems,
+				"security.cookie_same_site=none 必须同时设置 security.cookie_secure=true："+
+					"浏览器会丢弃 SameSite=None 且不带 Secure 的 cookie，登录态将完全建立不起来")
+		}
+	default:
+		problems = append(problems, fmt.Sprintf(
+			"security.cookie_same_site 取值非法（%q），只能是 %s / %s / %s（留空 = %s）",
+			Cfg.Security.CookieSameSite,
+			CookieSameSiteLax, CookieSameSiteStrict, CookieSameSiteNone, CookieSameSiteLax))
+	}
+
 	return problems
 }
 

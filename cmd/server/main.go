@@ -78,6 +78,12 @@ func main() {
 		logger.Log.Infof("[启动] IP 计数依据：可信代理 %v 转发的 X-Forwarded-For", config.Cfg.Server.TrustedProxies)
 	}
 
+	// 同理，把 token 的传输方式与 cookie 属性摆到启动日志里：
+	// SameSite / Secure 的正确取值取决于部署形态（同源还是分域名、HTTP 还是 HTTPS），
+	// 而配错的后果是「登录态建立不起来」或「CSRF 防线失效」——
+	// 两者都很难从现象反推配置。摘要里会带上当前取值下的风险提示。
+	logger.Log.Infof("[启动] %s", config.Cfg.Security.CookiePolicySummary())
+
 	if err := database.Init(); err != nil {
 		fatal("初始化数据库失败: %v", err)
 	}

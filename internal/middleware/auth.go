@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"go-admin/config"
+	"go-admin/internal/authcookie"
 	"go-admin/internal/cache"
 	"go-admin/internal/common"
 	"go-admin/internal/logger"
@@ -15,21 +17,12 @@ import (
 
 func Auth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			common.Unauthorized(c, "请先登录")
+		tokenString, source, msg := extractToken(c)
+		if msg != "" {
+			common.Unauthorized(c, msg)
 			c.Abort()
 			return
 		}
-
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			common.Unauthorized(c, "Token格式错误")
-			c.Abort()
-			return
-		}
-
-		tokenString := parts[1]
 
 		// 检查 Token 是否已被吊销。
 		// 查询失败时**拒绝**而不是放行：Redis 抖动期间放行等于让已登出的
@@ -76,6 +69,12 @@ func Auth() gin.HandlerFunc {
 		c.Set(common.ContextKeyTenantID, claims.TenantID)
 		c.Set(common.ContextKeyDeptID, claims.DeptID)
 
+		// 把「token 来自哪里」与「原文」交给下游：
+		//   · CSRF 中间件据此豁免走 Authorization 头的调用方
+		//   · 登出接口据此拿到 token 原文去拉黑（cookie 认证时没有 Authorization 头）
+		c.Set(common.ContextKeyTokenSource, source)
+		c.Set(common.ContextKeyAccessToken, tokenString)
+
 		// 平台级身份校验：租户 ID 为 0 的账号代表「不做租户过滤」，
 		// 而 TenantScope(db, 0) 正是「不过滤」的哨兵值 —— 换句话说，
 		// 持有一个 tenantID=0 的 token 就等于拿到了跨租户读写能力。
@@ -102,6 +101,46 @@ func Auth() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// extractToken 按 security.token_transport 的配置取出本次请求要校验的 token。
+//
+// 优先级：Authorization 头 → cookie（access_token）。返回的 source 会写进上下文。
+//
+// 抽成独立函数而不是内联在 Auth 里，理由与 canAccessWithoutTenant 相同：
+// Auth 后面几步依赖 Redis，测试环境没有 Redis 就走不到那里，
+// 只有纯函数才能把「三种传输方式 × 有头/无头/坏头/cookie」这张表穷举掉。
+//
+// 两个刻意的取舍：
+//   - **头存在但格式错时不回退到 cookie**。回退会让「调用方带了个坏头」
+//     表现成「用 cookie 认证成功了」，问题被掩盖成偶发；
+//     明确报错才能立刻定位到是哪个调用方发错了。
+//   - **cookie 读不到时不区分「没有」与「空值」**，一律按未登录处理。
+//     httpOnly cookie 的值由服务端写、浏览器原样回传，不存在「前端写了个空串」
+//     这种情况，区分它只会多一条永远走不到的分支。
+func extractToken(c *gin.Context) (token, source, errMsg string) {
+	sec := config.Cfg.Security
+
+	if sec.AcceptsHeaderToken() {
+		if authHeader := c.GetHeader("Authorization"); authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			// `Bearer` 后面必须有值：`Bearer `（尾随空格）也会被 SplitN 切成两段，
+			// 若不校验就会拿着空串往下走，最终报成「Token无效或已过期」——
+			// 把「格式写错」说成「凭证过期」，排查时会往完全错误的方向找。
+			if len(parts) != 2 || parts[0] != "Bearer" || strings.TrimSpace(parts[1]) == "" {
+				return "", common.TokenSourceHeader, "Token格式错误"
+			}
+			return parts[1], common.TokenSourceHeader, ""
+		}
+	}
+
+	if sec.AcceptsCookieToken() {
+		if v, err := c.Cookie(authcookie.AccessCookieName); err == nil && v != "" {
+			return v, common.TokenSourceCookie, ""
+		}
+	}
+
+	return "", "", "请先登录"
 }
 
 // canAccessWithoutTenant 判断「租户 ID 为 0」的请求能否放行。
