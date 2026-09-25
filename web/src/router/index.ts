@@ -40,7 +40,11 @@ router.beforeEach(async (to, _from, next) => {
           accessRoutes.forEach((route) => {
             router.addRoute(route)
           })
-          next({ ...to, replace: true })
+          // 按**路径**重导航，不要展开 `{ ...to }` 重放：
+          // 兜底命中时 `to.name` 是 `NotFoundCatchAll`，而 vue-router 解析
+          // location 对象时 name 优先于 path —— 展开重放会按 name 再命中一次
+          // 兜底，绕回 404，业务页面永远打不开。
+          next({ path: to.path, query: to.query, hash: to.hash, replace: true })
         } catch {
           userStore.logout()
           const permStore = usePermissionStore()

@@ -23,7 +23,7 @@
 | P2-5 覆盖率门槛 | ✅ 已完成 | `scripts/check-coverage.sh` 接入 CI 与 `make check-backend`；阈值 74.0%（实测 75.5%） |
 | P2-1b system 两包 | ✅ 已完成 | `f84dea1` system/service 39.6%→79.4%、controller 35.0%→84.8%；包均 70.5%→75.5% |
 | P2-1c middleware/member | ✅ 已完成 | middleware 61.8%→93.3%、member/service 44.2%→88.5%；包均 75.5%→**79.7%**；顺带修 CORS 启动 panic |
-| P3-2 路由收尾 | ✅ 已完成 | `60e472d` pathMatch 404 兜底 + 6 个用例；`else { next() }` 复核后结案 |
+| P3-2 路由收尾 | ✅ 已完成 | `60e472d` pathMatch 404 兜底；`else { next() }` 复核后结案。**兜底曾回归**（`redirect` 吞掉全部动态路由）→ 2026-09-25 已修，见 P3-2 段 |
 | P0-5 会员编号冲突 | ✅ 已完成 | **新发现**：`uk_member_no` 全局唯一 vs 按租户发号 → 第二租户建会员必失败；按方案 ①（发号改全局）修复，见 P2-1d |
 | 附：真 bug 修复 | ✅ 已完成 | `f5159fa` 登录限频把 redis.Nil 误判为故障（任何干净登录 500）；`bc67715` 仪表盘部门数按租户统计 |
 | P3 两个可选小项 | 📋 已出计划 | 前端代码分割、token 迁 httpOnly cookie；根因已定位（非「没做懒加载」，而是全量注册 + 无分包），详见 **`docs/plan-p3-optional.md`** |
@@ -498,14 +498,28 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   此前访问未匹配的路径只会得到控制台一条 "No match found for location" 警告
   加一片空白页 —— 用户的感受是「页面坏了」，而不是「地址写错了」，
   这两件事需要给出不同的反馈。
-  新增 `web/src/router/routes/static.spec.ts`（6 个用例）守住两件事：
-  未匹配路径必须落到 `/404`；兜底**不能盖住**具体路径，包括之后通过
-  `addRoute` 动态注册的业务路由。第二条是真正容易写错的地方 ——
-  Vue Router 4 按路径具体度打分，catch-all 放在数组最后只是可读性约定，
-  **不是**它能正确工作的原因；万一有人把它改成前缀匹配 `/:pathMatch(.*)`，
-  所有业务页面都会变成 404，值得用用例钉住。
-  变异验证：把 path 改成非通配 → 4 条用例转红。
-- ✅ **`router/index.ts:51-53` 的 `else { next() }` 经复核不需要额外校验**：
+- ⚠️→✅ **兜底曾经把「所有动态路由」都吞掉，已修**（2026-09-25 为 A2 建视觉基线时实测发现）。
+  最初的实现写成 `redirect: '/404'`，结果 `/login`、`/dashboard` 这类静态路由正常，
+  而 `/system/user`、`/member/level` 等由菜单 `addRoute` 注册的页面**一律渲染 404**。
+  根因：vue-router 的 `pushWithRedirect` 里 `handleRedirectRecord` 跑在
+  `navigate()`（`beforeEach` 在其中）**之前** —— 守卫拿到的 `to` 已经是 `/404`，
+  原始路径只剩在 `to.redirectedFrom` 里，于是「先 push 未注册路由 → 守卫里 `addRoute`
+  → 按 `to` 重导航」这条链路永远回不到原路径。
+  改法：兜底去掉 `redirect` 改 `component` 渲染 404 页（守卫因此能看见真实路径；
+  副作用是访问不存在的地址时地址栏保留原路径，比改写为 `/404` 更符合直觉）；
+  同时 `router/index.ts` 的重导航改按路径 `next({ path: to.path, query, hash, replace })`
+  —— 原来展开 `{ ...to }` 重放是第二个坑：`to.name` 仍是 `NotFoundCatchAll`，
+  而 vue-router 解析 location 对象时 name 优先于 path，展开会再命中一次兜底。
+- **用例教训（比缺陷本身更值钱）**：`static.spec.ts` 原先那条
+  「兜底不盖住之后动态注册的业务路由」是**先 `addRoute` 再 `push`**，
+  而真实时序是**先 `push`（命中兜底）→ 守卫里才 `addRoute` → 再重导航**。
+  它测的是「路由已注册时兜底不抢」，恰好绕开了出问题的那一段 —— 6 条用例全绿，
+  缺陷却真实存在。本次补了「真实时序」用例和「兜底必须用 component」用例（6 → 8），
+  并把三条断言从「落到 `/404`」改成「**保留原始路径**」（原断言等于把缺陷写成了规格）。
+  先补用例 → 5 红 3 绿；改完 → 8 绿。实机逐路由验证：
+  `/dashboard` `/system/user` `/system/role` `/member/level` 全部停在原路径、
+  菜单 21 项、表格正常；`/nope/nope` 渲染 404 页且保留原路径。
+- ✅ **`router/index.ts` 的 `else { next() }` 经复核不需要额外校验**：
   走到这条分支时 `addRoute` 已经完成，没被注册的路径本来就渲染不出内容，
   所以不构成越权（后端 Casbin 另有兜底）。它原本的症状就是「未匹配路由落到
   空白页」，已由上面的 catch-all 一并解决 —— **不必按安全项排期**。

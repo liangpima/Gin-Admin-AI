@@ -111,7 +111,10 @@ describe('图标白名单：精简性', () => {
       .filter(([, component]) => !component)
       .map(([name]) => name)
 
-    expect(invalid, `这些图标在白名单里但值是 undefined（多半是 import 被删了）：${invalid.join(', ')}`).toEqual([])
+    expect(
+      invalid,
+      `这些图标在白名单里但值是 undefined（多半是 import 被删了）：${invalid.join(', ')}`,
+    ).toEqual([])
   })
 
   it('白名单里没有用不到的图标（避免它只增不减）', () => {
