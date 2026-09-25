@@ -1,6 +1,6 @@
 import axios, { type AxiosInstance, type AxiosResponse, type AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
-import { getToken, removeToken } from '@/utils/auth'
+import { getToken, getRefreshToken, removeToken, setToken, setRefreshToken } from '@/utils/auth'
 import router from '@/router'
 
 let isRedirecting = false
@@ -58,10 +58,12 @@ service.interceptors.response.use(
         try {
           const res = JSON.parse(text)
           if (res.code === 401) {
-            handleLogout()
-          } else {
-            ElMessage.error(res.message || '导出失败')
+            return refreshAndReplay(
+              response.config as RetryableConfig,
+              new Error(res.message || '导出失败'),
+            )
           }
+          ElMessage.error(res.message || '导出失败')
           return Promise.reject(new Error(res.message || '导出失败'))
         } catch {
           // 不是合法 JSON，按文件流处理
@@ -73,10 +75,14 @@ service.interceptors.response.use(
     const res = response.data
     if (res.code !== 0) {
       if (res.code === 401) {
-        handleLogout()
-      } else {
-        ElMessage.error(res.message || '请求失败')
+        // 后端部分路径以「HTTP 200 + body code 401」返回（见 common.Unauthorized 的用法），
+        // 所以这条分支同样要走续期 —— 只在 axios 的 error 分支处理会漏掉它们
+        return refreshAndReplay(
+          response.config as RetryableConfig,
+          new BizError(res.code, res.message || '登录已过期', res.data),
+        )
       }
+      ElMessage.error(res.message || '请求失败')
       // 用 BizError 而不是 new Error(res.message)：
       // 后者会把后端业务码整个丢掉，调用方只能靠比对文案做分支，
       // 文案一改就静默失效（例如「余额不足」需要引导去充值这类逻辑）。
@@ -87,13 +93,127 @@ service.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
-      handleLogout()
-    } else {
-      ElMessage.error(error.message || '网络错误')
+      return refreshAndReplay(error.config as RetryableConfig | undefined, error)
     }
+    ElMessage.error(error.message || '网络错误')
     return Promise.reject(error)
   },
 )
+
+/**
+ * 扩展的请求配置：自动续期用的两个内部标记。
+ *
+ * 用挂在 config 上的自定义字段而不是外部 Map 记录状态 —— axios 会把
+ * `response.config` / `error.config` 原样交回来，重放时又把它合并进新请求，
+ * 所以标记天然跟着请求走，不需要额外的登记表（也就不会泄漏）。
+ */
+interface RetryableConfig extends AxiosRequestConfig {
+  /** 该请求已经历过一次「续期后重放」，再 401 就直接清会话（防无限循环） */
+  authRetried?: boolean
+  /** 该请求本身就是续期请求，不参与续期（防无限递归） */
+  skipAuthRefresh?: boolean
+}
+
+/**
+ * 不参与自动续期的路径。
+ *
+ * `/auth/refresh` 自身失败意味着 refresh token 也废了，再续期没有意义；
+ * `/auth/login` 失败是凭据错，此时去续期只会拿一个陈旧的 refresh token
+ * 多发一次注定失败的请求。
+ */
+const NO_REFRESH_PATHS = ['/auth/login', '/auth/refresh']
+
+/**
+ * 单飞（single-flight）：同一时刻只允许存在一次续期请求。
+ *
+ * 为什么必须有：一个页面同时发出 3 个请求、而 access token 恰好过期时，
+ * 3 个请求会同时收到 401。若各自去续期，就会有 3 次刷新请求并发打到后端 ——
+ * 而后端刷新是**轮换式**的（`authService.RefreshToken` 会先把旧 refresh token
+ * 从 Redis 删掉、再发一个新的），于是第 2、3 次刷新拿的是**已被删除**的旧 token，
+ * 后端返回「refresh token已过期」→ 401 → 前端清会话。结果是
+ * **用户刚过 2 小时就被踢出登录**，比不做自动续期还糟。
+ *
+ * 后到的调用复用同一个在途 Promise，续期完成后各自重放自己的请求。
+ */
+let refreshInFlight: Promise<void> | null = null
+
+/** 真正执行一次续期（不含单飞包装） */
+async function doRefreshSession(): Promise<void> {
+  const refreshToken = getRefreshToken()
+  if (!refreshToken) {
+    // 没有 refresh token 就没有续期手段。抛错让调用方走清会话分支，
+    // 而不是发一个注定 401 的请求再绕一圈回来
+    throw new Error('没有可用的 refresh token')
+  }
+
+  const res = await service.post<unknown, Result<{ accessToken: string; refreshToken: string }>>(
+    '/auth/refresh',
+    { refreshToken },
+    // 打上标记：这次请求自己的 401 不再触发续期
+    { skipAuthRefresh: true } as RetryableConfig,
+  )
+
+  // 后端刷新时**同时轮换**两个 token，必须都更新 ——
+  // 只更新 access token 的话，下一次续期用的还是已被消费掉的旧 refresh token
+  setToken(res.data.accessToken)
+  setRefreshToken(res.data.refreshToken)
+}
+
+/** 续期（带单飞）。失败时抛出原因，由调用方决定是否清会话 */
+function refreshSession(): Promise<void> {
+  if (!refreshInFlight) {
+    refreshInFlight = doRefreshSession().finally(() => {
+      // 无论成败都要释放：漏了这一步，一次失败会让后续所有续期
+      // 立刻拿到同一个 rejection，用户永远续不上
+      refreshInFlight = null
+    })
+  }
+  return refreshInFlight
+}
+
+/**
+ * 判断这次 401 是否应该尝试自动续期。
+ *
+ * 四种情况必须直接放弃（走清会话）：无法重放的请求、续期请求自身、
+ * 已经重放过一次的请求、以及本来就不该续期的路径。
+ */
+function shouldTryRefresh(config?: RetryableConfig): boolean {
+  if (!config) return false
+  if (config.skipAuthRefresh) return false
+  if (config.authRetried) return false
+  const url = config.url || ''
+  return !NO_REFRESH_PATHS.some((path) => url.startsWith(path))
+}
+
+/**
+ * 收到 401 后的统一处理：先续期、再重放原请求；续期不可行或失败则清会话。
+ *
+ * 抛出的始终是**原始错误**，调用方据此保持既有语义
+ * （业务错误仍是 BizError，网络错误仍是 axios error）。
+ */
+async function refreshAndReplay(
+  config: RetryableConfig | undefined,
+  originalError: unknown,
+): Promise<unknown> {
+  if (!shouldTryRefresh(config)) {
+    handleLogout()
+    throw originalError
+  }
+
+  // 先打标记再续期：万一重放回来又是 401，不会再次触发续期
+  config!.authRetried = true
+
+  try {
+    await refreshSession()
+  } catch (err) {
+    console.warn('[request] 自动续期失败，已清理本地会话', err)
+    handleLogout()
+    throw originalError
+  }
+
+  // 重放：request 拦截器会重新读 cookie，因此带的是刚换到的新 token
+  return service.request(config!)
+}
 
 /**
  * http：对 service 的类型化门面。

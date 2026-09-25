@@ -51,8 +51,14 @@ vi.mock('element-plus', () => ({ ElMessage }))
 
 const removeToken = vi.fn()
 const getToken = vi.fn()
+const getRefreshToken = vi.fn()
+const setToken = vi.fn()
+const setRefreshToken = vi.fn()
 vi.mock('@/utils/auth', () => ({
   getToken: () => getToken(),
+  getRefreshToken: () => getRefreshToken(),
+  setToken: (...a: unknown[]) => setToken(...a),
+  setRefreshToken: (...a: unknown[]) => setRefreshToken(...a),
   removeToken: () => removeToken(),
 }))
 
@@ -108,7 +114,12 @@ describe('响应拦截器：业务错误', () => {
     expect(ElMessage.error).toHaveBeenCalled()
   })
 
-  it('401 走清会话并跳登录，而不是弹「请求失败」', async () => {
+  it('401 且无从续期时清会话并跳登录，而不是弹「请求失败」', async () => {
+    // 401 现在的完整语义是「先续期、失败才清会话」（见 refresh.spec.ts）。
+    // 这里刻意让 getRefreshToken 返回空，把用例固定在「无凭据可续 → 清会话」
+    // 这条分支上 —— 否则它是否走续期就取决于 mock 的默认值，属于偶然通过
+    getRefreshToken.mockReturnValue(undefined)
+
     await expect(
       handlers.response!({ data: { code: 401, message: 'Token已失效', data: null }, config: {} }),
     ).rejects.toBeInstanceOf(BizError)
@@ -144,7 +155,9 @@ describe('响应拦截器：网络层错误', () => {
     vi.clearAllMocks()
   })
 
-  it('HTTP 401 也走清会话跳登录', async () => {
+  it('HTTP 401 且无从续期时也走清会话跳登录', async () => {
+    getRefreshToken.mockReturnValue(undefined)
+
     await expect(
       handlers.responseError!({ response: { status: 401 }, message: 'Unauthorized' }),
     ).rejects.toBeTruthy()
