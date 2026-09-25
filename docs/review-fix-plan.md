@@ -26,6 +26,7 @@
 | P3-2 路由收尾 | ✅ 已完成 | `60e472d` pathMatch 404 兜底 + 6 个用例；`else { next() }` 复核后结案 |
 | P0-5 会员编号冲突 | ✅ 已完成 | **新发现**：`uk_member_no` 全局唯一 vs 按租户发号 → 第二租户建会员必失败；按方案 ①（发号改全局）修复，见 P2-1d |
 | 附：真 bug 修复 | ✅ 已完成 | `f5159fa` 登录限频把 redis.Nil 误判为故障（任何干净登录 500）；`bc67715` 仪表盘部门数按租户统计 |
+| P3 两个可选小项 | 📋 已出计划 | 前端代码分割、token 迁 httpOnly cookie；根因已定位（非「没做懒加载」，而是全量注册 + 无分包），详见 **`docs/plan-p3-optional.md`** |
 
 **⚠️ 升级须知（P0-2/P0-3 带来的部署影响）**
 
@@ -508,9 +509,14 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   走到这条分支时 `addRoute` 已经完成，没被注册的路径本来就渲染不出内容，
   所以不构成越权（后端 Casbin 另有兜底）。它原本的症状就是「未匹配路由落到
   空白页」，已由上面的 catch-all 一并解决 —— **不必按安全项排期**。
-- token 从 `js-cookie` 迁到 httpOnly cookie（**可选小项，未执行**）：
-  需后端 `Set-Cookie` 配合 + CSRF 防护（`SameSite=Strict` 已够用，Bearer 头
-  方案可并存过渡）。改造面较大，单独立项。
+- token 从 `js-cookie` 迁到 httpOnly cookie（**可选小项，已出实施计划**）：
+  需后端 `Set-Cookie` 配合 + CSRF 防护 + **重构路由守卫的登录态判定**
+  （httpOnly cookie 对 JS 不可见，守卫现在同步读 `getToken()`，直接改会死循环跳登录页）。
+  分 B1 后端双读 → B2 前端切换 → B3 CSRF → B4 自动续期四个阶段，每阶段独立可回滚。
+  **顺带发现一个当前就在发生的缺陷**：`refreshToken()` API 定义了但从未被调用，
+  用户 2 小时后（`access_expire: 7200`）会被踢到登录页，而手里有 7 天有效的 refresh token
+  —— B4 建议拆出来单独先做。
+  详见 **`docs/plan-p3-optional.md` 项目 B**。
 
 ### P3-3 清理项
 - **5 个孤儿组件**（`SvgIcon`/`TableSkeleton`/`PageHeader`/`RightPanel`/`Upload`）：
@@ -525,11 +531,16 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   （无自建 `handleDelete`，行号 105 现在指向解构出来的 `handleDelete`）；
   全仓空 `catch {}` 实测只剩 1 处，且是 `useCrud.ts` 顶部注释里的示例文字。
   同类问题在 P2-3 的 useCrud 改造中已一并修掉。
-- **新增（2026-09-24 实测）**：前端产物未做代码分割 —— `vite build` 产出
-  `index-*.js` 1.27 MB（gzip 412 KB）、`agreement-*.js` 820 KB，
-  vite 已给出 chunk > 500 KB 的警告。可考虑 `manualChunks` 或路由级动态 import。
-  （**可选小项，未执行**：与 P3-2 的 httpOnly cookie 一并作为「记录但不在本轮做」
-  的两项。两者都属于改动面大于收益的类型，需要单独排期与验证。）
+- **新增（2026-09-24 实测，2026-09-25 已定位根因）**：前端产物未做代码分割 ——
+  `vite build` 产出 `index-*.js` **1237 kB**（gzip 412 kB）、`agreement-*.js` 801 kB、
+  全量 element-plus CSS 373 kB，vite 已给出 chunk > 500 kB 的警告。
+  **根因不是「没做路由懒加载」**（路由本来就是 `() => import()` 懒加载的），而是
+  `main.ts` 里 `app.use(ElementPlus)` **全量注册**架空了 `unplugin-vue-components`
+  的按需解析、`import * as ElementPlusIconsVue` 把 **293 个图标**（实际只用约 30 个）
+  全打进主包、以及 `vite.config.ts` 完全没有 `build` 段（无 vendor 分包）。
+  分 A1 图标白名单 → A2 去全量注册 → A3 manualChunks → A4 wangEditor 异步 →
+  A5 产物体积门禁 五步。
+  详见 **`docs/plan-p3-optional.md` 项目 A**。
 - **教训**：这份待办清单与 AGENTS.md 规则 7 的表清单犯的是同一个错 ——
   **文档里的事实陈述会随时间失真，且不会报错**。P2-3 改造完成后没有回头
   更新 P3 清单，导致三条待办在做之前就已经不成立。动手前先复核一遍现状。
