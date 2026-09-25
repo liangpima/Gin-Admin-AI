@@ -146,7 +146,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive } from 'vue'
+import { defineAsyncComponent, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   getAgreementList,
@@ -156,7 +156,12 @@ import {
   type AgreementItem,
   type AgreementQuery,
 } from '@/api/agreement'
-import WangEditor from '@/components/WangEditor/index.vue'
+// wangEditor 整个库约 800 kB。同步 import 会把它并进协议页自己的 chunk，
+// 页面壳与表单要等它下载完才开始渲染。改异步后壳先出来，编辑器随后到。
+//
+// 注意它**本来就是懒加载的**（协议页是懒加载路由，不点进来不会下载）——
+// 这一步只解决「同一页内重资源阻塞渲染」，不是省流量。
+const WangEditor = defineAsyncComponent(() => import('@/components/WangEditor/index.vue'))
 import FormDialog from '@/components/FormDialog/index.vue'
 import { formatDateTime } from '@/utils/format'
 import { useCrud } from '@/hooks/useCrud'

@@ -17,9 +17,9 @@
 | A1 图标白名单 | ✅ 已完成 | 主包 1267.9 → **1133.1 kB**（gzip 412.6 → 367.4）。新增 `web/src/utils/icons.ts` + `icons.spec.ts`（7 用例）；变异验证 5/5 转红；CDP 实机确认侧边栏 21/21 菜单图标都在。提交 `3067556` |
 | — 前置修复：404 兜底回归 | ✅ 已完成 | A2 建视觉基线时发现**所有动态路由都渲染 404**（P3-2 的 catch-all 用了 `redirect`，它在 `beforeEach` 之前被解析）。兜底改 `component` + 守卫改按路径重导航；`static.spec.ts` 6 → 8 用例。详见 `docs/review-fix-plan.md` P3-2 段 |
 | A2 去全量 EP 注册 | ✅ 已完成 | 首屏 **1506 kB → 473.6 kB**（JS 1133.16 → 385.08 kB、CSS 373 → 88.49 kB），约 **−69%**；dist 3.0M → 2.3M。`main.ts` 去 `app.use(ElementPlus)` + 全量 CSS；`App.vue` 补 `<el-config-provider>` 顶 locale/size；`role/index.vue` 的 `ElTree` 改 type-only import（显式 import 会让解析器跳过 `<el-tree>`，连带丢样式）。验证：22 页像素级对比无回归、48 项样式完整性校验、21 页控制台无解析失败、`v-loading` 实测生效 |
-| A3 manualChunks | ⏳ 待做 | |
-| A4 wangEditor 异步 | ⏳ 待做 | |
-| A5 产物体积门禁 | ⏳ 待做 | |
+| A3 manualChunks | ✅ 已完成（**有偏离**） | `vite.config.ts` 加 `build.rollupOptions.output.manualChunks`：`vendor-vue` 110.8 kB、`vendor-utils` 50.7 kB、`vendor-wangeditor` 792.9 kB（固定名，供 A5 门禁按名识别）。**计划里的 `vendor-element` 刻意没做** —— 见下方「A3 的偏离」 |
+| A4 wangEditor 异步 | ✅ 已完成 | `views/settings/agreement.vue` 改 `defineAsyncComponent(() => import('@/components/WangEditor/index.vue'))`；`agreement` chunk **820.91 kB → 8.41 kB**，wangEditor 被拆到独立的 `vendor-wangeditor`。实机验证：点开「新增协议」弹窗，工具栏 40 个按钮 + 编辑区 + `contenteditable` + 占位符全部正常，控制台无 error |
+| A5 产物体积门禁 | ✅ 已完成 | 新增 `web/scripts/check-bundle.mjs`（读 `dist/index.html` 解析首屏引用 + `gzipSync` 算体积 + 按 `-<hash>.js` 剥名匹配例外表）；接进 `npm run build`（`vue-tsc && vite build && node scripts/check-bundle.mjs`）与 CI 的 `构建 + 产物体积门禁` 步骤。实测首屏 JS gzip **137.9 kB** / CSS **13.1 kB**，通过 |
 | B1 后端双读 cookie | ⏳ 待做 | |
 | B2 前端 cookie-only | ⏳ 待做 | |
 | B3 CSRF | ⏳ 待做 | |
@@ -128,6 +128,22 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   改业务代码不再让用户重下 element-plus
 - 预期：主包只剩约 200 kB 业务代码，`vendor-*` 长期命中 `immutable` 缓存
 
+> **实施时的偏离（2026-09-25 补记）**：上面的 `vendor-element` **没有做**，这是有意的。
+> 这条计划写在 A2 之前，当时 `element-plus` 是**整体**进主包的，所以「把 element-plus
+> 整块抽成 vendor」是合理的。A2 去掉全量注册后，`unplugin-vue-components` 的按需解析
+> 才真正生效，Vite 已经把 element-plus **按组件**自动拆成了 `el-table-column` /
+> `el-select` / `el-tree` / `el-form-item` … 几十个小 chunk（其中 `el-table-column`
+> 88.6 kB **只在首屏用**，其余多数按路由懒加载）。
+> 此时再写一条 `manualChunks` 把 element-plus 合并回一个 `vendor-element`，
+> 等于**把 A2 的收益吐回去**：首屏会从「只下首屏真正用到的那几个组件」
+> 退回「下一次全量 element-plus」。
+>
+> 所以 A3 只对**真正跨页共享且不随 A2 拆分**的包做分包：`vue`/`vue-router`/`pinia`/
+> `@vue/*` → `vendor-vue`，`axios`/`js-cookie`/`nprogress`/`path-to-regexp` → `vendor-utils`，
+> 另把 `@wangeditor/*` 钉成固定名 `vendor-wangeditor`（哈希名无法被 A5 门禁按名识别）。
+> **A3 的验收口径也随之从「主包只剩业务代码」改成「第三方大包有稳定 chunk 名 +
+> 业务代码改动不波及它们」**，体积指标交给 A5 的门禁去守。
+
 **A4 · wangEditor 异步化**（2 行改动）
 
 - `views/settings/agreement.vue:159` 的
@@ -149,17 +165,46 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 ### A.5 验收标准
 
 - `npm run build` **无** chunk > 500 kB 警告
+  - **实际口径（2026-09-25 定稿）**：`vendor-wangeditor` 792.9 kB **仍然超 500 kB**，
+    上游库体积决定，压不下来。处理方式是给它一条**带理由和上限的显式例外**
+    （`check-bundle.mjs` 的 `CHUNK_ALLOWLIST`：`≤ 900 kB`），
+    而**不是**删掉检查、也不是调大 vite 的 `chunkSizeWarningLimit` 了事 ——
+    排除掉它就等于允许它无限增长。它已异步化，只在协议页加载，不进首屏。
+    除此之外的所有 chunk 都 ≤ 500 kB。
 - 主包 gzip ≤ 150 kB；CSS gzip ≤ 60 kB
+  - 实测：首屏 JS gzip **137.9 kB**、CSS gzip **13.1 kB**，均在阈值内（`check-bundle.mjs` 已固化）
 - 侧边栏 17 个数据库图标**逐个页面**确认正常显示
 - 中文 locale 正常（分页文案、日期选择器、上传按钮）
 - `npm run test` / `typecheck` / `lint` / `format:check` 全绿
 - 图标白名单用例**变异验证**：从表里删掉一个 DB 在用的图标 → 用例转红
 
+#### 验证记录（2026-09-25 实测）
+
+A3/A4/A5 都是「改动本身不报错、出问题只有肉眼能看见」的类型，所以全部实机验证：
+
+| 手法 | 脚本（`runtime/`，已 gitignore） | 结果 |
+|---|---|---|
+| 22 页批量巡检（整页加载 → 查最终路径 / 菜单挂载 / 表格 / 控制台 error） | `cov/verify_a3a4.mjs` | 21 个业务页全部停在原路径、菜单 21 项、**控制台 0 条 error/warning**；`/nope/nope` 渲染 404 页且保留原路径 |
+| 协议页编辑器专项（真的点「新增协议」按钮，轮询等异步组件） | `cov/verify_a4_editor.mjs` | 工具栏 40 个按钮、编辑区、`contenteditable`、占位符「请输入内容...」全部正常 |
+| 产物门禁自测 | `scripts/check-bundle.mjs` | 通过：首屏 JS gzip 137.9 ≤ 150、CSS gzip 13.1 ≤ 60；`vendor-wangeditor` 792.9 ≤ 900（例外） |
+
+**两个「先怀疑代码、结果发现是断言错」的坑（都留了注释）**：
+
+1. 第一版编辑器探测查了**列表页**的 DOM —— 而 `/settings/agreement` 是列表页，
+   编辑器在弹窗里，于是「编辑器未渲染」是**假阳性**。改成真的点按钮才验到真东西。
+2. 控制台那条 `编辑区域高度 < 300px 这可能会导致 modal hoverbar 定位异常` 一开始被判成
+   A4 引入的回归（异步化确实会改变组件挂载时机，从而可能改变容器测量高度 —— 这个
+   因果链是成立的，所以不能靠推理否掉）。**用对照实验证伪**：把 `defineAsyncComponent`
+   临时改回静态 import 再跑一次，这条 warning 一字不差地照旧出现 →
+   与 A4 无关，是 wangEditor 自身的 advisory。改完再把异步写法还原。
+
 ### A.6 风险与回滚
 
 - **最大风险是 A2 的样式回归**，且**只有肉眼能发现** → 必须实机逐页比对，不能只跑测试
 - 回滚：A1/A2 是 `main.ts` 与 `App.vue` 的独立改动，`git revert` 单个提交即可；
-  A3 只影响构建配置；A4 两行；A5 是新增文件
+  A3 只影响构建配置；A4 两行；A5 是新增文件（`web/scripts/check-bundle.mjs`）
+  加上三处调用点（`web/package.json` 的 `build` / `.github/workflows/ci.yml` / `Makefile`），
+  要回滚需一并处理，否则 `npm run build` 会因找不到脚本而失败
 
 ---
 

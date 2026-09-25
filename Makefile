@@ -51,7 +51,7 @@ check-frontend:
 	cd web && npm run lint
 	cd web && npm run format:check
 	cd web && npm run test
-	cd web && npx vite build
+	cd web && npm run build
 	@echo "前端检查通过"
 
 # 执行未应用的数据库迁移（读取 config/config.yaml 里的 database.* 配置）

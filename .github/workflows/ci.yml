@@ -118,8 +118,23 @@ jobs:
       - name: 格式检查（Prettier）
         run: npm run format:check
 
-      - name: 构建
-        run: npx vite build
+      # ────────────────────────────────────────────────────────
+      # 构建 + 产物体积门禁：**阻断项**。
+      #
+      # 刻意用 `npm run build` 而不是 `npx vite build`：
+      # `build` 的定义是 `vue-tsc && vite build && node scripts/check-bundle.mjs`，
+      # 让 CI 与本地跑的是**同一条命令**，避免「CI 绿了但本地 build 其实是另一回事」。
+      #
+      # 体积门禁为什么必须有：本次产物从 1.27 MB 悄悄涨到首屏 1.5 MB，
+      # vite 的 chunk 警告一直有，但**警告不是门禁** —— 不阻断就没人看，
+      # 和 P2-2 那个「lint 因版本不对根本没在检查、continue-on-error 又让它连失败
+      # 都不显眼」是同一类失效。阈值与例外项见 web/scripts/check-bundle.mjs 头部注释。
+      #
+      # 上面那步 `类型检查` 与这里的 vue-tsc 有重叠（多花约 20s）：
+      # 保留它只是为了失败时步骤名直接指向「类型检查」，定位更快。
+      # ────────────────────────────────────────────────────────
+      - name: 构建 + 产物体积门禁
+        run: npm run build
 
   # ────────────────────────────────────────────────────────────
   # golangci-lint：**阻断项**。
