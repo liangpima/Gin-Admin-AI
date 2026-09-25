@@ -101,6 +101,10 @@ cors:
     - "Accept"
     - "Authorization"
     - "X-Tenant-Id"
+    # 与 config/config.yaml 保持一致（前端每次非 GET 请求都会带这个头）。
+    # 同源部署（nginx 反代 /api）不产生预检，因此漏配在本项目默认编排下
+    # 不会暴露 —— 只在有人把前端挪到别的域名时才炸。
+    - "X-CSRF-Token"
   expose_headers:
     - "Content-Length"
     - "Content-Disposition"

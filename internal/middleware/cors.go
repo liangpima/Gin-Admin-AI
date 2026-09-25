@@ -17,7 +17,14 @@ func Cors() gin.HandlerFunc {
 		cfg.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"}
 	}
 	if len(cfg.AllowHeaders) == 0 {
-		cfg.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Tenant-Id"}
+		// X-CSRF-Token 必须在列表里：它由前端在每次非 GET 请求上携带，
+		// 而自定义头会触发 CORS 预检 —— 漏了它，跨域部署下预检失败，
+		// 现象是「所有写操作都发不出去」，而同源部署（dev 走 Vite proxy、
+		// prod 走 nginx）根本不发预检，因此测不出来。
+		cfg.AllowHeaders = []string{
+			"Origin", "Content-Type", "Accept", "Authorization",
+			"X-Tenant-Id", "X-CSRF-Token",
+		}
 	}
 	if len(cfg.ExposeHeaders) == 0 {
 		cfg.ExposeHeaders = []string{"Content-Length", "Content-Disposition"}

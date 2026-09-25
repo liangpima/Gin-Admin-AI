@@ -182,13 +182,18 @@ func (c *SecurityConfig) CookiePolicySummary() string {
 	summary := fmt.Sprintf("token 传输：%s；cookie 属性 SameSite=%s Secure=%t",
 		how, c.SameSiteName(), c.CookieSecureEnabled())
 
+	// 把 double-submit 一并报出来：SameSite 与 double-submit 是**两层**防护，
+	// 只看 SameSite 会让人以为「配了 lax 就没有 CSRF 风险」，
+	// 而分域名部署下 SameSite 只能设 none、那时全靠这一层。
+	summary += "；写请求启用 CSRF double-submit 校验（X-CSRF-Token）"
+
 	if !c.CookieSecureEnabled() {
 		summary += "（Secure=false 只适用于 HTTP 部署；上 HTTPS 后必须置 true，" +
 			"否则 cookie 会随明文传输）"
 	}
 	if c.SameSite() == http.SameSiteNoneMode {
 		summary += "（SameSite=None：跨站请求会携带 cookie，CSRF 面最大，" +
-			"必须确认 double-submit 校验已启用）"
+			"此时 double-submit 是唯一还在生效的防线）"
 	}
 	return summary
 }

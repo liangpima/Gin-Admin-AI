@@ -15,9 +15,13 @@
 package authcookie
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+
 	"github.com/gin-gonic/gin"
 
 	"go-admin/config"
+	"go-admin/internal/logger"
 )
 
 const (
@@ -71,6 +75,38 @@ const (
 	// 守卫在任意业务页面上都会读它，收窄 Path 会让部分页面读不到 ——
 	// 那会表现成「在这个页面刷新会掉登录，在另一个页面不会」，极难定位。
 	LoginFlagCookiePath = "/"
+
+	// CSRFCookieName 「双提交 Cookie」（double-submit）方案里的 CSRF 令牌名。
+	//
+	// 它**必须是非 HttpOnly**：整个机制就是「浏览器把 cookie 里的值读出来、
+	// 放进请求头，服务端只校验两者相等」，服务端不存储任何东西。
+	// 这也是它与上面两个 token 的根本区别 —— 那两个越读不到越安全，
+	// 这一个读不到就没法用。因此**不能**因为「看起来像凭据」而给它加上 HttpOnly。
+	//
+	// 为什么攻击者拿不到它：跨站请求能让浏览器**带上** cookie（表单、img、fetch），
+	// 但**读不到** cookie 的值，也就填不出匹配的请求头；而自定义头会触发 CORS 预检，
+	// 白名单之外直接失败。于是「带上 cookie」与「填对头」无法同时成立。
+	CSRFCookieName = "csrf_token"
+
+	// CSRFHeaderName 前端放置 CSRF 令牌的请求头名。
+	//
+	// 三处必须保持一致：这里、前端 `web/src/utils/auth.ts` 的同名常量、
+	// 以及 `cors.allow_headers`（两份配置模板 + cors.go 的兜底默认值）。
+	// 前两处不一致 → 所有非 GET 请求 403；第三处漏配只在**跨域部署**
+	// （自定义头触发预检）时才暴露，同源部署下测不出来。
+	CSRFHeaderName = "X-CSRF-Token"
+
+	// CSRFCookiePath 与 access token 一致（全站可见）。
+	//
+	// 它要跟着**每一个**非 GET 请求发出去，收窄 Path 会让业务接口全部 403。
+	CSRFCookiePath = "/"
+
+	// csrfTokenBytes 令牌的随机字节数（hex 编码后长度翻倍）。
+	//
+	// 32 字节 = 256 位，与 session id 同量级。这里只需「不可猜」，
+	// 不需要抗离线暴力破解 —— 每次请求都要与服务端下发的值比对，
+	// 攻击者没有离线试错的余地。
+	csrfTokenBytes = 32
 )
 
 // Set 按当前配置下发 access / refresh cookie，以及供前端守卫使用的登录态标记。
@@ -100,6 +136,15 @@ func Set(c *gin.Context, accessToken, refreshToken string) {
 		// 标记本来就不代表会话有效（见 LoginFlagCookieName 的注释）。
 		writeCookie(c, LoginFlagCookieName, LoginFlagCookieValue,
 			LoginFlagCookiePath, config.Cfg.JWT.RefreshExpire, false)
+
+		// CSRF 令牌与 refresh token 同寿命：会话没了，令牌也就没有意义。
+		//
+		// 取值「已带则沿用、没带才生成」，理由见 csrfTokenFor。
+		// 生成失败时返回空串，此时**不下发**该 cookie（fail-closed：
+		// 前端拿不到令牌，后续非 GET 请求会被中间件拒绝，而不是放行）。
+		if token := csrfTokenFor(c); token != "" {
+			writeCookie(c, CSRFCookieName, token, CSRFCookiePath, config.Cfg.JWT.RefreshExpire, false)
+		}
 	}
 }
 
@@ -117,6 +162,35 @@ func Clear(c *gin.Context) {
 	// 登录态标记也必须清 —— 漏了它，用户登出后刷新页面会被标记骗回
 	// 「已登录」分支，白拉一次 userInfo 再被踢一次，且中间会闪一下空白布局。
 	clearCookie(c, LoginFlagCookieName, LoginFlagCookiePath, false)
+	// CSRF 令牌一并清掉：留着它虽然不构成漏洞（没有会话可被利用），
+	// 但会让「登出后 cookie 里还剩一个安全相关的值」看起来像漏清，
+	// 下一次登录也会把它当成「已带」而沿用，掩盖掉本应重新生成的路径。
+	clearCookie(c, CSRFCookieName, CSRFCookiePath, false)
+}
+
+// csrfTokenFor 返回本次应当下发的 CSRF 令牌：请求已带则**沿用**，否则新生成。
+//
+// 为什么沿用而不是每次登录/续期都换一个新的：续期发生在**并发请求的中间**。
+// 若续期轮换令牌，那些「已经读好 cookie、拼好请求头，但还没发出去」的请求
+// 会带着旧值，而浏览器真正发出时 cookie 已经变成新值 —— 头与 cookie 不一致，
+// 于是被 403。窗口很窄但真实存在，且现象是「偶发某一个请求失败」，极难定位。
+// 沿用旧值把这个竞态整个消除，且安全性上没有任何损失：令牌只承担
+// 「与 cookie 同源可比对」的职责，不负责标识会话新鲜度（那是 refresh token 的事）。
+//
+// 生成失败（crypto/rand 不可用）时返回空串，调用方**不下发**该 cookie。
+// 方向必须是安全的：宁可让前端拿不到令牌（后续非 GET 请求被拒），
+// 也不能退回一个可预测的值 —— 那会让 double-submit 退化成「填什么都通过」。
+func csrfTokenFor(c *gin.Context) string {
+	if v, err := c.Cookie(CSRFCookieName); err == nil && v != "" {
+		return v
+	}
+
+	buf := make([]byte, csrfTokenBytes)
+	if _, err := rand.Read(buf); err != nil {
+		logger.Log.Errorf("[authcookie] 生成 CSRF 令牌失败，本次不下发该 cookie（写请求将被拒绝）: %v", err)
+		return ""
+	}
+	return hex.EncodeToString(buf)
 }
 
 // RefreshFromRequest 取出本次请求携带的 refresh token。

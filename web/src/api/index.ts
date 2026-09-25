@@ -1,7 +1,16 @@
 import axios, { type AxiosInstance, type AxiosResponse, type AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
-import { clearLoginFlag } from '@/utils/auth'
+import { clearLoginFlag, CSRFHeaderName, getCsrfToken } from '@/utils/auth'
 import router from '@/router'
+
+/**
+ * 需要携带 CSRF 令牌的方法。
+ *
+ * 与后端 `isSafeMethod` 的白名单互补：那边列的是**免校验**的安全方法
+ * （GET/HEAD/OPTIONS），这里列的是需要校验的。两处必须同步改 ——
+ * 后端新增一个要校验的方法而这里漏了，现象是「该方法的请求全部 403」。
+ */
+const CSRF_METHODS = ['post', 'put', 'patch', 'delete']
 
 let isRedirecting = false
 
@@ -53,6 +62,22 @@ service.interceptors.request.use(
     // 注意这**不是**「回滚开关」：后端 security.token_transport 设成 header 时
     // 不再下发 cookie，而前端已经不再注入头，两边都拿不到凭据。
     // B2 之后回滚的粒度是「前后端一起回退到 B2 之前的提交」，不是改一个配置项。
+    //
+    // CSRF 令牌（P3-B3）：非 GET 请求带上 X-CSRF-Token，与服务端的
+    // double-submit 校验配对（见 internal/middleware/csrf.go）。
+    // 它**不是**凭据，只是「请求由本域脚本发出」的信物 —— 与 Authorization 头
+    // 是两回事，别把两者混为一谈。
+    //
+    // 只对非安全方法附加：GET/HEAD/OPTIONS 在服务端本就免校验，
+    // 而自定义头会触发 CORS 预检 —— 给每个 GET 都加一个头，等于把
+    // 跨域部署下所有读请求都变成「先发一次 OPTIONS」，纯属性能损失。
+    const method = (config.method || 'get').toLowerCase()
+    if (CSRF_METHODS.includes(method)) {
+      const csrf = getCsrfToken()
+      if (csrf) {
+        config.headers[CSRFHeaderName] = csrf
+      }
+    }
     return config
   },
   (error) => Promise.reject(error),

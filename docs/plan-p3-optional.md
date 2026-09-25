@@ -22,7 +22,7 @@
 | A5 产物体积门禁 | ✅ 已完成 | 新增 `web/scripts/check-bundle.mjs`（读 `dist/index.html` 解析首屏引用 + `gzipSync` 算体积 + 按 `-<hash>.js` 剥名匹配例外表）；接进 `npm run build`（`vue-tsc && vite build && node scripts/check-bundle.mjs`）与 CI 的 `构建 + 产物体积门禁` 步骤。实测首屏 JS gzip **137.9 kB** / CSS **13.1 kB**，通过 |
 | B1 后端双读 cookie | ✅ 已完成（**有一处偏离**） | 新增 `security.token_transport`（header/both/cookie，默认 both）+ `cookie_secure` + `cookie_same_site`；`middleware.Auth` 抽出 `extractToken`（头优先、其次 cookie）；新增 `internal/authcookie` 包负责下发/清除；登录/刷新写 cookie、登出清 cookie 并**吊销 refresh token**；`deploy/config.docker.yaml` 补上**此前完全缺失的 security 段**；启动日志打印 cookie 策略。前端一行未改。**`refresh_token` 的 Path 从计划的 `/api/v1/auth/refresh` 放宽到 `/api/v1/auth`**，理由见 B.3 的注 |
 | B2 前端 cookie-only | ✅ 已完成（**有 3 处计划外改动**） | 删 `getToken/setToken/…` 改为非敏感 `logged_in` 标记；守卫改同步判定；`api/index.ts` 加 `withCredentials`、去掉 Authorization 注入、续期不再传 body；`Upload` 组件去掉手写的 `Authorization` 头。新增 `utils/auth.spec.ts`（7）+ `router/index.spec.ts`（9）；后端补 `/auth/refresh` 的 cookie 取值（**计划外**）。实机：B2 冒烟 **27/27**、浏览器端 **13/13**（含「刷新后仍是登录态」）。详见下方「B2 的偏离」 |
-| B3 CSRF | ⏳ 待做 | |
+| B3 CSRF | ✅ 已完成（**计划外修掉一个既有缺陷**） | double-submit：`authcookie` 下发非 HttpOnly 的 `csrf_token`（32 字节 hex，寿命跟 refresh token）；前端 `api/index.ts` 非 GET 请求带 `X-CSRF-Token`（`Upload` 组件手工补，它不走 axios）；新增 `middleware.CSRF`（只校验「走 cookie 认证的非安全方法」，走头的 API 客户端自动豁免）。验证：后端冒烟 **21/21**、浏览器端 **18/18**、变异验证 4 组全转红。**顺带修掉 `DrainBody`**：见下方「B3 顺带修掉的既有缺陷」 |
 
 ---
 
@@ -368,18 +368,51 @@ Lax 会让 cookie 不被携带，必须改 `SameSite=None; Secure` ——
 >   导航瞬间 pathname 就已经是目标值了，守卫的重定向还没发生 ——
 >   第一版据此报「停在 /dashboard」，而实际上登录是 403 失败的。
 
-**B3 · CSRF 防护**
+**B3 · CSRF 防护** ✅ 已完成
 
-- **主防线：`SameSite=Lax`**，写成配置项 + 启动日志打印当前值
+- **主防线：`SameSite=Lax`** —— 即 B1 落地的 `security.cookie_same_site`，
+  启动日志会打印当前取值（`CookiePolicySummary`）
 - **纵深防御：双提交 Cookie（double-submit）**
-  - 登录时额外下发一个**非 HttpOnly** 的 `csrf_token`（随机值）
+  - 登录/续期额外下发一个**非 HttpOnly** 的 `csrf_token`（32 字节随机 hex，
+    寿命跟 refresh token），清理由登出负责
   - 前端每次非 GET 请求把它放进 `X-CSRF-Token` 头
-  - 中间件校验「头里的值 == cookie 里的值」（无需服务端存储）
+  - `middleware.CSRF` 校验「头里的值 == cookie 里的值」
+    （`subtle.ConstantTimeCompare`，**服务端不存储任何东西**）
   - 只对**非 GET/HEAD/OPTIONS** 生效，且**只对走 cookie 认证的请求**生效 ——
     走 `Authorization` 头的 API 客户端自动豁免。这是 B1 双读设计带来的额外好处
-- 测试（`internal/middleware`）：缺头拒绝 / 头与 cookie 不一致拒绝 / GET 放行 /
-  走 `Authorization` 头时豁免
-- **变异验证**：把校验改成恒真 → 用例必须转红
+  - 挂载位置：`Auth()` 之后、`CasbinAuth()` 之前。位置有语义：豁免规则依赖
+    Auth 写进上下文的「凭据来源」；放在鉴权与操作日志之前，则被拦下的伪造请求
+    不会消耗一次鉴权查询与一次日志写库
+- 测试（`internal/middleware/csrf_test.go`）：15 组判定表（缺头 / 缺 cookie /
+  两者都缺 / 值不一致 / 仅大小写不同 / PUT·DELETE·PATCH / GET·HEAD·OPTIONS 放行 /
+  走头豁免 / 上下文无来源时 fail-closed）+ header 模式短路 + `isSafeMethod` 白名单方向
+
+**三处「看起来可以简化、简化了就坏」的地方（都写进了代码注释）**：
+
+1. **`csrf_token` 必须非 HttpOnly**。它看起来像凭据，很容易被后人「顺手加强」——
+   而 double-submit 的机制就是「JS 读出 cookie 放进请求头」，加了 HttpOnly
+   等于把机制本身关掉。退化后的现象极具迷惑性：GET 全部正常、登录正常，
+   **只有写操作 403**。
+2. **续期时不得轮换令牌**（`csrfTokenFor` 沿用请求已带的旧值）。续期发生在
+   **并发请求的中间**：若此时换新值，那些「已读好 cookie、拼好头但还没发出去」
+   的请求会带着旧值、而 cookie 已是新值 → 头与 cookie 不一致 → 403。
+   窗口很窄但真实存在，现象是「偶发某一个请求失败」。
+   沿用旧值安全性没有任何损失：令牌只承担「与 cookie 同源可比对」的职责，
+   不负责标识会话新鲜度（那是 refresh token 的事）。
+3. **令牌生成失败时不下发**（`csrfTokenFor` 返回空串则跳过写 cookie）。
+   方向必须是安全的：宁可让前端拿不到令牌（后续写请求被拒），
+   也不能退回一个可预测的值 —— 那会让 double-submit 退化成「填什么都通过」。
+
+**两处计划外的接线**（不改则功能不成立）：
+
+- `cors.allow_headers` 必须加 `X-CSRF-Token`（两份配置模板 + `cors.go` 的兜底默认值）。
+  漏配的后果很隐蔽：同源部署（dev 的 Vite proxy、prod 的 nginx 反代）**根本不发预检**，
+  漏了也一切正常；只有当有人把前端挪到另一个域名、自定义头开始触发预检时，
+  所有写操作才会集体失败。`TestConfigTemplatesParse` 因此断言两份模板都必须含它。
+- `Upload` 组件必须**手工**带这个头：`el-upload` 用自己的 XHR，不经过 axios 的
+  请求拦截器，拿不到那里附加的 `X-CSRF-Token`。漏了这一行的现象是
+  「其他写操作都正常，只有上传 403」。取值用 `computed` 而非挂载时取一次 ——
+  令牌由服务端在登录/续期时下发，组件挂载时可能还没有。
 
 **B4 · 补上自动续期（顺带修掉「refresh token 只写不用」）**
 
@@ -436,6 +469,132 @@ Lax 会让 cookie 不被携带，必须改 `SameSite=None; Secure` ——
 现已补齐，并让 `TestConfigTemplatesParse` 断言 `token_transport` /
 `cookie_same_site` 的取值、以及 `cookie_secure` **必须显式配置**（不得依赖代码默认值）。
 
+#### B3 验证记录（2026-09-25 实测）
+
+| 手法 | 位置 | 结果 |
+|---|---|---|
+| 单元：15 组判定表（安全方法放行 / 缺头 / 缺 cookie / 两者都缺 / 值不一致 / 仅大小写不同 / PUT·DELETE·PATCH / 走头豁免 / 上下文无来源 fail-closed） | `internal/middleware/csrf_test.go` | 全绿 |
+| 单元：`isSafeMethod` 白名单方向（TRACE / CONNECT / 空串 / 小写 `get` 都必须落在「需校验」一侧） | 同上 | 全绿 |
+| 单元：`csrf_token` 属性（非 HttpOnly、Path=/、MaxAge 取自 refresh_expire、64 位 hex）、续期沿用不轮换、每次登录随机 | `internal/authcookie/cookie_test.go` | 全绿 |
+| 单元：请求拦截器只在非 GET 上带头、无令牌时不写空值头、不缓存令牌 | `web/src/api/interceptor.spec.ts` | 全绿 |
+| 单元：`getCsrfToken` / `csrfHeaders` 读的是 `csrf_token` 而不是 `logged_in` | `web/src/utils/auth.spec.ts` | 全绿 |
+| **实机冒烟**（`runtime/smoke/b3_smoke.py`，打真服务） | — | **21/21 通过** |
+| **浏览器端**（`runtime/smoke/b3_browser.mjs`，真 Chrome + CDP 抓请求头） | — | **18/18 通过** |
+
+实机冒烟覆盖的关键几条（单测覆盖不到「浏览器/客户端真实收到什么」）：
+
+- 登录下发 4 个 cookie，其中 `csrf_token` **不含 HttpOnly**、`Path=/`、
+  `Max-Age=604800`（跟 refresh token 而非 access token）
+- `GET /auth/userInfo` 不带 CSRF 头照常 200（跨站 `<img>`/`<script>` 触发的正是 GET）
+- 缺头 / 头与 cookie 不一致 → 403，文案统一为「请求校验失败，请刷新页面后重试」
+- 带对令牌 → 不再是 403 而是走到参数校验（400）；只带 `Authorization` 头、无 cookie
+  无 CSRF 头 → 同样通过（Swagger / curl 无需任何改动）
+- 续期换发了新 access token 而 `csrf_token` 一字未变；**且用续期前的令牌仍能通过**
+  （证明没有竞态窗口）
+- 登出清掉 `csrf_token`（`Max-Age=0`），且此后原 refresh token 换不出新 token
+
+浏览器端覆盖的关键几条（前端的另一半，单测把 `getCsrfToken` 打了桩验不到）：
+
+- `document.cookie` 里**能**读到 `csrf_token`（64 位 hex），而 `access_token` /
+  `refresh_token` 仍然读不到 —— 两者是「非敏感 cookie」但用途相反，不能混用
+- CDP 抓真实请求头：点「退出登录」发出的 `POST /auth/logout` 确实带了
+  `X-CSRF-Token`，**且值与 cookie 完全一致**，服务端返回 200
+- **反向对照**：把 `csrf_token` 从 cookie 里删掉再点登出 → 前端不发这个头、
+  服务端 **403**。这一条是整组里最重要的 —— 没有它，「带令牌能过」也可能只是
+  因为后端根本没在校验
+
+**变异验证（4 组全部转红，均已恢复）**：
+
+| 变异 | 转红的用例 |
+|---|---|
+| 把 CSRF 校验改成恒真（`if false && ...`） | `TestCSRFDoubleSubmit` 的 9 个子用例 |
+| **删掉 `authorized.Use(middleware.CSRF())` 这一行**（未接线） | 只有**实机冒烟**转红（18/21，恰好是那 3 条 CSRF 断言）——单测直接调 `middleware.CSRF()`，接线错了照样全绿。这类「接线」缺陷只能靠真请求发现 |
+| 前端 `CSRF_METHODS` 改成空数组（不再带头） | `interceptor.spec.ts` 4 个用例 + **浏览器端 3 条断言**（含 403） |
+| — | — |
+
+> 第三条值得单独说：它在**单测**与**真浏览器**两侧同时转红，说明这组验证
+> 不是「断言了实现细节」，而是真的覆盖了「头有没有发出去、服务端收不收」。
+
+### B3 顺带修掉的既有缺陷：提前拒绝的响应会丢（`middleware.DrainBody`）
+
+**这不是 B3 引入的，是 B3 的冒烟脚本把它撞出来的** —— 而且是个存在已久、
+一直没被发现的传输层缺陷。`runtime/smoke/b3_smoke.py` 第一次跑到
+「头与 cookie 不一致 → 403」时抛 `ConnectionResetError`，但服务端日志里
+那条 403 好好地记着：**响应写出来了，客户端却没收到。**
+
+**成因（已对照 Go 源码逐条核实）**：
+
+1. 请求带 body 且被**提前拒绝**（401/403/429）—— 这些路径都在读 body 之前返回；
+2. 调用方用 `Connection: close`；
+3. net/http 的 `(*http.body).Close()` 有个**有顺序的 switch**：
+
+   ```go
+   case b.sawEOF:                  // 已读到 EOF → 空操作
+   case b.hdr == nil && b.closing: // ← Connection: close → 直接跳过，不读
+   case b.doEarlyClose:            // ← 读掉最多 maxPostHandlerReadBytes(256KB)
+   default:                        // ← 全部读完
+   ```
+
+   `doEarlyClose` 对**每个**服务端请求都置为 true（`server.go`），
+   也就是说 **keep-alive 的请求，handler 返回后 net/http 本来就会补读**；
+   只有 `closing` 这一条分支被显式跳过（注释理由是 "no point in reading to EOF"）。
+4. 于是关闭连接时接收缓冲区里还压着未读数据（或数据在关闭后才到达），
+   内核发的不是 FIN 而是 **RST**；RST 会让对端内核**丢弃已收到但尚未被读走的
+   数据** —— 包括刚写出去的那个 401/403。
+
+**为什么必须修**：本项目自己的部署配置就会触发它 —— `deploy/nginx/default.conf`
+设了 `proxy_http_version 1.1` 却**没有** `proxy_set_header Connection ""`，
+nginx 因此对上游发 `Connection: close`（这正是「要开 upstream keepalive 就必须
+显式清空 Connection 头」那条经典配置的由来）。后果直接砸在两个已完成的改造上：
+B4 的「401 → 续期 → 重放」拿不到 401（nginx 报 502），B3 的 403 前端也看不到。
+触发门槛还很低：只要**请求体比响应晚到**就行（慢速链路、body 稍大）。
+
+**修法**：新增 `middleware.DrainBody`，注册在**最外层**（第一个），
+在 `c.Next()` 之后把未读完的 body 补读掉（上限 256KB，与 net/http 同值）。
+它**不是发明新行为，而是消除两条路径的差异** —— 让 `Connection: close` 的请求
+也享受 keep-alive 请求本来就有的待遇。
+
+几处刻意的取舍：
+
+- **挂最外层而不是在每个 `c.Abort()` 旁边各写一遍**：那种写法迟早会漏，
+  而漏掉的那一处只会表现为「偶发网络错误」，没人会联想到请求体
+- **不判断 `c.IsAborted()`**：请求体是否被读完是传输层的事实，不该取决于
+  某个中间件是否记得调用 Abort（handler 提前 return 而没 Abort 同样会留下未读 body）
+- **有 256KB 上限**：这个函数运行在**尚未通过鉴权**的请求上，无上限地读完
+  等于让匿名调用方用一个 `Content-Length` 就能让我们替他把数据收完
+- **不加更短的读超时**：那会让「body 比响应晚到」的慢速客户端重新落回 RST，
+  把要修的场景又修坏。补读的阻塞受 `server.read_timeout`（60s）约束，
+  与 net/http 对 keep-alive 请求本就会做的事一致，**没有引入新的资源占用形态**
+
+**验证**：
+
+- `runtime/smoke/probe_csrf_reset.py` 四组对照实验（每组 12 次）：
+
+  | 场景 | 修复前 | 修复后 |
+  |---|---|---|
+  | `Connection: close` + 有 body + 错头 | **4/12** 收到响应 | **12/12** |
+  | `Connection: close` + 有 body + 无头 | **3/12** 收到响应 | **12/12** |
+  | `Connection: close` + 无 body + 错头 | 12/12 | 12/12 |
+  | keep-alive + 有 body + 错头 | 12/12 | 12/12 |
+
+  中间两行是关键对照：去掉「未读 body」或去掉「服务端会关连接」任一变量，
+  现象就消失 —— 这正是「成因是 RST 而非 CSRF 校验本身」的判据。
+- `internal/middleware/drain_body_test.go` 6 条用例，`DrainBody` 覆盖率 100%；
+  变异验证 4/4 转红。
+
+**写用例时踩到的一个坑（值得记住）**：真连接用例的**初版是一条永远绿的假用例**。
+它用 `http.Client` 循环 10 次，断言「总能收到 401」—— 在「把补读整个删掉」的
+变异版本上照样 10/10 通过。原因有两层：
+
+1. `http.Client` 一发出请求就立刻读响应，把 RST 与响应之间的竞速掩盖掉了；
+2. 即使改用裸 socket，只要把请求头与 body **一次性写出去**，body 就会和请求头
+   落在同一个 TCP 段里、被 net/http 读请求头时的 bufio 一并吞进用户态 ——
+   关闭时内核接收缓冲区是空的，发的是 FIN 而不是 RST。
+
+最终改成**显式制造「body 晚到」**：只写请求头 → 等 50ms 让服务端把响应写完并关闭
+→ 再写 body → 等 300ms 让 RST 确定到达 → 最后才读。两次延迟把竞速变成确定性，
+修复前稳定报 `connection reset`，修复后稳定拿到 401。
+
 ### B.5 风险与回滚
 
 - **最高风险是 B2 的守卫改动** → 必须**先**补 vitest + jsdom 的守卫用例
@@ -456,7 +615,7 @@ Lax 会让 cookie 不被携带，必须改 `SameSite=None; Secure` ——
 | A5 产物体积门禁 | A1~A4 | 收尾 |
 | B1 后端双读 cookie | 无 | 与 A 组完全独立，可并行 |
 | B2 前端 cookie-only | **先补 vitest + jsdom 守卫用例** | |
-| B3 CSRF | B2 | |
+| B3 CSRF | B2 | ✅ 已完成 |
 | B4 自动续期 | **无** | 见下 |
 
 **建议把 B4 拆出来单独先做。** 它与 cookie 改造没有任何依赖，修的是一个

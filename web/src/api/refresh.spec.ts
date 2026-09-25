@@ -74,11 +74,15 @@ const ElMessage = { error: vi.fn(), success: vi.fn(), warning: vi.fn() }
 vi.mock('element-plus', () => ({ ElMessage }))
 
 const clearLoginFlag = vi.fn()
-// 只 mock 这一个导出（P3-B2 之后 @/utils/auth 就只剩登录态标记的读写）。
+// 只 mock 真实模块**实际导出**的东西（P3-B2 之后 @/utils/auth 只剩登录态标记
+// 与 CSRF 令牌的读写）。
 // 若实现回退去调 getToken / setToken，这里会得到 undefined 并直接抛错 ——
 // 这比断言「调用了新接口」更能防回退：后者不阻止旧接口同时被调用。
 vi.mock('@/utils/auth', () => ({
   clearLoginFlag: () => clearLoginFlag(),
+  CSRFHeaderName: 'X-CSRF-Token',
+  // 本文件关注续期链路，不关心 CSRF；返回 undefined 让请求拦截器不加头
+  getCsrfToken: () => undefined,
 }))
 
 const routerPush = vi.fn(() => Promise.resolve())

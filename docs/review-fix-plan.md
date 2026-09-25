@@ -530,11 +530,21 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   **顺带发现一个当前就在发生的缺陷**：`refreshToken()` API 定义了但从未被调用，
   用户 2 小时后（`access_expire: 7200`）会被踢到登录页，而手里有 7 天有效的 refresh token
   —— B4 已拆出来单独先做（提交 `765a90f`）。
-  **进度（2026-09-25）**：B4 ✅、**B1 ✅**（后端双读 cookie：新增
-  `security.token_transport` 三态开关 + `internal/authcookie` 包，登录/刷新写
-  HttpOnly cookie、登出清 cookie 并吊销 refresh token；前端一行未改，可独立上线；
-  实机冒烟 18/18 通过，变异验证 3/3 转红）。B2/B3 待做。
-  详见 **`docs/plan-p3-optional.md` 项目 B**。
+  **进度（2026-09-25）**：**B 组四项全部完成** ——
+  B4 ✅（自动续期，`765a90f`）、
+  **B1 ✅**（后端双读 cookie：新增 `security.token_transport` 三态开关 +
+  `internal/authcookie` 包，登录/刷新写 HttpOnly cookie、登出清 cookie 并吊销
+  refresh token；前端一行未改，可独立上线；实机冒烟 18/18，变异验证 3/3 转红）、
+  **B2 ✅**（前端切 cookie-only，登录态判定改用非敏感 `logged_in` 标记；
+  新增 vitest+jsdom 守卫用例；实机冒烟 27/27、浏览器端 13/13）、
+  **B3 ✅**（CSRF double-submit：非 HttpOnly 的 `csrf_token` + `middleware.CSRF`
+  + 前端拦截器带 `X-CSRF-Token`；后端冒烟 21/21、浏览器端 18/18、
+  变异验证 4 组全转红）。
+  **B3 顺带修掉一个既有传输层缺陷**：带 body 的请求被提前拒绝时，
+  若调用方用 `Connection: close`（**本项目 nginx 配置就是**），
+  net/http 会带着未读数据关闭连接 → RST → 已写出的 401/403 被对端内核丢弃，
+  调用方只看到「连接被重置」。新增 `middleware.DrainBody` 在最外层补读请求体，
+  实测 4/12 → **12/12**。详见 **`docs/plan-p3-optional.md` 项目 B**。
 
 ### P3-3 清理项
 - **5 个孤儿组件**（`SvgIcon`/`TableSkeleton`/`PageHeader`/`RightPanel`/`Upload`）：

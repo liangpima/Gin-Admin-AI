@@ -70,6 +70,9 @@ cors:
     - "Accept"
     - "Authorization"
     - "X-Tenant-Id"
+    # 前端每次非 GET 请求都会带它（CSRF double-submit，见 internal/middleware/csrf.go）。
+    # 自定义头会触发 CORS 预检，漏了它跨域部署下所有写操作都会被预检挡下。
+    - "X-CSRF-Token"
   expose_headers:
     - "Content-Length"
     - "Content-Disposition"

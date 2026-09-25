@@ -134,6 +134,11 @@ func Setup(mode string) *gin.Engine {
 		logger.Log.Errorf("[router] 设置可信代理失败，IP 限频可能可被 X-Forwarded-For 绕过: %v", err)
 	}
 
+	// 必须是**第一个**注册的：gin 里先注册的中间件后执行其 c.Next() 之后的部分，
+	// 所以只有挂在这里，补读请求体才会发生在连接关闭之前、且晚于所有下游拒绝。
+	// 详见 middleware.DrainBody 的注释 —— 漏了它，被提前拒绝的写请求
+	// 在 Connection: close 的调用方（含本项目 nginx 配置）眼里会变成连接重置。
+	r.Use(middleware.DrainBody())
 	r.Use(middleware.Recovery())
 	r.Use(middleware.Logger())
 	r.Use(middleware.Cors())
@@ -223,6 +228,12 @@ func Setup(mode string) *gin.Engine {
 
 	authorized := api.Group("")
 	authorized.Use(middleware.Auth())
+	// CSRF 必须紧跟在 Auth 之后：它的豁免规则依赖 Auth 写进上下文的
+	// 「凭据来自头还是 cookie」（见 middleware/csrf.go）。
+	// 放在 CasbinAuth / OperationLog 之前，是让被 CSRF 拦下的请求
+	// 不再消耗一次鉴权查询与一次操作日志写库 —— 那两步对伪造请求没有价值，
+	// 反而给了攻击者一个「用无效请求刷库」的入口。
+	authorized.Use(middleware.CSRF())
 	authorized.Use(middleware.CasbinAuth())
 	authorized.Use(middleware.OperationLog())
 	{

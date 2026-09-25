@@ -54,10 +54,14 @@ const ElMessage = { error: vi.fn(), success: vi.fn(), warning: vi.fn() }
 vi.mock('element-plus', () => ({ ElMessage }))
 
 const clearLoginFlag = vi.fn()
-// 只 mock 这一个导出（P3-B2 之后 @/utils/auth 就只剩登录态标记的读写）。
+const getCsrfToken = vi.fn<() => string | undefined>()
+// 只 mock 真实模块**实际导出**的东西（P3-B2 之后 @/utils/auth 只剩登录态标记
+// 与 CSRF 令牌的读写）。
 // 若实现回退去调 getToken / removeToken，这里会得到 undefined 并直接抛错。
 vi.mock('@/utils/auth', () => ({
   clearLoginFlag: () => clearLoginFlag(),
+  CSRFHeaderName: 'X-CSRF-Token',
+  getCsrfToken: () => getCsrfToken(),
 }))
 
 const routerPush = vi.fn(() => Promise.resolve())
@@ -189,5 +193,90 @@ describe('请求拦截器：不再注入 Authorization 头（P3-B2）', () => {
 
     expect(result).toBe(config)
     expect(config.headers.Authorization).toBeUndefined()
+  })
+})
+
+/**
+ * 请求拦截器：非 GET 请求携带 CSRF 令牌（P3-B3）。
+ *
+ * 后端从 B3 起要求「走 cookie 认证的非安全方法」带上 `X-CSRF-Token`
+ * （见 internal/middleware/csrf.go）。前端这一半的失效方式都很安静：
+ * 漏加头 → 所有写操作 403；给 GET 也加 → 跨域部署下每个读请求都多一次预检
+ * （功能正常，只是慢，所以没人会去查）。
+ *
+ * 令牌来自 cookie，因此这里用 mock 控制「有没有令牌」，而不需要真实 cookie jar
+ * （本文件跑在 node 环境，没有 document.cookie）。
+ */
+describe('请求拦截器：非 GET 请求携带 CSRF 令牌（P3-B3）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('POST 请求带上 X-CSRF-Token', () => {
+    getCsrfToken.mockReturnValue('tok-1')
+    const config = { method: 'post', headers: {} as Record<string, string> }
+
+    handlers.request!(config)
+
+    expect(config.headers['X-CSRF-Token']).toBe('tok-1')
+  })
+
+  it('PUT / PATCH / DELETE 同样带上', () => {
+    for (const method of ['put', 'patch', 'delete']) {
+      getCsrfToken.mockReturnValue('tok-1')
+      const config = { method, headers: {} as Record<string, string> }
+
+      handlers.request!(config)
+
+      expect(config.headers['X-CSRF-Token'], `${method} 应带 CSRF 头`).toBe('tok-1')
+    }
+  })
+
+  it('方法名大小写不敏感（axios 实际传的是大写）', () => {
+    getCsrfToken.mockReturnValue('tok-1')
+    const config = { method: 'DELETE', headers: {} as Record<string, string> }
+
+    handlers.request!(config)
+
+    expect(config.headers['X-CSRF-Token']).toBe('tok-1')
+  })
+
+  it('GET 请求**不**带 —— 避免跨域部署下每个读请求都触发 CORS 预检', () => {
+    getCsrfToken.mockReturnValue('tok-1')
+    const config = { method: 'get', headers: {} as Record<string, string> }
+
+    handlers.request!(config)
+
+    // 断言「键集合为空」而不是 `toBeUndefined()`：后者区分不了
+    // 「没写这个头」与「写了但值是 undefined」—— 变异验证时正是这一点
+    // 让一个「无令牌也照样赋值」的实现蒙混过关（属性存在、值为 undefined）。
+    expect(Object.keys(config.headers)).toEqual([])
+  })
+
+  it('没有令牌时不写这个头（而不是写一个空值头）', () => {
+    // 未登录时（还没拿到 csrf cookie）不能塞空串：服务端校验的是
+    // 「头非空 且 与 cookie 相等」，空值头只会让请求带着一个无意义的头出去
+    getCsrfToken.mockReturnValue(undefined)
+    const config = { method: 'post', headers: {} as Record<string, string> }
+
+    handlers.request!(config)
+
+    expect(Object.keys(config.headers)).toEqual([])
+  })
+
+  it('令牌每次现读 cookie，不缓存在模块里', () => {
+    // 服务端在续期时会重新下发这个 cookie（值沿用不变）。若前端在首次读取后
+    // 缓存下来，一旦服务端换了值（例如登出后重新登录），缓存值就与 cookie 不一致，
+    // 现象是「随机有几个写请求失败」，极难复现。
+    getCsrfToken.mockReturnValue('first')
+    const c1 = { method: 'post', headers: {} as Record<string, string> }
+    handlers.request!(c1)
+
+    getCsrfToken.mockReturnValue('second')
+    const c2 = { method: 'post', headers: {} as Record<string, string> }
+    handlers.request!(c2)
+
+    expect(c1.headers['X-CSRF-Token']).toBe('first')
+    expect(c2.headers['X-CSRF-Token']).toBe('second')
   })
 })

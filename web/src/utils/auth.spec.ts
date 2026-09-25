@@ -2,7 +2,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Cookies from 'js-cookie'
-import { clearLoginFlag, isLoggedIn } from '@/utils/auth'
+import { clearLoginFlag, csrfHeaders, CSRFHeaderName, getCsrfToken, isLoggedIn } from '@/utils/auth'
 
 /**
  * 登录态标记的单元测试（P3-B2）。
@@ -95,5 +95,57 @@ describe('模块边界：不再有任何 token 存取接口', () => {
     for (const name of ['getToken', 'setToken', 'getRefreshToken', 'setRefreshToken']) {
       expect(mod, `不应再导出 ${name}`).not.toHaveProperty(name)
     }
+  })
+})
+
+/**
+ * CSRF 令牌的读取（P3-B3）。
+ *
+ * 这组用例守的是 double-submit 的前端一半。它与上面那组是**镜像关系**：
+ * `logged_in` 不能当鉴权依据，而 `csrf_token` 恰恰必须能被 JS 读到 ——
+ * 两者都是「非敏感 cookie」，但一个只用来决定要不要拉 userInfo，
+ * 另一个要放进请求头。把这两个 cookie 混用（比如用 logged_in 当令牌，
+ * 或给 csrf_token 加上 HttpOnly）都会让功能在「看起来正常」的状态下悄悄坏掉。
+ */
+describe('CSRF 令牌：读 cookie、拼请求头', () => {
+  const CSRF = 'csrf_token'
+
+  beforeEach(() => {
+    Cookies.remove(CSRF, { path: '/' })
+  })
+
+  it('没有令牌时返回 undefined（未登录时不该带头）', () => {
+    // 登录接口本身就是「还没有令牌」的状态。若这里返回空串，
+    // 调用方会写出 `X-CSRF-Token: `（空值头），而服务端校验的是
+    // 「头非空 且 与 cookie 相等」—— 空头应当由前端就不发，而不是靠服务端兜底。
+    expect(getCsrfToken()).toBeUndefined()
+  })
+
+  it('有令牌时原样读出（不做 trim / 不改写）', () => {
+    Cookies.set(CSRF, 'abc123', { path: '/' })
+    expect(getCsrfToken()).toBe('abc123')
+  })
+
+  it('csrfHeaders() 无令牌时返回空对象', () => {
+    expect(csrfHeaders()).toEqual({})
+  })
+
+  it('csrfHeaders() 有令牌时返回正确的头名与值', () => {
+    Cookies.set(CSRF, 'abc123', { path: '/' })
+    expect(csrfHeaders()).toEqual({ 'X-CSRF-Token': 'abc123' })
+  })
+
+  it('头名必须是 X-CSRF-Token —— 与服务端 authcookie.CSRFHeaderName 逐字一致', () => {
+    // 拼错（如 X-CSRF-Token 写成 X-Csrf-Token 之外的其它名字）不会有任何报错，
+    // 现象是**所有非 GET 请求 403**，而 GET 一切正常 —— 很容易被当成权限问题。
+    expect(CSRFHeaderName).toBe('X-CSRF-Token')
+  })
+
+  it('读的是 csrf_token 而不是 logged_in —— 两个 cookie 不能混用', () => {
+    // 用 logged_in 当令牌的话，服务端比对的是 csrf_token cookie，
+    // 永远对不上 → 所有写请求 403
+    Cookies.set('logged_in', '1', { path: '/' })
+    expect(getCsrfToken()).toBeUndefined()
+    expect(csrfHeaders()).toEqual({})
   })
 })

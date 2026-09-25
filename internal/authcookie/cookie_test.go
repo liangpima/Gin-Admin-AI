@@ -1,6 +1,7 @@
 package authcookie
 
 import (
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -196,6 +197,101 @@ func TestSetWritesLoginFlag(t *testing.T) {
 	}
 }
 
+// TestSetWritesCSRFToken 双提交 Cookie 的令牌属性（P3-B3）。
+//
+// 与登录态标记相反，这个 cookie **必须**是 JS 可读的：整个 double-submit 机制
+// 就是「浏览器读出 cookie 的值、放进请求头，服务端比对两者是否相等」。
+// 因此它是最容易被后人「顺手加强」的地方 —— 看起来像凭据就加上 HttpOnly，
+// 加完登录照常能用（GET 不受影响），但所有写操作会在下一次请求时 403。
+func TestSetWritesCSRFToken(t *testing.T) {
+	withSecurity(t, config.TokenTransportBoth, config.CookieSameSiteLax, nil, 7200, 604800)
+
+	c, w := newCookieCtx()
+	Set(c, "access-1", "refresh-1")
+	got := cookiesOf(t, w)
+
+	token, ok := got[CSRFCookieName]
+	if !ok {
+		t.Fatalf("应下发 %s，实际只有 %v", CSRFCookieName, keysOf(got))
+	}
+	if token.HttpOnly {
+		t.Error("CSRF 令牌**必须**是 JS 可读的（HttpOnly=false）：" +
+			"读不到就无法放进请求头，double-submit 直接失效")
+	}
+	if token.Path != CSRFCookiePath {
+		t.Errorf("CSRF 令牌 Path 应为 %q（它要跟着每个非 GET 请求发出去），实际 %q",
+			CSRFCookiePath, token.Path)
+	}
+	if token.MaxAge != 604800 {
+		t.Errorf("CSRF 令牌 MaxAge 应取自 jwt.refresh_expire(604800)，实际 %d", token.MaxAge)
+	}
+	if token.Value == "" {
+		t.Error("CSRF 令牌不能为空 —— 空值会让「空 == 空」通过校验")
+	}
+	if len(token.Value) != csrfTokenBytes*2 {
+		t.Errorf("令牌应为 %d 位 hex 字符串，实际长度 %d（%q）",
+			csrfTokenBytes*2, len(token.Value), token.Value)
+	}
+	if _, err := hex.DecodeString(token.Value); err != nil {
+		t.Errorf("令牌应为合法 hex，实际 %q：%v", token.Value, err)
+	}
+}
+
+// TestCSRFTokenIsStableWithinSession 续期时**不得**轮换令牌。
+//
+// 这是本方案的一处关键取舍（理由写在 csrfTokenFor 的注释里）：续期发生在
+// 并发请求的中间，若此时轮换令牌，那些「已经读好 cookie、拼好头但还没发出去」
+// 的请求会带着旧值、而 cookie 已经变成新值 —— 头与 cookie 不一致 → 403。
+// 窗口很窄但真实存在，现象是「偶发某一个请求失败」，几乎不可能定位。
+func TestCSRFTokenIsStableWithinSession(t *testing.T) {
+	withSecurity(t, config.TokenTransportBoth, config.CookieSameSiteLax, nil, 7200, 604800)
+
+	// 1) 首次登录（请求里没有令牌）→ 生成
+	c, w := newCookieCtx()
+	Set(c, "access-1", "refresh-1")
+	first := cookiesOf(t, w)[CSRFCookieName].Value
+
+	// 2) 续期（浏览器把令牌带了回来）→ 必须沿用同一个值
+	c2, w2 := newCookieCtx()
+	c2.Request.AddCookie(&http.Cookie{Name: CSRFCookieName, Value: first})
+	Set(c2, "access-2", "refresh-2")
+
+	second, ok := cookiesOf(t, w2)[CSRFCookieName]
+	if !ok {
+		t.Fatalf("续期时也应重新下发 %s（否则它会在 refresh token 之前过期）", CSRFCookieName)
+	}
+	if second.Value != first {
+		t.Errorf("续期不应轮换 CSRF 令牌：旧 %q，新 %q", first, second.Value)
+	}
+
+	// 3) 请求里带着一个别处的值 → 原样沿用（不去猜它从哪来）
+	c3, w3 := newCookieCtx()
+	c3.Request.AddCookie(&http.Cookie{Name: CSRFCookieName, Value: "preset-value"})
+	Set(c3, "access-3", "refresh-3")
+	if got := cookiesOf(t, w3)[CSRFCookieName].Value; got != "preset-value" {
+		t.Errorf("请求已带令牌时应沿用，实际 %q", got)
+	}
+}
+
+// TestCSRFTokenIsRandomPerLogin 令牌必须是随机的。
+//
+// 若实现退化成固定值（或某个可推导的值），double-submit 就只剩「攻击者
+// 猜得到那个常量」这一层薄壳 —— 而功能上一切正常，没有任何现象。
+func TestCSRFTokenIsRandomPerLogin(t *testing.T) {
+	withSecurity(t, config.TokenTransportBoth, config.CookieSameSiteLax, nil, 7200, 604800)
+
+	seen := make(map[string]bool, 8)
+	for i := 0; i < 8; i++ {
+		c, w := newCookieCtx()
+		Set(c, "access", "refresh")
+		v := cookiesOf(t, w)[CSRFCookieName].Value
+		if seen[v] {
+			t.Fatalf("令牌出现重复值 %q —— 必须每次登录重新随机生成", v)
+		}
+		seen[v] = true
+	}
+}
+
 // TestSetSkipsEmptyToken 空 token 不应写出空 cookie。
 //
 // 写空 cookie 会让浏览器把已有的那个覆盖掉 —— 例如登录响应里只有 access token
@@ -232,6 +328,9 @@ func TestClearExpiresBothCookies(t *testing.T) {
 		// 登录态标记也要清：漏了它，用户登出后刷新页面会被标记骗回
 		// 「已登录」分支，白拉一次 userInfo 再被踢一次
 		{LoginFlagCookieName, LoginFlagCookiePath},
+		// CSRF 令牌一并清（P3-B3）：留着不构成漏洞，但会让下一次登录把它
+		// 当成「请求已带」而沿用，掩盖掉本应重新生成的路径
+		{CSRFCookieName, CSRFCookiePath},
 	} {
 		ck, ok := got[tc.name]
 		if !ok {

@@ -184,8 +184,29 @@ func TestConfigTemplatesParse(t *testing.T) {
 			if Cfg.Security.CookieSecure == nil {
 				t.Error("security.cookie_secure 必须在模板里显式配置（不要依赖代码默认值）")
 			}
+
+			// cors.allow_headers 必须包含 CSRF 头（P3-B3）。
+			//
+			// 这条断言存在的理由与上面几项同源：**两份模板必须同步改**。
+			// 漏配的后果很隐蔽 —— 同源部署（dev 的 Vite proxy、prod 的 nginx 反代）
+			// 根本不发 CORS 预检，所以漏了也一切正常；只有当有人把前端挪到
+			// 另一个域名、自定义头开始触发预检时，所有写操作才会集体失败，
+			// 而那时没人会想到是几个月前漏了一个 YAML 条目。
+			if !containsString(Cfg.CORS.AllowHeaders, "X-CSRF-Token") {
+				t.Errorf("cors.allow_headers 必须包含 X-CSRF-Token，实际 %v", Cfg.CORS.AllowHeaders)
+			}
 		})
 	}
+}
+
+// containsString 报告 slice 里是否含 item（大小写不敏感，因为 HTTP 头名不区分大小写）。
+func containsString(slice []string, item string) bool {
+	for _, s := range slice {
+		if strings.EqualFold(s, item) {
+			return true
+		}
+	}
+	return false
 }
 
 // TestValidateTrustedProxies 反向代理白名单的启动期校验（P0-2）。

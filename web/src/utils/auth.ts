@@ -65,3 +65,60 @@ export function isLoggedIn(): boolean {
 export function clearLoginFlag(): void {
   Cookies.remove(LoginFlagKey, { path: '/' })
 }
+
+/**
+ * CSRF 令牌的读取（P3-B3）。
+ *
+ * 与服务端的双提交校验配对：服务端在登录时下发一个**非 HttpOnly** 的随机
+ * `csrf_token`，前端每次非 GET 请求把它放进 `X-CSRF-Token` 头，
+ * 服务端只校验「头里的值 == cookie 里的值」（见 internal/middleware/csrf.go）。
+ *
+ * ## 为什么这个 cookie 可以（而且必须）被 JS 读到
+ *
+ * 它与 `logged_in` 是同一个道理：**不含凭据**。攻击者即使拿到这个值也没有用 ——
+ * 它只是一个「证明请求确实由本域脚本发出」的信物。反过来，如果给它加上 HttpOnly，
+ * 前端就读不到、也就放不进请求头，整个机制直接失效（且现象是「所有写操作 403」）。
+ *
+ * 真正的凭据（access / refresh token）依然是 HttpOnly，本文件**不提供**
+ * 任何读取它们的接口 —— 这条边界由 auth.spec.ts 里的用例守着。
+ *
+ * ## 为什么是「每次请求现读」而不是登录后存到内存里
+ *
+ * 服务端会在续期时重新下发这个 cookie（值沿用不变）。现读 cookie 永远拿到
+ * 服务端当前认可的那个值；存到内存则需要额外的同步逻辑，而一旦漏同步，
+ * 现象是「每隔一段时间随机有几个写请求失败」—— 很难复现。
+ */
+
+/** 与服务端 authcookie.CSRFCookieName 保持一致；改一处必须同时改另一处 */
+const CSRFCookieKey = 'csrf_token'
+
+/**
+ * 与服务端 authcookie.CSRFHeaderName 保持一致。
+ *
+ * 这个值还必须在 `cors.allow_headers` 里出现（config/config.yaml 与
+ * deploy/config.docker.yaml 两份模板都要）—— 自定义头会触发 CORS 预检，
+ * 漏配只会在跨域部署时暴露，而同源部署下完全正常。
+ */
+export const CSRFHeaderName = 'X-CSRF-Token'
+
+/**
+ * 读取当前应当携带的 CSRF 令牌。
+ *
+ * 未登录（还没拿到 cookie）时返回 undefined，调用方据此**不带头**：
+ * 登录接口本身就是「还没有令牌」的状态，硬塞一个空值会让服务端
+ * 把「空 == 空」判成通过（服务端已显式排除这种情况，但前端也不该依赖它兜底）。
+ */
+export function getCsrfToken(): string | undefined {
+  return Cookies.get(CSRFCookieKey)
+}
+
+/**
+ * 组装带 CSRF 令牌的请求头；没有令牌时返回空对象。
+ *
+ * 供**绕过 axios 的请求**使用（如 el-upload 内部的 XHR）——
+ * 走 axios 的请求由 `api/index.ts` 的请求拦截器统一附加，不需要调它。
+ */
+export function csrfHeaders(): Record<string, string> {
+  const token = getCsrfToken()
+  return token ? { [CSRFHeaderName]: token } : {}
+}
