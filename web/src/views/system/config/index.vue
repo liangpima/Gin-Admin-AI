@@ -7,31 +7,22 @@
           <el-button type="primary" @click="handleAdd()">新增配置</el-button>
         </div>
       </template>
-      <el-table :data="tableData" v-loading="loading" border>
-        <el-table-column prop="name" label="参数名称" min-width="100" />
-        <el-table-column prop="key" label="参数键名" min-width="120" />
-        <el-table-column prop="value" label="参数键值" min-width="100" show-overflow-tooltip />
-        <el-table-column prop="type" label="系统内置" width="90">
-          <template #default="{ row }">
-            <el-tag :type="row.type === 0 ? 'danger' : 'info'" size="small">{{
-              row.type === 0 ? '是' : '否'
-            }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="创建时间" width="170">
-          <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="160">
-          <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row as ConfigItem)"
-              >编辑</el-button
-            >
-            <el-button type="danger" link size="small" @click="handleDelete(row as ConfigItem)"
-              >删除</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
+      <ResponsiveTable :data="tableData" :columns="columns" :loading="loading">
+        <template #type="{ row }">
+          <el-tag :type="row.type === 0 ? 'danger' : 'info'" size="small">{{
+            row.type === 0 ? '是' : '否'
+          }}</el-tag>
+        </template>
+        <template #createdAt="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+        <template #actions="{ row }">
+          <el-button type="primary" link size="small" @click="handleEdit(row as ConfigItem)"
+            >编辑</el-button
+          >
+          <el-button type="danger" link size="small" @click="handleDelete(row as ConfigItem)"
+            >删除</el-button
+          >
+        </template>
+      </ResponsiveTable>
       <Pagination
         v-model:page="page"
         v-model:limit="pageSize"
@@ -78,8 +69,20 @@ import {
   type ConfigQuery,
 } from '@/api/config'
 import FormDialog from '@/components/FormDialog/index.vue'
+import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
+import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
 import { formatDateTime } from '@/utils/format'
 import { useCrud } from '@/hooks/useCrud'
+
+// 列定义是唯一来源：桌面端表格列与手机端卡片字段都从这里派生
+const columns: ResponsiveColumn<ConfigItem>[] = [
+  { label: '参数名称', prop: 'name', minWidth: 100 },
+  { label: '参数键名', prop: 'key', minWidth: 120 },
+  { label: '参数键值', prop: 'value', minWidth: 100, showOverflowTooltip: true },
+  { label: '系统内置', slot: 'type', width: 90 },
+  { label: '创建时间', slot: 'createdAt', width: 170 },
+  { label: '操作', slot: 'actions', width: 160, hideInCard: true },
+]
 
 interface ConfigForm {
   id: number

@@ -46,6 +46,11 @@ export interface PointsLogItem {
   type: number
   source: string
   orderNo: string
+  // 后端 `PointsLog` 内嵌 `TenantBaseModel` → `BaseModel`，而 BaseModel 带
+  // `Remark string \`json:"remark"\``，所以接口**确实会返回** remark。
+  // 此前这里漏了它，表格里 `prop="remark"` 能显示但类型上不存在 ——
+  // 改成列定义（有类型检查）后才暴露出来。
+  remark: string
   createdAt: string
 }
 

@@ -531,9 +531,44 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
     另跑全站 21 页控制台+渲染巡检全绿。
   - 该脚本自带数据（`sys_post` 实测是**空表**，第一次跑「结构断言全过、有数据行=0」，
     看着像布局坏了其实是没数据）：用接口造一条、结束再删，可重复执行且不留残留。
-  - **剩余**：其余含 `el-table` 的 13 个页面按同样方式接入；
-    筛选区抽屉化；`MobileAction` 推广（它解决的是 768–1024px 仍显示表格时
-    操作列过窄的问题，与卡片折叠互补）。
+
+- ✅ **2026-09-26 全量铺开完成：13 个含表格的页面全部接入**
+  `grep -rl el-table src/views/` 现在返回空 —— 页面里不再直接写 `el-table`，
+  只有 `ResponsiveTable` 内部用。按形态分三类处理：
+  - **普通平表（9 个）**：member/list、member/level、member/tag、member/points、
+    payment/order、settings/agreement、system/{config,role,user,post}
+  - **一页两张表（2 个）**：`system/dict`（主从：左类型右数据）、`system/log`（两个 Tab）。
+    插槽名必须加前缀（`op*` / `login*` / `data*`）—— 同一个组件里同名插槽会互相串用。
+  - **树形表（2 个）**：`system/dept`、`system/menu`。新增 `tree` 属性让卡片
+    **按深度优先摊平**并保留缩进层级。**必须摊平**：表格里子节点靠展开箭头呈现，
+    卡片的 `v-for` 只遍历顶层数组 —— 不摊平的话子节点会整个消失，而桌面端一切正常。
+  - 顺带为组件补了这些透传：`align` / `showOverflowTooltip` / `fixed` /
+    `border` / `stripe`（各页原有写法不同，不补就是桌面端视觉回归）、
+    以及主从联动用的 `highlightCurrentRow` + `currentRowKey` + `currentChange`。
+
+  **验证**：`runtime/smoke/check_responsive_all.mjs` —— 14 个页面 × 两种宽度
+  **57/57 通过**，并**按页归因控制台输出**（累计 0 条）。树形页额外断言
+  「卡片缩进档位 > 1」（只看数量不看层级是发现不了「子节点丢了」的）。
+  变异验证 2 组：去掉卡片分支 → 6 条转红；不摊平树 → 2 条转红。
+
+  ⚠️ **本次自己引入并修掉了一个回归（值得记）**：改造后 `/system/user`、
+  `/member/list`、`/settings/agreement` 三页在**桌面端**控制台报
+  `ElementPlusError: [ElSwitch] model-value must be active-value or inactive-value`。
+  用「把该页还原成改造前版本再跑一次」的对照实验确认是本次引入的（还原后 0 开关、无告警），
+  再用 DOM 祖先链定位到开关被渲染在 `el-table` 的 **`.hidden-columns`** 里。
+  根因（已对照 element-plus 源码）：`el-table-column` 会用 dummy row
+  （`{ row: {}, column: {}, $index: -1 }`）调一次默认插槽来收集「子列」，
+  并把结果里**是 ElTableColumn / 有状态组件（`shapeFlag & 2`）/ Fragment** 的
+  vnode 渲染进隐藏区。原来页面里直接写 `<el-switch>` 时插槽函数返回单个组件 vnode
+  且**不是数组**，`isArray(renderDefault)` 为假 → 什么都不收集；
+  而组件化之后列插槽里是 `<slot/>` 出口，返回的是**数组/Fragment** →
+  页面插槽里的 `<el-switch>` 被真的挂载一次、拿到 `row = {}` 执行 setup → 报错。
+  **修法**：在列插槽里用一层 `<span class="cell-slot">`（`display: contents`）
+  包住 slot 出口，使插槽函数返回单个元素 vnode，不满足收集条件。
+  这条坑对「把页面模板收进通用组件」的改造都成立，已写进组件注释与 ENV 文档。
+
+  - **剩余**：筛选区抽屉化；`MobileAction` 推广（它解决的是 768–1024px 仍显示表格时
+    操作列过窄的问题，与卡片折叠互补，不是替代关系）。
 
 ### P3-2 路由与鉴权收尾（前端）
 - ✅ **`pathMatch(.*)*` 404 catch-all 已补**（`web/src/router/routes/static.ts`）。

@@ -47,55 +47,42 @@
         <el-button type="primary" @click="loadData">搜索</el-button>
       </div>
 
-      <el-table :data="tableData" v-loading="loading" stripe>
-        <el-table-column prop="orderNo" label="订单号" width="200" />
-        <el-table-column prop="subject" label="订单标题" min-width="150" />
-        <el-table-column label="金额" width="100" align="right">
-          <template #default="{ row }">
-            <span class="amount-text">¥{{ (row.amount / 100).toFixed(2) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="渠道" width="100" align="center">
-          <template #default="{ row }">
-            <el-tag v-if="row.channel === 'wechat'" type="success" size="small">微信</el-tag>
-            <el-tag v-else-if="row.channel === 'alipay'" type="primary" size="small">支付宝</el-tag>
-            <el-tag v-else size="small">{{ row.channel }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="100" align="center">
-          <template #default="{ row }">
-            <DictTag type="sys_pay_order_status" :value="row.status" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="tradeNo" label="第三方交易号" width="180" />
-        <el-table-column label="支付时间" width="180">
-          <template #default="{ row }">
-            {{ row.paidAt ? formatDate(row.paidAt) : '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="创建时间" width="180">
-          <template #default="{ row }">
-            {{ formatDate(row.createdAt) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+      <ResponsiveTable
+        :data="tableData"
+        :columns="columns"
+        :loading="loading"
+        :border="false"
+        stripe
+      >
+        <template #amount="{ row }">
+          <span class="amount-text">¥{{ (row.amount / 100).toFixed(2) }}</span>
+        </template>
+        <template #channel="{ row }">
+          <el-tag v-if="row.channel === 'wechat'" type="success" size="small">微信</el-tag>
+          <el-tag v-else-if="row.channel === 'alipay'" type="primary" size="small">支付宝</el-tag>
+          <el-tag v-else size="small">{{ row.channel }}</el-tag>
+        </template>
+        <template #status="{ row }">
+          <DictTag type="sys_pay_order_status" :value="row.status" />
+        </template>
+        <template #paidAt="{ row }">{{ row.paidAt ? formatDate(row.paidAt) : '-' }}</template>
+        <template #createdAt="{ row }">{{ formatDate(row.createdAt) }}</template>
+        <template #actions="{ row }">
           <!-- Element Plus 把插槽行推成 DefaultRow，而 handleClose/handleDetail
                形参是 PayOrder，故此处显式断言（数据来自本页查询，类型是可信的） -->
-          <template #default="{ row }">
-            <el-button
-              v-if="row.status === 0"
-              type="danger"
-              link
-              size="small"
-              @click="handleClose(row as PayOrder)"
-              >关闭</el-button
-            >
-            <el-button type="primary" link size="small" @click="handleDetail(row as PayOrder)"
-              >详情</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
+          <el-button
+            v-if="row.status === 0"
+            type="danger"
+            link
+            size="small"
+            @click="handleClose(row as PayOrder)"
+            >关闭</el-button
+          >
+          <el-button type="primary" link size="small" @click="handleDetail(row as PayOrder)"
+            >详情</el-button
+          >
+        </template>
+      </ResponsiveTable>
 
       <Pagination
         v-model:page="page"
@@ -139,7 +126,22 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getPayOrderList, closePayOrder, type PayOrder } from '@/api/payment'
 import DictTag from '@/components/DictTag/index.vue'
+import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
+import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
 import { useDict } from '@/hooks/useDict'
+
+// 列定义是唯一来源：桌面端表格列与手机端卡片字段都从这里派生
+const columns: ResponsiveColumn<PayOrder>[] = [
+  { label: '订单号', prop: 'orderNo', width: 200 },
+  { label: '订单标题', prop: 'subject', minWidth: 150 },
+  { label: '金额', slot: 'amount', width: 100, align: 'right' },
+  { label: '渠道', slot: 'channel', width: 100, align: 'center' },
+  { label: '状态', slot: 'status', width: 100, align: 'center' },
+  { label: '第三方交易号', prop: 'tradeNo', width: 180 },
+  { label: '支付时间', slot: 'paidAt', width: 180 },
+  { label: '创建时间', slot: 'createdAt', width: 180 },
+  { label: '操作', slot: 'actions', width: 120, fixed: 'right', hideInCard: true },
+]
 
 const loading = ref(false)
 const tableData = ref<PayOrder[]>([])

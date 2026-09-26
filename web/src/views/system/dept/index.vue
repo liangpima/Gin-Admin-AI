@@ -8,39 +8,24 @@
         </div>
       </template>
 
-      <el-table
-        :data="tableData"
-        v-loading="loading"
-        border
-        row-key="id"
-        :tree-props="{ children: 'children' }"
-        default-expand-all
-      >
-        <el-table-column prop="name" label="部门名称" min-width="120" />
-        <el-table-column prop="leader" label="负责人" min-width="80" />
-        <el-table-column prop="phone" label="联系电话" min-width="100" />
-        <el-table-column prop="sort" label="排序" width="60" />
-        <el-table-column prop="status" label="状态" width="70">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">
-              {{ row.status === 1 ? '正常' : '停用' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="180">
-          <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleAdd({ parentId: row.id })"
-              >新增</el-button
-            >
-            <el-button type="primary" link size="small" @click="handleEdit(row as DeptItem)"
-              >编辑</el-button
-            >
-            <el-button type="danger" link size="small" @click="handleDelete(row as DeptItem)"
-              >删除</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
+      <ResponsiveTable :data="tableData" :columns="columns" :loading="loading" tree>
+        <template #status="{ row }">
+          <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">
+            {{ row.status === 1 ? '正常' : '停用' }}
+          </el-tag>
+        </template>
+        <template #actions="{ row }">
+          <el-button type="primary" link size="small" @click="handleAdd({ parentId: row.id })"
+            >新增</el-button
+          >
+          <el-button type="primary" link size="small" @click="handleEdit(row as DeptItem)"
+            >编辑</el-button
+          >
+          <el-button type="danger" link size="small" @click="handleDelete(row as DeptItem)"
+            >删除</el-button
+          >
+        </template>
+      </ResponsiveTable>
     </el-card>
 
     <FormDialog
@@ -90,7 +75,20 @@
 import { ref } from 'vue'
 import { getDeptTree, createDept, updateDept, deleteDept, type DeptItem } from '@/api/dept'
 import FormDialog from '@/components/FormDialog/index.vue'
+import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
+import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
 import { useCrud } from '@/hooks/useCrud'
+
+// 列定义是唯一来源：桌面端表格列与手机端卡片字段都从这里派生。
+// 本页是树形数据，`tree` 让卡片按深度优先摊平（否则子部门在手机上会整个消失）。
+const columns: ResponsiveColumn<DeptItem>[] = [
+  { label: '部门名称', prop: 'name', minWidth: 120 },
+  { label: '负责人', prop: 'leader', minWidth: 80 },
+  { label: '联系电话', prop: 'phone', minWidth: 100 },
+  { label: '排序', prop: 'sort', width: 60 },
+  { label: '状态', slot: 'status', width: 70 },
+  { label: '操作', slot: 'actions', width: 180, hideInCard: true },
+]
 
 interface DeptForm {
   id: number

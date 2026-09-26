@@ -17,6 +17,12 @@ export interface ResponsiveColumn<T> {
   prop?: keyof T & string
   width?: number | string
   minWidth?: number | string
+  /** 单元格对齐方式，透传给 el-table-column（卡片里恒为「标签左、值右」） */
+  align?: 'left' | 'center' | 'right'
+  /** 内容超宽时以 tooltip 展示，透传给 el-table-column（卡片里不需要，文字自然换行） */
+  showOverflowTooltip?: boolean
+  /** 固定列，透传给 el-table-column（仅桌面端有意义；卡片里不存在横向滚动） */
+  fixed?: boolean | 'left' | 'right'
   /** 具名插槽名：表格与卡片共用同一份渲染实现 */
   slot?: string
   /** 卡片里不展示（例如「操作」列 —— 它由 #actions 插槽统一渲染在卡片底部） */

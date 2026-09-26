@@ -9,43 +9,37 @@
               <el-button type="primary" @click="handleAddType">新增</el-button>
             </div>
           </template>
-          <el-table
+          <ResponsiveTable
             :data="typeList"
-            v-loading="typeLoading"
-            border
-            stripe
+            :columns="typeColumns"
+            :loading="typeLoading"
+            :stripe="true"
             highlight-current-row
+            :current-row-key="currentType?.id"
             @current-change="handleTypeChange"
           >
-            <el-table-column prop="id" label="ID" width="60" />
-            <el-table-column prop="name" label="字典名称" min-width="100" />
-            <el-table-column prop="type" label="字典类型" min-width="120" show-overflow-tooltip />
-            <el-table-column prop="status" label="状态" width="70">
-              <template #default="{ row }">
-                <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{
-                  row.status === 1 ? '正常' : '停用'
-                }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="120">
-              <template #default="{ row }">
-                <el-button
-                  type="primary"
-                  link
-                  size="small"
-                  @click="handleEditType(row as DictTypeItem)"
-                  >编辑</el-button
-                >
-                <el-button
-                  type="danger"
-                  link
-                  size="small"
-                  @click="handleDeleteType(row as DictTypeItem)"
-                  >删除</el-button
-                >
-              </template>
-            </el-table-column>
-          </el-table>
+            <template #status="{ row }">
+              <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{
+                row.status === 1 ? '正常' : '停用'
+              }}</el-tag>
+            </template>
+            <template #actions="{ row }">
+              <el-button
+                type="primary"
+                link
+                size="small"
+                @click="handleEditType(row as DictTypeItem)"
+                >编辑</el-button
+              >
+              <el-button
+                type="danger"
+                link
+                size="small"
+                @click="handleDeleteType(row as DictTypeItem)"
+                >删除</el-button
+              >
+            </template>
+          </ResponsiveTable>
         </el-card>
       </el-col>
       <el-col :xs="24" :sm="24" :md="14">
@@ -58,44 +52,39 @@
               >
             </div>
           </template>
-          <el-table :data="dataList" v-loading="dataLoading" border stripe>
-            <el-table-column prop="id" label="ID" width="60" />
-            <el-table-column prop="label" label="字典标签" min-width="100" />
-            <el-table-column prop="value" label="字典键值" min-width="80" />
-            <el-table-column prop="sort" label="排序" width="60" />
-            <el-table-column label="回显样式" width="100">
-              <template #default="{ row }">
-                <el-tag :type="tagTypeOf(row.listClass)" size="small">{{
-                  row.listClass || '默认'
-                }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="status" label="状态" width="70">
-              <template #default="{ row }">
-                <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{
-                  row.status === 1 ? '正常' : '停用'
-                }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="120">
-              <template #default="{ row }">
-                <el-button
-                  type="primary"
-                  link
-                  size="small"
-                  @click="handleEditData(row as DictDataItem)"
-                  >编辑</el-button
-                >
-                <el-button
-                  type="danger"
-                  link
-                  size="small"
-                  @click="handleDeleteData(row as DictDataItem)"
-                  >删除</el-button
-                >
-              </template>
-            </el-table-column>
-          </el-table>
+          <ResponsiveTable
+            :data="dataList"
+            :columns="dataColumns"
+            :loading="dataLoading"
+            :stripe="true"
+          >
+            <template #listClass="{ row }">
+              <el-tag :type="tagTypeOf(row.listClass)" size="small">{{
+                row.listClass || '默认'
+              }}</el-tag>
+            </template>
+            <template #dataStatus="{ row }">
+              <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{
+                row.status === 1 ? '正常' : '停用'
+              }}</el-tag>
+            </template>
+            <template #dataActions="{ row }">
+              <el-button
+                type="primary"
+                link
+                size="small"
+                @click="handleEditData(row as DictDataItem)"
+                >编辑</el-button
+              >
+              <el-button
+                type="danger"
+                link
+                size="small"
+                @click="handleDeleteData(row as DictDataItem)"
+                >删除</el-button
+              >
+            </template>
+          </ResponsiveTable>
         </el-card>
       </el-col>
     </el-row>
@@ -182,7 +171,29 @@ import {
   type DictDataItem,
 } from '@/api/dict'
 import FormDialog from '@/components/FormDialog/index.vue'
+import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
+import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
 import { clearDictCache } from '@/hooks/useDict'
+
+// 两个表格各自一份列定义（本页是主从布局：左侧字典类型、右侧字典数据）
+const typeColumns: ResponsiveColumn<DictTypeItem>[] = [
+  { label: 'ID', prop: 'id', width: 60 },
+  { label: '字典名称', prop: 'name', minWidth: 100 },
+  { label: '字典类型', prop: 'type', minWidth: 120, showOverflowTooltip: true },
+  { label: '状态', slot: 'status', width: 70 },
+  { label: '操作', slot: 'actions', width: 120, hideInCard: true },
+]
+
+// 数据表的状态/操作插槽名与类型表区分开，避免同名插槽串用
+const dataColumns: ResponsiveColumn<DictDataItem>[] = [
+  { label: 'ID', prop: 'id', width: 60 },
+  { label: '字典标签', prop: 'label', minWidth: 100 },
+  { label: '字典键值', prop: 'value', minWidth: 80 },
+  { label: '排序', prop: 'sort', width: 60 },
+  { label: '回显样式', slot: 'listClass', width: 100 },
+  { label: '状态', slot: 'dataStatus', width: 70 },
+  { label: '操作', slot: 'dataActions', width: 120, hideInCard: true },
+]
 
 type TagType = 'primary' | 'success' | 'info' | 'warning' | 'danger'
 

@@ -8,52 +8,32 @@
         </div>
       </template>
 
-      <el-table
-        :data="tableData"
-        v-loading="loading"
-        border
-        row-key="id"
-        :tree-props="{ children: 'children' }"
-        default-expand-all
-      >
-        <el-table-column prop="title" label="菜单名称" min-width="150" />
-        <el-table-column prop="icon" label="图标" width="80">
-          <template #default="{ row }">
-            <el-icon v-if="row.icon"><component :is="row.icon" /></el-icon>
-          </template>
-        </el-table-column>
-        <el-table-column prop="type" label="类型" width="80">
-          <template #default="{ row }">
-            <el-tag v-if="row.type === 0" type="warning">目录</el-tag>
-            <el-tag v-else-if="row.type === 1" type="success">菜单</el-tag>
-            <el-tag v-else type="danger">按钮</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="sort" label="排序" width="80" />
-        <el-table-column prop="permission" label="权限标识" min-width="120" />
-        <el-table-column prop="path" label="路由地址" min-width="120" />
-        <el-table-column prop="component" label="组件路径" min-width="120" />
-        <el-table-column prop="status" label="状态" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'danger'">
-              {{ row.status === 1 ? '正常' : '停用' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="180">
-          <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleAdd({ parentId: row.id })"
-              >新增</el-button
-            >
-            <el-button type="primary" link size="small" @click="handleEdit(row as MenuItem)"
-              >编辑</el-button
-            >
-            <el-button type="danger" link size="small" @click="handleDelete(row as MenuItem)"
-              >删除</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
+      <ResponsiveTable :data="tableData" :columns="columns" :loading="loading" tree>
+        <template #icon="{ row }">
+          <el-icon v-if="row.icon"><component :is="row.icon" /></el-icon>
+        </template>
+        <template #type="{ row }">
+          <el-tag v-if="row.type === 0" type="warning">目录</el-tag>
+          <el-tag v-else-if="row.type === 1" type="success">菜单</el-tag>
+          <el-tag v-else type="danger">按钮</el-tag>
+        </template>
+        <template #status="{ row }">
+          <el-tag :type="row.status === 1 ? 'success' : 'danger'">
+            {{ row.status === 1 ? '正常' : '停用' }}
+          </el-tag>
+        </template>
+        <template #actions="{ row }">
+          <el-button type="primary" link size="small" @click="handleAdd({ parentId: row.id })"
+            >新增</el-button
+          >
+          <el-button type="primary" link size="small" @click="handleEdit(row as MenuItem)"
+            >编辑</el-button
+          >
+          <el-button type="danger" link size="small" @click="handleDelete(row as MenuItem)"
+            >删除</el-button
+          >
+        </template>
+      </ResponsiveTable>
     </el-card>
 
     <FormDialog
@@ -119,7 +99,23 @@
 import { ref } from 'vue'
 import { getMenuTree, createMenu, updateMenu, deleteMenu, type MenuItem } from '@/api/menu'
 import FormDialog from '@/components/FormDialog/index.vue'
+import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
+import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
 import { useCrud } from '@/hooks/useCrud'
+
+// 列定义是唯一来源：桌面端表格列与手机端卡片字段都从这里派生。
+// 本页是树形数据，`tree` 让卡片按深度优先摊平（否则子菜单在手机上会整个消失）。
+const columns: ResponsiveColumn<MenuItem>[] = [
+  { label: '菜单名称', prop: 'title', minWidth: 150 },
+  { label: '图标', slot: 'icon', width: 80 },
+  { label: '类型', slot: 'type', width: 80 },
+  { label: '排序', prop: 'sort', width: 80 },
+  { label: '权限标识', prop: 'permission', minWidth: 120 },
+  { label: '路由地址', prop: 'path', minWidth: 120 },
+  { label: '组件路径', prop: 'component', minWidth: 120 },
+  { label: '状态', slot: 'status', width: 80 },
+  { label: '操作', slot: 'actions', width: 180, hideInCard: true },
+]
 
 interface MenuForm {
   id: number

@@ -31,33 +31,24 @@
         </div>
       </template>
 
-      <el-table :data="tableData" v-loading="loading" border>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="name" label="标签名称" min-width="120" />
-        <el-table-column label="颜色" width="100">
-          <template #default="{ row }">
-            <el-tag :color="row.color" style="color: #fff; border: none">{{ row.name }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="sort" label="排序" width="70" align="center" />
-        <el-table-column label="状态" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{
-              row.status === 1 ? '正常' : '停用'
-            }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="160">
-          <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row as MemberTagItem)"
-              >编辑</el-button
-            >
-            <el-button type="danger" link size="small" @click="handleDelete(row as MemberTagItem)"
-              >删除</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
+      <ResponsiveTable :data="tableData" :columns="columns" :loading="loading">
+        <template #color="{ row }">
+          <el-tag :color="row.color" style="color: #fff; border: none">{{ row.name }}</el-tag>
+        </template>
+        <template #status="{ row }">
+          <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{
+            row.status === 1 ? '正常' : '停用'
+          }}</el-tag>
+        </template>
+        <template #actions="{ row }">
+          <el-button type="primary" link size="small" @click="handleEdit(row as MemberTagItem)"
+            >编辑</el-button
+          >
+          <el-button type="danger" link size="small" @click="handleDelete(row as MemberTagItem)"
+            >删除</el-button
+          >
+        </template>
+      </ResponsiveTable>
 
       <Pagination
         v-model:page="page"
@@ -104,6 +95,8 @@ import {
   type MemberTagItem,
 } from '@/api/member'
 import FormDialog from '@/components/FormDialog/index.vue'
+import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
+import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
 import { useCrud } from '@/hooks/useCrud'
 
 interface TagForm {
@@ -113,6 +106,16 @@ interface TagForm {
   sort: number
   status: number
 }
+
+// 列定义是唯一来源：桌面端表格列与手机端卡片字段都从这里派生
+const columns: ResponsiveColumn<MemberTagItem>[] = [
+  { label: 'ID', prop: 'id', width: 60 },
+  { label: '标签名称', prop: 'name', minWidth: 120 },
+  { label: '颜色', slot: 'color', width: 100 },
+  { label: '排序', prop: 'sort', width: 70, align: 'center' },
+  { label: '状态', slot: 'status', width: 80 },
+  { label: '操作', slot: 'actions', width: 160, hideInCard: true },
+]
 
 // 搜索条件只放本页自己的字段。page/pageSize 由 useCrud 管理 ——
 // 原先它们混在同一个 queryParams 里，重置时要记得一并复位，很容易漏。

@@ -61,78 +61,61 @@
         </div>
       </template>
 
-      <el-table :data="tableData" v-loading="loading" border>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column label="头像" width="60">
-          <template #default="{ row }">
-            <el-avatar :size="32" :src="row.avatar || undefined">{{
-              row.username?.charAt(0)?.toUpperCase()
-            }}</el-avatar>
-          </template>
-        </el-table-column>
-        <el-table-column prop="username" label="用户名" width="120" />
-        <el-table-column prop="nickname" label="昵称" min-width="120" />
-        <el-table-column prop="phone" label="手机号" width="120" />
-        <el-table-column prop="email" label="邮箱" min-width="200" show-overflow-tooltip />
-        <el-table-column label="用户角色" min-width="200">
-          <template #default="{ row }">
-            <el-select
-              v-model="row.roleIds"
-              multiple
-              collapse-tags
-              collapse-tags-tooltip
-              placeholder="请选择角色"
-              style="width: 100%"
-              @change="(val: number[]) => handleRoleChange(row as UserRow, val)"
-            >
-              <el-option
-                v-for="role in roleList"
-                :key="role.id"
-                :label="role.name"
-                :value="role.id"
-              />
-            </el-select>
-          </template>
-        </el-table-column>
-        <el-table-column label="部门" min-width="180">
-          <template #default="{ row }">
-            <el-tree-select
-              v-model="row.deptId"
-              :data="deptTree"
-              :props="{ label: 'name', value: 'id' } as any"
-              placeholder="选择部门"
-              check-strictly
-              style="width: 100%"
-              @change="(val: number) => handleDeptChange(row as UserRow, val)"
+      <ResponsiveTable :data="tableData" :columns="columns" :loading="loading">
+        <template #avatar="{ row }">
+          <el-avatar :size="32" :src="row.avatar || undefined">{{
+            row.username?.charAt(0)?.toUpperCase()
+          }}</el-avatar>
+        </template>
+        <template #roleIds="{ row }">
+          <el-select
+            v-model="row.roleIds"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="请选择角色"
+            style="width: 100%"
+            @change="(val: number[]) => handleRoleChange(row as UserRow, val)"
+          >
+            <el-option
+              v-for="role in roleList"
+              :key="role.id"
+              :label="role.name"
+              :value="role.id"
             />
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="80">
-          <template #default="{ row }">
-            <el-switch
-              v-model="row.status"
-              :active-value="1"
-              :inactive-value="0"
-              @change="handleStatusChange(row as UserRow)"
-            />
-          </template>
-        </el-table-column>
-        <el-table-column label="创建时间" width="170">
-          <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="200">
-          <template #default="{ row }">
-            <MobileAction
-              :actions="[
-                { label: '编辑', icon: 'Edit', color: 'var(--el-color-primary)' },
-                { label: '重置密码', icon: 'Key', color: 'var(--el-color-warning)' },
-                { label: '删除', icon: 'Delete', color: 'var(--el-color-danger)' },
-              ]"
-              @command="(cmd: string) => handleAction(cmd, row as UserItem)"
-            />
-          </template>
-        </el-table-column>
-      </el-table>
+          </el-select>
+        </template>
+        <template #deptId="{ row }">
+          <el-tree-select
+            v-model="row.deptId"
+            :data="deptTree"
+            :props="{ label: 'name', value: 'id' } as any"
+            placeholder="选择部门"
+            check-strictly
+            style="width: 100%"
+            @change="(val: number) => handleDeptChange(row as UserRow, val)"
+          />
+        </template>
+        <template #status="{ row }">
+          <el-switch
+            v-model="row.status"
+            :active-value="1"
+            :inactive-value="0"
+            @change="handleStatusChange(row as UserRow)"
+          />
+        </template>
+        <template #createdAt="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+        <template #actions="{ row }">
+          <MobileAction
+            :actions="[
+              { label: '编辑', icon: 'Edit', color: 'var(--el-color-primary)' },
+              { label: '重置密码', icon: 'Key', color: 'var(--el-color-warning)' },
+              { label: '删除', icon: 'Delete', color: 'var(--el-color-danger)' },
+            ]"
+            @command="(cmd: string) => handleAction(cmd, row as UserItem)"
+          />
+        </template>
+      </ResponsiveTable>
 
       <Pagination
         v-model:page="page"
@@ -243,6 +226,8 @@ import {
 import ImagePicker from '@/components/ImagePicker/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
 import MobileAction from '@/components/MobileAction/index.vue'
+import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
+import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
 import { formatDateTime } from '@/utils/format'
 import { getAllRoles, type RoleItem } from '@/api/role'
 import { getDeptTree, type DeptItem } from '@/api/dept'
@@ -265,6 +250,23 @@ interface UserForm {
   status: number
   remark: string
 }
+
+// 列定义是唯一来源：桌面端表格列与手机端卡片字段都从这里派生。
+// 「用户角色 / 部门 / 状态」在表格里是行内编辑控件，卡片里用的是**同一个插槽**，
+// 所以手机上照样能直接改。
+const columns: ResponsiveColumn<UserRow>[] = [
+  { label: 'ID', prop: 'id', width: 60 },
+  { label: '头像', slot: 'avatar', width: 60 },
+  { label: '用户名', prop: 'username', width: 120 },
+  { label: '昵称', prop: 'nickname', minWidth: 120 },
+  { label: '手机号', prop: 'phone', width: 120 },
+  { label: '邮箱', prop: 'email', minWidth: 200, showOverflowTooltip: true },
+  { label: '用户角色', slot: 'roleIds', minWidth: 200 },
+  { label: '部门', slot: 'deptId', minWidth: 180 },
+  { label: '状态', slot: 'status', width: 80 },
+  { label: '创建时间', slot: 'createdAt', width: 170 },
+  { label: '操作', slot: 'actions', width: 200, hideInCard: true },
+]
 
 // 搜索条件只放本页自己的字段；page/pageSize 由 useCrud 管理
 const queryParams = reactive({

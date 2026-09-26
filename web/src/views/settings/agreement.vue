@@ -61,39 +61,26 @@
         </div>
       </template>
 
-      <el-table :data="tableData" v-loading="loading" border>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="title" label="标题" min-width="150" show-overflow-tooltip />
-        <el-table-column label="类型" width="120">
-          <template #default="{ row }">
-            {{ typeMap[row.type] || row.type }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="sort" label="排序" width="70" />
-        <el-table-column label="状态" width="80">
-          <template #default="{ row }">
-            <el-switch
-              v-model="row.status"
-              :active-value="1"
-              :inactive-value="0"
-              @change="handleStatusChange(row as AgreementItem)"
-            />
-          </template>
-        </el-table-column>
-        <el-table-column label="创建时间" width="170">
-          <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="160">
-          <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row as AgreementItem)"
-              >编辑</el-button
-            >
-            <el-button type="danger" link size="small" @click="handleDelete(row as AgreementItem)"
-              >删除</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
+      <ResponsiveTable :data="tableData" :columns="columns" :loading="loading">
+        <template #type="{ row }">{{ typeMap[row.type] || row.type }}</template>
+        <template #status="{ row }">
+          <el-switch
+            v-model="row.status"
+            :active-value="1"
+            :inactive-value="0"
+            @change="handleStatusChange(row as AgreementItem)"
+          />
+        </template>
+        <template #createdAt="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+        <template #actions="{ row }">
+          <el-button type="primary" link size="small" @click="handleEdit(row as AgreementItem)"
+            >编辑</el-button
+          >
+          <el-button type="danger" link size="small" @click="handleDelete(row as AgreementItem)"
+            >删除</el-button
+          >
+        </template>
+      </ResponsiveTable>
 
       <Pagination
         v-model:page="page"
@@ -163,8 +150,21 @@ import {
 // 这一步只解决「同一页内重资源阻塞渲染」，不是省流量。
 const WangEditor = defineAsyncComponent(() => import('@/components/WangEditor/index.vue'))
 import FormDialog from '@/components/FormDialog/index.vue'
+import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
+import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
 import { formatDateTime } from '@/utils/format'
 import { useCrud } from '@/hooks/useCrud'
+
+// 列定义是唯一来源：桌面端表格列与手机端卡片字段都从这里派生
+const columns: ResponsiveColumn<AgreementItem>[] = [
+  { label: 'ID', prop: 'id', width: 60 },
+  { label: '标题', prop: 'title', minWidth: 150, showOverflowTooltip: true },
+  { label: '类型', slot: 'type', width: 120 },
+  { label: '排序', prop: 'sort', width: 70 },
+  { label: '状态', slot: 'status', width: 80 },
+  { label: '创建时间', slot: 'createdAt', width: 170 },
+  { label: '操作', slot: 'actions', width: 160, hideInCard: true },
+]
 
 interface AgreementForm {
   id: number

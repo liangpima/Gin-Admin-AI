@@ -71,81 +71,62 @@
         </div>
       </template>
 
-      <el-table :data="tableData" v-loading="loading" border>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="memberNo" label="会员编号" width="110" />
-        <el-table-column label="头像" width="60">
-          <template #default="{ row }">
-            <el-avatar :size="32" :src="row.avatar || undefined">{{
-              row.nickname?.charAt(0)?.toUpperCase() || row.username?.charAt(0)?.toUpperCase()
-            }}</el-avatar>
-          </template>
-        </el-table-column>
-        <el-table-column prop="nickname" label="昵称" width="120" />
-        <el-table-column prop="phone" label="手机号" width="120" />
-        <el-table-column label="性别" width="70">
-          <template #default="{ row }">
-            {{ { 0: '未知', 1: '男', 2: '女' }[row.gender as number] || '未知' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="等级" width="120">
-          <template #default="{ row }">
-            <el-select
-              v-model="row.levelId"
-              placeholder="无等级"
-              style="width: 100%"
-              @change="(val: number) => handleLevelChange(row as MemberRow, val)"
-            >
-              <el-option :label="'无等级'" :value="0" />
-              <el-option
-                v-for="level in levelList"
-                :key="level.id"
-                :label="level.name"
-                :value="level.id"
-              />
-            </el-select>
-          </template>
-        </el-table-column>
-        <el-table-column label="标签" min-width="200">
-          <template #default="{ row }">
-            <el-select
-              v-model="row.tagIds"
-              multiple
-              collapse-tags
-              collapse-tags-tooltip
-              placeholder="请选择标签"
-              style="width: 100%"
-              @change="(val: number[]) => handleTagChange(row as MemberRow, val)"
-            >
-              <el-option v-for="tag in tagList" :key="tag.id" :label="tag.name" :value="tag.id" />
-            </el-select>
-          </template>
-        </el-table-column>
-        <el-table-column prop="points" label="积分" width="80" align="right" />
-        <el-table-column label="状态" width="80">
-          <template #default="{ row }">
-            <el-switch
-              v-model="row.status"
-              :active-value="1"
-              :inactive-value="0"
-              @change="handleStatusChange(row as MemberRow)"
+      <ResponsiveTable :data="tableData" :columns="columns" :loading="loading">
+        <template #avatar="{ row }">
+          <el-avatar :size="32" :src="row.avatar || undefined">{{
+            row.nickname?.charAt(0)?.toUpperCase() || row.username?.charAt(0)?.toUpperCase()
+          }}</el-avatar>
+        </template>
+        <template #gender="{ row }">
+          {{ { 0: '未知', 1: '男', 2: '女' }[row.gender as number] || '未知' }}
+        </template>
+        <template #level="{ row }">
+          <el-select
+            v-model="row.levelId"
+            placeholder="无等级"
+            style="width: 100%"
+            @change="(val: number) => handleLevelChange(row as MemberRow, val)"
+          >
+            <el-option :label="'无等级'" :value="0" />
+            <el-option
+              v-for="level in levelList"
+              :key="level.id"
+              :label="level.name"
+              :value="level.id"
             />
-          </template>
-        </el-table-column>
-        <el-table-column label="注册时间" width="170">
-          <template #default="{ row }">{{ formatDateTime(row.registerTime) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="160">
-          <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row as MemberRow)"
-              >编辑</el-button
-            >
-            <el-button type="danger" link size="small" @click="handleDelete(row as MemberRow)"
-              >删除</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
+          </el-select>
+        </template>
+        <template #tags="{ row }">
+          <el-select
+            v-model="row.tagIds"
+            multiple
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="请选择标签"
+            style="width: 100%"
+            @change="(val: number[]) => handleTagChange(row as MemberRow, val)"
+          >
+            <el-option v-for="tag in tagList" :key="tag.id" :label="tag.name" :value="tag.id" />
+          </el-select>
+        </template>
+        <template #status="{ row }">
+          <el-switch
+            v-model="row.status"
+            :active-value="1"
+            :inactive-value="0"
+            @change="handleStatusChange(row as MemberRow)"
+          />
+        </template>
+        <template #registerTime="{ row }">{{ formatDateTime(row.registerTime) }}</template>
+        <template #actions="{ row }">
+          <el-button type="primary" link size="small" @click="handleEdit(row as MemberRow)"
+            >编辑</el-button
+          >
+          <el-button type="danger" link size="small" @click="handleDelete(row as MemberRow)"
+            >删除</el-button
+          >
+        </template>
+      </ResponsiveTable>
 
       <Pagination
         v-model:page="page"
@@ -263,8 +244,28 @@ import {
 } from '@/api/member'
 import ImagePicker from '@/components/ImagePicker/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
+import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
+import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
 import { formatDateTime } from '@/utils/format'
 import { useCrud } from '@/hooks/useCrud'
+
+// 列定义是唯一来源：桌面端表格列与手机端卡片字段都从这里派生。
+// 注意「等级 / 标签 / 状态」三列在表格里是行内编辑控件，卡片里用的是
+// **同一个插槽**，所以手机上照样能直接改 —— 这正是把渲染收在一处的收益。
+const columns: ResponsiveColumn<MemberRow>[] = [
+  { label: 'ID', prop: 'id', width: 60 },
+  { label: '会员编号', prop: 'memberNo', width: 110 },
+  { label: '头像', slot: 'avatar', width: 60 },
+  { label: '昵称', prop: 'nickname', width: 120 },
+  { label: '手机号', prop: 'phone', width: 120 },
+  { label: '性别', slot: 'gender', width: 70 },
+  { label: '等级', slot: 'level', width: 120 },
+  { label: '标签', slot: 'tags', minWidth: 200 },
+  { label: '积分', prop: 'points', width: 80, align: 'right' },
+  { label: '状态', slot: 'status', width: 80 },
+  { label: '注册时间', slot: 'registerTime', width: 170 },
+  { label: '操作', slot: 'actions', width: 160, hideInCard: true },
+]
 
 // 列表行 = 接口返回的 MemberItem + 前端映射出来的 tagIds。
 // 接口给的是 tags（对象数组），表格里要按 id 做多选回显，所以映射时补 tagIds。

@@ -41,34 +41,25 @@
         </div>
       </template>
 
-      <el-table :data="tableData" v-loading="loading" border>
-        <el-table-column prop="name" label="角色名称" min-width="100" />
-        <el-table-column prop="code" label="角色编码" min-width="100" />
-        <el-table-column prop="sort" label="排序" width="60" />
-        <el-table-column prop="status" label="状态" width="70">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">
-              {{ row.status === 1 ? '正常' : '停用' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="创建时间" width="170">
-          <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="200">
-          <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row as RoleItem)"
-              >编辑</el-button
-            >
-            <el-button type="primary" link size="small" @click="handlePermission(row as RoleItem)"
-              >权限</el-button
-            >
-            <el-button type="danger" link size="small" @click="handleDelete(row as RoleItem)"
-              >删除</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
+      <ResponsiveTable :data="tableData" :columns="columns" :loading="loading">
+        <template #status="{ row }">
+          <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">
+            {{ row.status === 1 ? '正常' : '停用' }}
+          </el-tag>
+        </template>
+        <template #createdAt="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+        <template #actions="{ row }">
+          <el-button type="primary" link size="small" @click="handleEdit(row as RoleItem)"
+            >编辑</el-button
+          >
+          <el-button type="primary" link size="small" @click="handlePermission(row as RoleItem)"
+            >权限</el-button
+          >
+          <el-button type="danger" link size="small" @click="handleDelete(row as RoleItem)"
+            >删除</el-button
+          >
+        </template>
+      </ResponsiveTable>
 
       <Pagination
         v-model:page="page"
@@ -140,9 +131,21 @@ import {
   type RoleQuery,
 } from '@/api/role'
 import FormDialog from '@/components/FormDialog/index.vue'
+import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
+import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
 import { formatDateTime } from '@/utils/format'
 import { getMenuTree, type MenuItem } from '@/api/menu'
 import { useCrud } from '@/hooks/useCrud'
+
+// 列定义是唯一来源：桌面端表格列与手机端卡片字段都从这里派生
+const columns: ResponsiveColumn<RoleItem>[] = [
+  { label: '角色名称', prop: 'name', minWidth: 100 },
+  { label: '角色编码', prop: 'code', minWidth: 100 },
+  { label: '排序', prop: 'sort', width: 60 },
+  { label: '状态', slot: 'status', width: 70 },
+  { label: '创建时间', slot: 'createdAt', width: 170 },
+  { label: '操作', slot: 'actions', width: 200, hideInCard: true },
+]
 
 interface RoleForm {
   id: number

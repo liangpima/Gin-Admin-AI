@@ -43,30 +43,19 @@
         </div>
       </template>
 
-      <el-table :data="tableData" v-loading="loading" border>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="memberId" label="会员ID" width="80" />
-        <el-table-column label="变更积分" width="100" align="right">
-          <template #default="{ row }">
-            <span :class="row.change > 0 ? 'points-positive' : 'points-negative'">
-              {{ row.change > 0 ? '+' : '' }}{{ row.change }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="类型" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.type === 1 ? 'success' : 'warning'" size="small">{{
-              row.type === 1 ? '获取' : '消费'
-            }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="source" label="来源" min-width="120" />
-        <el-table-column prop="orderNo" label="关联订单号" min-width="160" />
-        <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip />
-        <el-table-column label="时间" width="170">
-          <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
-        </el-table-column>
-      </el-table>
+      <ResponsiveTable :data="tableData" :columns="columns" :loading="loading">
+        <template #change="{ row }">
+          <span :class="row.change > 0 ? 'points-positive' : 'points-negative'">
+            {{ row.change > 0 ? '+' : '' }}{{ row.change }}
+          </span>
+        </template>
+        <template #type="{ row }">
+          <el-tag :type="row.type === 1 ? 'success' : 'warning'" size="small">{{
+            row.type === 1 ? '获取' : '消费'
+          }}</el-tag>
+        </template>
+        <template #createdAt="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+      </ResponsiveTable>
 
       <Pagination
         v-model:page="queryParams.page"
@@ -84,6 +73,21 @@
 import { ref, reactive, onMounted } from 'vue'
 import { getPointsLogList, type PointsLogItem } from '@/api/member'
 import { formatDateTime } from '@/utils/format'
+import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
+import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
+
+// 列定义是唯一来源：桌面端表格列与手机端卡片字段都从这里派生。
+// 本页是只读列表，没有操作列。
+const columns: ResponsiveColumn<PointsLogItem>[] = [
+  { label: 'ID', prop: 'id', width: 60 },
+  { label: '会员ID', prop: 'memberId', width: 80 },
+  { label: '变更积分', slot: 'change', width: 100, align: 'right' },
+  { label: '类型', slot: 'type', width: 80 },
+  { label: '来源', prop: 'source', minWidth: 120 },
+  { label: '关联订单号', prop: 'orderNo', minWidth: 160 },
+  { label: '备注', prop: 'remark', minWidth: 120, showOverflowTooltip: true },
+  { label: '时间', slot: 'createdAt', width: 170 },
+]
 
 const loading = ref(false)
 const tableData = ref<PointsLogItem[]>([])

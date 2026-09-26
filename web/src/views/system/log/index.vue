@@ -24,30 +24,14 @@
               </el-row>
             </el-form>
           </div>
-          <el-table :data="opLogs" v-loading="opLoading" border stripe>
-            <el-table-column prop="id" label="ID" width="70" />
-            <el-table-column prop="title" label="模块标题" width="100" />
-            <el-table-column prop="operatorName" label="操作人" width="90" />
-            <el-table-column prop="requestMethod" label="请求方法" width="100" />
-            <el-table-column
-              prop="requestUrl"
-              label="请求URL"
-              min-width="150"
-              show-overflow-tooltip
-            />
-            <el-table-column prop="status" label="状态" width="70">
-              <template #default="{ row }">
-                <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{
-                  row.status === 1 ? '成功' : '失败'
-                }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="ip" label="IP" width="120" />
-            <el-table-column prop="costTime" label="耗时(ms)" width="80" />
-            <el-table-column label="操作时间" width="170">
-              <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
-            </el-table-column>
-          </el-table>
+          <ResponsiveTable :data="opLogs" :columns="opColumns" :loading="opLoading" :stripe="true">
+            <template #opStatus="{ row }">
+              <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{
+                row.status === 1 ? '成功' : '失败'
+              }}</el-tag>
+            </template>
+            <template #opCreatedAt="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+          </ResponsiveTable>
           <Pagination
             v-model:page="opQuery.page"
             :total="opTotal"
@@ -79,24 +63,19 @@
               </el-row>
             </el-form>
           </div>
-          <el-table :data="loginLogs" v-loading="loginLoading" border stripe>
-            <el-table-column prop="id" label="ID" width="70" />
-            <el-table-column prop="username" label="用户名" width="100" />
-            <el-table-column prop="ip" label="IP" width="120" />
-            <el-table-column prop="browser" label="浏览器" width="120" />
-            <el-table-column prop="os" label="操作系统" width="120" />
-            <el-table-column prop="status" label="状态" width="70">
-              <template #default="{ row }">
-                <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{
-                  row.status === 1 ? '成功' : '失败'
-                }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="msg" label="消息" min-width="100" show-overflow-tooltip />
-            <el-table-column label="登录时间" width="170">
-              <template #default="{ row }">{{ formatDateTime(row.loginTime) }}</template>
-            </el-table-column>
-          </el-table>
+          <ResponsiveTable
+            :data="loginLogs"
+            :columns="loginColumns"
+            :loading="loginLoading"
+            :stripe="true"
+          >
+            <template #loginStatus="{ row }">
+              <el-tag :type="row.status === 1 ? 'success' : 'danger'" size="small">{{
+                row.status === 1 ? '成功' : '失败'
+              }}</el-tag>
+            </template>
+            <template #loginTime="{ row }">{{ formatDateTime(row.loginTime) }}</template>
+          </ResponsiveTable>
           <Pagination
             v-model:page="loginQuery.page"
             :total="loginTotal"
@@ -114,6 +93,33 @@
 import { ref, reactive, onMounted } from 'vue'
 import { getOperationLogs, getLoginLogs, type OperationLogItem, LoginLogItem } from '@/api/log'
 import { formatDateTime } from '@/utils/format'
+import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
+import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
+
+// 两个 Tab 各一份列定义。插槽名刻意加前缀（op*/login*）：
+// 两个表格在同一个组件里，同名插槽会互相串用。
+const opColumns: ResponsiveColumn<OperationLogItem>[] = [
+  { label: 'ID', prop: 'id', width: 70 },
+  { label: '模块标题', prop: 'title', width: 100 },
+  { label: '操作人', prop: 'operatorName', width: 90 },
+  { label: '请求方法', prop: 'requestMethod', width: 100 },
+  { label: '请求URL', prop: 'requestUrl', minWidth: 150, showOverflowTooltip: true },
+  { label: '状态', slot: 'opStatus', width: 70 },
+  { label: 'IP', prop: 'ip', width: 120 },
+  { label: '耗时(ms)', prop: 'costTime', width: 80 },
+  { label: '操作时间', slot: 'opCreatedAt', width: 170 },
+]
+
+const loginColumns: ResponsiveColumn<LoginLogItem>[] = [
+  { label: 'ID', prop: 'id', width: 70 },
+  { label: '用户名', prop: 'username', width: 100 },
+  { label: 'IP', prop: 'ip', width: 120 },
+  { label: '浏览器', prop: 'browser', width: 120 },
+  { label: '操作系统', prop: 'os', width: 120 },
+  { label: '状态', slot: 'loginStatus', width: 70 },
+  { label: '消息', prop: 'msg', minWidth: 100, showOverflowTooltip: true },
+  { label: '登录时间', slot: 'loginTime', width: 170 },
+]
 
 const activeTab = ref('operation')
 

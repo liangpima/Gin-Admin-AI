@@ -31,38 +31,26 @@
         </div>
       </template>
 
-      <el-table :data="tableData" v-loading="loading" border>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="name" label="等级名称" min-width="120" />
-        <el-table-column prop="minPoints" label="最低积分" width="100" align="right" />
-        <el-table-column label="折扣" width="80" align="center">
-          <template #default="{ row }">{{ row.discount }}折</template>
-        </el-table-column>
-        <el-table-column label="图标" width="80" align="center">
-          <template #default="{ row }">
-            <el-avatar v-if="row.icon" :size="32" :src="row.icon" shape="square" />
-            <span v-else style="color: var(--color-text-placeholder)">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="sort" label="排序" width="70" align="center" />
-        <el-table-column label="状态" width="80">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{
-              row.status === 1 ? '正常' : '停用'
-            }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="160">
-          <template #default="{ row }">
-            <el-button type="primary" link size="small" @click="handleEdit(row as MemberLevelItem)"
-              >编辑</el-button
-            >
-            <el-button type="danger" link size="small" @click="handleDelete(row as MemberLevelItem)"
-              >删除</el-button
-            >
-          </template>
-        </el-table-column>
-      </el-table>
+      <ResponsiveTable :data="tableData" :columns="columns" :loading="loading">
+        <template #discount="{ row }">{{ row.discount }}折</template>
+        <template #icon="{ row }">
+          <el-avatar v-if="row.icon" :size="32" :src="row.icon" shape="square" />
+          <span v-else style="color: var(--color-text-placeholder)">-</span>
+        </template>
+        <template #status="{ row }">
+          <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{
+            row.status === 1 ? '正常' : '停用'
+          }}</el-tag>
+        </template>
+        <template #actions="{ row }">
+          <el-button type="primary" link size="small" @click="handleEdit(row as MemberLevelItem)"
+            >编辑</el-button
+          >
+          <el-button type="danger" link size="small" @click="handleDelete(row as MemberLevelItem)"
+            >删除</el-button
+          >
+        </template>
+      </ResponsiveTable>
 
       <Pagination
         v-model:page="page"
@@ -128,7 +116,21 @@ import {
 } from '@/api/member'
 import ImagePicker from '@/components/ImagePicker/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
+import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
+import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
 import { useCrud } from '@/hooks/useCrud'
+
+// 列定义是唯一来源：桌面端表格列与手机端卡片字段都从这里派生
+const columns: ResponsiveColumn<MemberLevelItem>[] = [
+  { label: 'ID', prop: 'id', width: 60 },
+  { label: '等级名称', prop: 'name', minWidth: 120 },
+  { label: '最低积分', prop: 'minPoints', width: 100, align: 'right' },
+  { label: '折扣', slot: 'discount', width: 80, align: 'center' },
+  { label: '图标', slot: 'icon', width: 80, align: 'center' },
+  { label: '排序', prop: 'sort', width: 70, align: 'center' },
+  { label: '状态', slot: 'status', width: 80 },
+  { label: '操作', slot: 'actions', width: 160, hideInCard: true },
+]
 
 interface LevelForm {
   id: number
