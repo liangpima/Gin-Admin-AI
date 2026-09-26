@@ -15,6 +15,18 @@ func NewAgreementController() *AgreementController {
 	return &AgreementController{agreementService: service.NewAgreementService()}
 }
 
+// @Summary 创建协议
+// @Tags 协议
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param title body string true "标题"
+// @Param content body string false "正文"
+// @Param type body string true "协议类型"
+// @Param sort body int false "排序"
+// @Param status body int false "状态：0 停用 / 1 正常"
+// @Success 200 {object} common.Response
+// @Router /system/agreement [post]
 func (ctl *AgreementController) Create(c *gin.Context) {
 	var req struct {
 		Title   string `json:"title" binding:"required"`
@@ -35,6 +47,19 @@ func (ctl *AgreementController) Create(c *gin.Context) {
 	common.Success(c, nil)
 }
 
+// @Summary 更新协议
+// @Tags 协议
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id body int true "协议 ID"
+// @Param title body string true "标题"
+// @Param content body string false "正文"
+// @Param type body string true "协议类型"
+// @Param sort body int false "排序"
+// @Param status body int false "状态：0 停用 / 1 正常"
+// @Success 200 {object} common.Response
+// @Router /system/agreement [put]
 func (ctl *AgreementController) Update(c *gin.Context) {
 	var req struct {
 		ID      uint   `json:"id" binding:"required"`
@@ -56,6 +81,13 @@ func (ctl *AgreementController) Update(c *gin.Context) {
 	common.Success(c, nil)
 }
 
+// @Summary 删除协议
+// @Tags 协议
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "ID"
+// @Success 200 {object} common.Response
+// @Router /system/agreement/{id} [delete]
 func (ctl *AgreementController) Delete(c *gin.Context) {
 	id, err := common.GetUintParam(c, "id")
 	if err != nil {
@@ -69,6 +101,17 @@ func (ctl *AgreementController) Delete(c *gin.Context) {
 	common.Success(c, nil)
 }
 
+// @Summary 协议列表
+// @Tags 协议
+// @Produce json
+// @Security BearerAuth
+// @Param name query string false "标题（模糊）"
+// @Param type query string false "协议类型"
+// @Param status query int false "状态"
+// @Param page query int false "页码"
+// @Param pageSize query int false "每页条数"
+// @Success 200 {object} common.Response
+// @Router /system/agreement/list [get]
 func (ctl *AgreementController) FindList(c *gin.Context) {
 	var req struct {
 		Name     string `form:"name"`
@@ -89,6 +132,14 @@ func (ctl *AgreementController) FindList(c *gin.Context) {
 	common.SuccessWithPage(c, list, total, req.Page, req.PageSize)
 }
 
+// @Summary 按类型取协议
+// @Description 前端协议页用；同类型取排序最靠前的一条
+// @Tags 协议
+// @Produce json
+// @Security BearerAuth
+// @Param type path string true "协议类型"
+// @Success 200 {object} common.Response
+// @Router /system/agreement/type/{type} [get]
 func (ctl *AgreementController) FindByType(c *gin.Context) {
 	typ := c.Param("type")
 	if typ == "" {

@@ -772,8 +772,26 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
   - 验证：`runtime/cov/check_swagger_routes.py` 交叉核对仍全绿
     （54 个文档接口全部命中真实路由），`go build` / `go vet` / golangci-lint /
     覆盖率门槛均通过。
-  - **剩余 43 条**（system 各模块：config 7、dict 9、role 7、menu 6、dept 5、
-    agreement 5、post 4），按模块分批继续。
+  - ✅ **2026-09-26 第二批已补（43 条）——P3-3 完成**
+    system 各模块：config 7、dict 9、role 7、menu 6、dept 5、agreement 5、post 4。
+    **最终覆盖 97 条**，`check_swagger_routes.py` 报
+    「**所有业务接口都有文档**」（103 条注册路由里其余 6 条是
+    swagger / uploads / health 等非业务路由，按设计不文档化）。
+
+    几个「不能照抄」的点：
+    · 部门/菜单/角色/字典的增改绑的是**具名 dto**（`dto.CreateDeptRequest` 等），
+      直接 `@Param body body dto.XxxRequest` 让 swag 去解析类型，
+      比逐字段列一遍准确；岗位/协议/配置绑的是**匿名结构体**，只能逐字段写。
+    · 列表接口的分页参数统一是 `page` / `pageSize`（走 `common.BindPage`），
+      不是某些框架的 `current` / `size`。
+    · `@Tags` 沿用项目已有的中文描述式命名（`管理员`/`会员`/`文件`…），
+      新模块按同一风格取名（`岗位`/`协议`/`部门`/`菜单`/`角色`/`参数配置`/`字典`），
+      最终 20 个分组无重复。
+    · 补注解的脚本用**辅助函数生成**而不是 43 段手写文本 ——
+      这类内容高度同构，手写必然出现「复制上一段忘了改 `@Router`」，
+      而**注解写错不会报错**，只会让文档悄悄指错接口。
+
+  - ~~遗留：64 条路由无注解~~ → **已全部补齐**。
 - ~~`views/system/post/index.vue:105` handleDelete 无 try/catch~~
   ~~11 处空 catch 吞错~~
   —— **2026-09-24 复核后已失效，两条都不用做了**：post 页已改走 `useCrud`

@@ -30,6 +30,66 @@ definitions:
     - newPassword
     - oldPassword
     type: object
+  dto.CreateDeptRequest:
+    properties:
+      email:
+        maxLength: 128
+        type: string
+      leader:
+        maxLength: 64
+        type: string
+      name:
+        maxLength: 64
+        type: string
+      parentId:
+        type: integer
+      phone:
+        maxLength: 16
+        type: string
+      sort:
+        type: integer
+      status:
+        enum:
+        - 0
+        - 1
+        type: integer
+    required:
+    - name
+    type: object
+  dto.CreateDictDataRequest:
+    properties:
+      cssClass:
+        type: string
+      dictType:
+        type: string
+      label:
+        type: string
+      listClass:
+        type: string
+      remark:
+        type: string
+      sort:
+        type: integer
+      value:
+        type: string
+    required:
+    - dictType
+    - label
+    - value
+    type: object
+  dto.CreateDictTypeRequest:
+    properties:
+      name:
+        type: string
+      type:
+        description: |-
+          Type 字典类型编码，业务代码里按它取值（如 useDict('sys_user_status')），
+          因此只允许小写字母、数字、下划线，格式校验在 Service 层。
+        type: string
+    required:
+    - name
+    - type
+    type: object
   dto.CreateMemberLevelRequest:
     properties:
       discount:
@@ -108,6 +168,109 @@ definitions:
         - 1
         type: integer
     required:
+    - name
+    type: object
+  dto.CreateMenuRequest:
+    properties:
+      component:
+        maxLength: 200
+        type: string
+      icon:
+        maxLength: 64
+        type: string
+      isCache:
+        enum:
+        - 0
+        - 1
+        type: integer
+      isExternal:
+        enum:
+        - 0
+        - 1
+        type: integer
+      name:
+        maxLength: 64
+        type: string
+      parentId:
+        type: integer
+      path:
+        maxLength: 200
+        type: string
+      permission:
+        maxLength: 200
+        type: string
+      redirect:
+        maxLength: 200
+        type: string
+      sort:
+        type: integer
+      status:
+        enum:
+        - 0
+        - 1
+        type: integer
+      title:
+        maxLength: 64
+        type: string
+      type:
+        description: |-
+          Type 菜单类型：0 目录 / 1 菜单 / 2 按钮。
+
+          ⚠️ 这里**不能**加 `required`：validator 的 required 判的是「不等于零值」，
+          而 int8 的零值 0 恰好是合法取值（目录）。加上它之后「新增目录型菜单」
+          会被 400 拒绝，报错还是 Field validation for 'Type' failed on the
+          'required' tag 这种看不出所以然的话 —— 前端菜单表单默认 type=1，
+          只有用户主动选「目录」时才会踩到，所以很容易长期没被发现。
+
+          `oneof=0 1 2` 已经能挡掉非法取值（3、-1 等）；省略该字段时按 0（目录）处理，
+          这是可接受的默认值（前端始终显式传该字段）。
+        enum:
+        - 0
+        - 1
+        - 2
+        type: integer
+      visible:
+        enum:
+        - 0
+        - 1
+        type: integer
+    required:
+    - name
+    type: object
+  dto.CreateRoleRequest:
+    properties:
+      code:
+        maxLength: 64
+        minLength: 2
+        type: string
+      dataScope:
+        enum:
+        - 1
+        - 2
+        - 3
+        - 4
+        - 5
+        type: integer
+      menuIds:
+        items:
+          type: integer
+        type: array
+      name:
+        maxLength: 64
+        minLength: 2
+        type: string
+      remark:
+        maxLength: 500
+        type: string
+      sort:
+        type: integer
+      status:
+        enum:
+        - 0
+        - 1
+        type: integer
+    required:
+    - code
     - name
     type: object
   dto.CreateUserRequest:
@@ -209,6 +372,65 @@ definitions:
         type: integer
     required:
     - id
+    type: object
+  dto.UpdateDeptRequest:
+    properties:
+      email:
+        maxLength: 128
+        type: string
+      id:
+        type: integer
+      leader:
+        maxLength: 64
+        type: string
+      name:
+        maxLength: 64
+        type: string
+      parentId:
+        type: integer
+      phone:
+        maxLength: 16
+        type: string
+      sort:
+        type: integer
+      status:
+        enum:
+        - 0
+        - 1
+        type: integer
+    required:
+    - id
+    type: object
+  dto.UpdateDictDataRequest:
+    properties:
+      cssClass:
+        type: string
+      label:
+        type: string
+      listClass:
+        type: string
+      remark:
+        type: string
+      sort:
+        type: integer
+      status:
+        type: integer
+      value:
+        type: string
+    required:
+    - label
+    - value
+    type: object
+  dto.UpdateDictTypeRequest:
+    properties:
+      name:
+        type: string
+      remark:
+        type: string
+      status:
+        type: integer
+    required:
+    - name
     type: object
   dto.UpdateMemberLevelRequest:
     properties:
@@ -319,6 +541,101 @@ definitions:
         items:
           type: integer
         type: array
+    required:
+    - id
+    type: object
+  dto.UpdateMenuRequest:
+    properties:
+      component:
+        maxLength: 200
+        type: string
+      icon:
+        maxLength: 64
+        type: string
+      id:
+        type: integer
+      isCache:
+        enum:
+        - 0
+        - 1
+        type: integer
+      isExternal:
+        enum:
+        - 0
+        - 1
+        type: integer
+      name:
+        maxLength: 64
+        type: string
+      parentId:
+        type: integer
+      path:
+        maxLength: 200
+        type: string
+      permission:
+        maxLength: 200
+        type: string
+      redirect:
+        maxLength: 200
+        type: string
+      sort:
+        type: integer
+      status:
+        enum:
+        - 0
+        - 1
+        type: integer
+      title:
+        maxLength: 64
+        type: string
+      type:
+        enum:
+        - 0
+        - 1
+        - 2
+        type: integer
+      visible:
+        enum:
+        - 0
+        - 1
+        type: integer
+    required:
+    - id
+    type: object
+  dto.UpdateRoleRequest:
+    properties:
+      code:
+        maxLength: 64
+        minLength: 2
+        type: string
+      dataScope:
+        enum:
+        - 1
+        - 2
+        - 3
+        - 4
+        - 5
+        type: integer
+      id:
+        type: integer
+      menuIds:
+        items:
+          type: integer
+        type: array
+      name:
+        maxLength: 64
+        minLength: 2
+        type: string
+      remark:
+        maxLength: 500
+        type: string
+      sort:
+        type: integer
+      status:
+        enum:
+        - 0
+        - 1
+        type: integer
     required:
     - id
     type: object
@@ -1123,6 +1440,681 @@ paths:
       summary: 站点公开信息
       tags:
       - 站点
+  /system/agreement:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 标题
+        in: body
+        name: title
+        required: true
+        schema:
+          type: string
+      - description: 正文
+        in: body
+        name: content
+        schema:
+          type: string
+      - description: 协议类型
+        in: body
+        name: type
+        required: true
+        schema:
+          type: string
+      - description: 排序
+        in: body
+        name: sort
+        schema:
+          type: integer
+      - description: 状态：0 停用 / 1 正常
+        in: body
+        name: status
+        schema:
+          type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 创建协议
+      tags:
+      - 协议
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 协议 ID
+        in: body
+        name: id
+        required: true
+        schema:
+          type: integer
+      - description: 标题
+        in: body
+        name: title
+        required: true
+        schema:
+          type: string
+      - description: 正文
+        in: body
+        name: content
+        schema:
+          type: string
+      - description: 协议类型
+        in: body
+        name: type
+        required: true
+        schema:
+          type: string
+      - description: 排序
+        in: body
+        name: sort
+        schema:
+          type: integer
+      - description: 状态：0 停用 / 1 正常
+        in: body
+        name: status
+        schema:
+          type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 更新协议
+      tags:
+      - 协议
+  /system/agreement/{id}:
+    delete:
+      parameters:
+      - description: ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 删除协议
+      tags:
+      - 协议
+  /system/agreement/list:
+    get:
+      parameters:
+      - description: 标题（模糊）
+        in: query
+        name: name
+        type: string
+      - description: 协议类型
+        in: query
+        name: type
+        type: string
+      - description: 状态
+        in: query
+        name: status
+        type: integer
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 协议列表
+      tags:
+      - 协议
+  /system/agreement/type/{type}:
+    get:
+      description: 前端协议页用；同类型取排序最靠前的一条
+      parameters:
+      - description: 协议类型
+        in: path
+        name: type
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 按类型取协议
+      tags:
+      - 协议
+  /system/config:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 参数名称
+        in: body
+        name: name
+        required: true
+        schema:
+          type: string
+      - description: 参数键名
+        in: body
+        name: key
+        required: true
+        schema:
+          type: string
+      - description: 参数键值
+        in: body
+        name: value
+        schema:
+          type: string
+      - description: 是否系统内置：0 是 / 1 否
+        in: body
+        name: type
+        schema:
+          type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 创建参数
+      tags:
+      - 参数配置
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 参数 ID
+        in: body
+        name: id
+        required: true
+        schema:
+          type: integer
+      - description: 参数名称
+        in: body
+        name: name
+        required: true
+        schema:
+          type: string
+      - description: 参数键名
+        in: body
+        name: key
+        required: true
+        schema:
+          type: string
+      - description: 参数键值
+        in: body
+        name: value
+        schema:
+          type: string
+      - description: 是否系统内置
+        in: body
+        name: type
+        schema:
+          type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 更新参数
+      tags:
+      - 参数配置
+  /system/config/{id}:
+    delete:
+      parameters:
+      - description: ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 删除参数
+      tags:
+      - 参数配置
+  /system/config/batch:
+    put:
+      consumes:
+      - application/json
+      description: 按前缀成组保存（如站点设置表单一次提交多项）
+      parameters:
+      - description: 键名前缀
+        in: body
+        name: prefix
+        required: true
+        schema:
+          type: string
+      - description: 键值对列表，元素形如 {key, value}
+        in: body
+        name: items
+        required: true
+        schema:
+          type: array
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 批量保存参数
+      tags:
+      - 参数配置
+  /system/config/list:
+    get:
+      parameters:
+      - description: 参数名称（模糊）
+        in: query
+        name: name
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 参数列表
+      tags:
+      - 参数配置
+  /system/config/prefix:
+    get:
+      parameters:
+      - description: 键名前缀，如 site.
+        in: query
+        name: prefix
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 按前缀取参数
+      tags:
+      - 参数配置
+  /system/config/upload:
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: 证书文件
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 上传支付证书
+      tags:
+      - 参数配置
+  /system/dept:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 部门信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateDeptRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 创建部门
+      tags:
+      - 部门
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 部门信息（含 id）
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateDeptRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 更新部门
+      tags:
+      - 部门
+  /system/dept/{id}:
+    delete:
+      parameters:
+      - description: ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 删除部门
+      tags:
+      - 部门
+    get:
+      parameters:
+      - description: ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 部门详情
+      tags:
+      - 部门
+  /system/dept/tree:
+    get:
+      description: 整棵返回、不分页；按租户过滤
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 部门树
+      tags:
+      - 部门
+  /system/dict/data:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 字典项信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateDictDataRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 创建字典数据
+      tags:
+      - 字典
+  /system/dict/data/{id}:
+    delete:
+      parameters:
+      - description: ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 删除字典数据
+      tags:
+      - 字典
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 字典项信息（含 id）
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateDictDataRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 更新字典数据
+      tags:
+      - 字典
+  /system/dict/data/list:
+    get:
+      parameters:
+      - description: 字典类型编码
+        in: query
+        name: dictType
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 字典项列表
+      tags:
+      - 字典
+  /system/dict/data/type/{type}:
+    get:
+      description: 下拉选项用；前端有缓存，改字典后需要清缓存
+      parameters:
+      - description: 字典类型编码
+        in: path
+        name: type
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 按类型取字典项
+      tags:
+      - 字典
+  /system/dict/type:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 字典类型信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateDictTypeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 创建字典类型
+      tags:
+      - 字典
+  /system/dict/type/{id}:
+    delete:
+      parameters:
+      - description: ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 删除字典类型
+      tags:
+      - 字典
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 字典类型信息（含 id）
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateDictTypeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 更新字典类型
+      tags:
+      - 字典
+  /system/dict/type/list:
+    get:
+      parameters:
+      - description: 字典名称（模糊）
+        in: query
+        name: name
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 字典类型列表
+      tags:
+      - 字典
   /system/file/{id}:
     delete:
       parameters:
@@ -1291,6 +2283,120 @@ paths:
       summary: 操作日志列表
       tags:
       - 日志
+  /system/menu:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 菜单信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateMenuRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 创建菜单
+      tags:
+      - 菜单
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 菜单信息（含 id）
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateMenuRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 更新菜单
+      tags:
+      - 菜单
+  /system/menu/{id}:
+    delete:
+      parameters:
+      - description: ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 删除菜单
+      tags:
+      - 菜单
+    get:
+      parameters:
+      - description: ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 菜单详情
+      tags:
+      - 菜单
+  /system/menu/all:
+    get:
+      description: 给角色授权树、下拉选项用
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 全部菜单（扁平）
+      tags:
+      - 菜单
+  /system/menu/tree:
+    get:
+      description: 菜单管理页用；sys_menu 是全局表，不按租户过滤
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 菜单树
+      tags:
+      - 菜单
   /system/pay/order:
     get:
       parameters:
@@ -1474,6 +2580,289 @@ paths:
       summary: 订单退款
       tags:
       - 支付订单
+  /system/post:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 岗位编码
+        in: body
+        name: code
+        required: true
+        schema:
+          type: string
+      - description: 岗位名称
+        in: body
+        name: name
+        required: true
+        schema:
+          type: string
+      - description: 排序
+        in: body
+        name: sort
+        schema:
+          type: integer
+      - description: 状态：0 停用 / 1 正常
+        in: body
+        name: status
+        schema:
+          type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 创建岗位
+      tags:
+      - 岗位
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 岗位 ID
+        in: body
+        name: id
+        required: true
+        schema:
+          type: integer
+      - description: 岗位编码
+        in: body
+        name: code
+        required: true
+        schema:
+          type: string
+      - description: 岗位名称
+        in: body
+        name: name
+        required: true
+        schema:
+          type: string
+      - description: 排序
+        in: body
+        name: sort
+        schema:
+          type: integer
+      - description: 状态：0 停用 / 1 正常
+        in: body
+        name: status
+        schema:
+          type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 更新岗位
+      tags:
+      - 岗位
+  /system/post/{id}:
+    delete:
+      parameters:
+      - description: ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 删除岗位
+      tags:
+      - 岗位
+  /system/post/list:
+    get:
+      parameters:
+      - description: 岗位名称（模糊）
+        in: query
+        name: name
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 岗位列表
+      tags:
+      - 岗位
+  /system/role:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 角色信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 创建角色
+      tags:
+      - 角色
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 角色信息（含 id）
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateRoleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 更新角色
+      tags:
+      - 角色
+  /system/role/{id}:
+    delete:
+      parameters:
+      - description: ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 删除角色
+      tags:
+      - 角色
+    get:
+      parameters:
+      - description: ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 角色详情
+      tags:
+      - 角色
+  /system/role/all:
+    get:
+      description: 给用户编辑页的角色下拉用
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 全部角色（不分页）
+      tags:
+      - 角色
+  /system/role/list:
+    get:
+      parameters:
+      - description: 角色名称（模糊）
+        in: query
+        name: name
+        type: string
+      - description: 状态
+        in: query
+        name: status
+        type: integer
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 角色列表
+      tags:
+      - 角色
+  /system/role/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 角色 ID 与目标状态
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.StatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 启用 / 停用角色
+      tags:
+      - 角色
   /system/user:
     post:
       consumes:

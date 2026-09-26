@@ -18,6 +18,14 @@ func NewDeptController() *DeptController {
 	}
 }
 
+// @Summary 创建部门
+// @Tags 部门
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body dto.CreateDeptRequest true "部门信息"
+// @Success 200 {object} common.Response
+// @Router /system/dept [post]
 func (ctl *DeptController) Create(c *gin.Context) {
 	var req dto.CreateDeptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -35,6 +43,14 @@ func (ctl *DeptController) Create(c *gin.Context) {
 	common.Success(c, nil)
 }
 
+// @Summary 更新部门
+// @Tags 部门
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body dto.UpdateDeptRequest true "部门信息（含 id）"
+// @Success 200 {object} common.Response
+// @Router /system/dept [put]
 func (ctl *DeptController) Update(c *gin.Context) {
 	var req dto.UpdateDeptRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -52,6 +68,13 @@ func (ctl *DeptController) Update(c *gin.Context) {
 	common.Success(c, nil)
 }
 
+// @Summary 删除部门
+// @Tags 部门
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "ID"
+// @Success 200 {object} common.Response
+// @Router /system/dept/{id} [delete]
 func (ctl *DeptController) Delete(c *gin.Context) {
 	id, err := common.GetUintParam(c, "id")
 	if err != nil {
@@ -69,6 +92,13 @@ func (ctl *DeptController) Delete(c *gin.Context) {
 	common.Success(c, nil)
 }
 
+// @Summary 部门详情
+// @Tags 部门
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "ID"
+// @Success 200 {object} common.Response
+// @Router /system/dept/{id} [get]
 func (ctl *DeptController) FindByID(c *gin.Context) {
 	id, err := common.GetUintParam(c, "id")
 	if err != nil {
@@ -85,6 +115,13 @@ func (ctl *DeptController) FindByID(c *gin.Context) {
 	common.Success(c, dept)
 }
 
+// @Summary 部门树
+// @Description 整棵返回、不分页；按租户过滤
+// @Tags 部门
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} common.Response
+// @Router /system/dept/tree [get]
 func (ctl *DeptController) FindTree(c *gin.Context) {
 	depts, err := ctl.deptService.FindTree(common.GetTenantID(c))
 	if err != nil {

@@ -17,6 +17,17 @@ func NewPostController() *PostController {
 
 // tenantID 从 JWT claims 取（Auth 中间件注入），是全链路租户隔离的起点：
 // sys_post 为多租户表，漏传会让 TenantScope 退化为全表查询。
+// @Summary 创建岗位
+// @Tags 岗位
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param code body string true "岗位编码"
+// @Param name body string true "岗位名称"
+// @Param sort body int false "排序"
+// @Param status body int false "状态：0 停用 / 1 正常"
+// @Success 200 {object} common.Response
+// @Router /system/post [post]
 func (ctl *PostController) Create(c *gin.Context) {
 	var req struct {
 		Code   string `json:"code" binding:"required"`
@@ -36,6 +47,18 @@ func (ctl *PostController) Create(c *gin.Context) {
 	common.Success(c, nil)
 }
 
+// @Summary 更新岗位
+// @Tags 岗位
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id body int true "岗位 ID"
+// @Param code body string true "岗位编码"
+// @Param name body string true "岗位名称"
+// @Param sort body int false "排序"
+// @Param status body int false "状态：0 停用 / 1 正常"
+// @Success 200 {object} common.Response
+// @Router /system/post [put]
 func (ctl *PostController) Update(c *gin.Context) {
 	var req struct {
 		ID     uint   `json:"id" binding:"required"`
@@ -56,6 +79,13 @@ func (ctl *PostController) Update(c *gin.Context) {
 	common.Success(c, nil)
 }
 
+// @Summary 删除岗位
+// @Tags 岗位
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "ID"
+// @Success 200 {object} common.Response
+// @Router /system/post/{id} [delete]
 func (ctl *PostController) Delete(c *gin.Context) {
 	id, err := common.GetUintParam(c, "id")
 	if err != nil {
@@ -69,6 +99,15 @@ func (ctl *PostController) Delete(c *gin.Context) {
 	common.Success(c, nil)
 }
 
+// @Summary 岗位列表
+// @Tags 岗位
+// @Produce json
+// @Security BearerAuth
+// @Param name query string false "岗位名称（模糊）"
+// @Param page query int false "页码"
+// @Param pageSize query int false "每页条数"
+// @Success 200 {object} common.Response
+// @Router /system/post/list [get]
 func (ctl *PostController) FindList(c *gin.Context) {
 	var req struct {
 		Name     string `form:"name"`

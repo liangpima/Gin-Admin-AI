@@ -22,6 +22,17 @@ func NewConfigController() *ConfigController {
 	return &ConfigController{configService: service.NewConfigService()}
 }
 
+// @Summary 创建参数
+// @Tags 参数配置
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param name body string true "参数名称"
+// @Param key body string true "参数键名"
+// @Param value body string false "参数键值"
+// @Param type body int false "是否系统内置：0 是 / 1 否"
+// @Success 200 {object} common.Response
+// @Router /system/config [post]
 func (ctl *ConfigController) Create(c *gin.Context) {
 	var req struct {
 		Name  string `json:"name" binding:"required"`
@@ -40,6 +51,18 @@ func (ctl *ConfigController) Create(c *gin.Context) {
 	common.Success(c, nil)
 }
 
+// @Summary 更新参数
+// @Tags 参数配置
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id body int true "参数 ID"
+// @Param name body string true "参数名称"
+// @Param key body string true "参数键名"
+// @Param value body string false "参数键值"
+// @Param type body int false "是否系统内置"
+// @Success 200 {object} common.Response
+// @Router /system/config [put]
 func (ctl *ConfigController) Update(c *gin.Context) {
 	var req struct {
 		ID    uint   `json:"id" binding:"required"`
@@ -59,6 +82,13 @@ func (ctl *ConfigController) Update(c *gin.Context) {
 	common.Success(c, nil)
 }
 
+// @Summary 删除参数
+// @Tags 参数配置
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "ID"
+// @Success 200 {object} common.Response
+// @Router /system/config/{id} [delete]
 func (ctl *ConfigController) Delete(c *gin.Context) {
 	id, err := common.GetUintParam(c, "id")
 	if err != nil {
@@ -72,6 +102,15 @@ func (ctl *ConfigController) Delete(c *gin.Context) {
 	common.Success(c, nil)
 }
 
+// @Summary 参数列表
+// @Tags 参数配置
+// @Produce json
+// @Security BearerAuth
+// @Param name query string false "参数名称（模糊）"
+// @Param page query int false "页码"
+// @Param pageSize query int false "每页条数"
+// @Success 200 {object} common.Response
+// @Router /system/config/list [get]
 func (ctl *ConfigController) FindList(c *gin.Context) {
 	var req struct {
 		Name     string `form:"name"`
@@ -114,6 +153,13 @@ func (ctl *ConfigController) SiteInfo(c *gin.Context) {
 	common.Success(c, result)
 }
 
+// @Summary 按前缀取参数
+// @Tags 参数配置
+// @Produce json
+// @Security BearerAuth
+// @Param prefix query string true "键名前缀，如 site."
+// @Success 200 {object} common.Response
+// @Router /system/config/prefix [get]
 func (ctl *ConfigController) FindByPrefix(c *gin.Context) {
 	prefix := c.Query("prefix")
 	if prefix == "" {
@@ -128,6 +174,16 @@ func (ctl *ConfigController) FindByPrefix(c *gin.Context) {
 	common.Success(c, list)
 }
 
+// @Summary 批量保存参数
+// @Description 按前缀成组保存（如站点设置表单一次提交多项）
+// @Tags 参数配置
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param prefix body string true "键名前缀"
+// @Param items body array true "键值对列表，元素形如 {key, value}"
+// @Success 200 {object} common.Response
+// @Router /system/config/batch [put]
 func (ctl *ConfigController) BatchSave(c *gin.Context) {
 	var req struct {
 		Prefix string `json:"prefix" binding:"required"`
@@ -156,6 +212,14 @@ func (ctl *ConfigController) BatchSave(c *gin.Context) {
 	common.Success(c, nil)
 }
 
+// @Summary 上传支付证书
+// @Tags 参数配置
+// @Accept multipart/form-data
+// @Produce json
+// @Security BearerAuth
+// @Param file formData file true "证书文件"
+// @Success 200 {object} common.Response
+// @Router /system/config/upload [post]
 func (ctl *ConfigController) UploadCert(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
