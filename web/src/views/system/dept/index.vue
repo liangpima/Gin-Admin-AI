@@ -15,15 +15,16 @@
           </el-tag>
         </template>
         <template #actions="{ row }">
-          <el-button type="primary" link size="small" @click="handleAdd({ parentId: row.id })"
-            >新增</el-button
-          >
-          <el-button type="primary" link size="small" @click="handleEdit(row as DeptItem)"
-            >编辑</el-button
-          >
-          <el-button type="danger" link size="small" @click="handleDelete(row as DeptItem)"
-            >删除</el-button
-          >
+          <!-- 3 个按钮在窄列里会挤：MobileAction 在 <1024px 收成「更多」下拉，
+               ≥1024px 按同一份 actions 生成按钮 -->
+          <MobileAction
+            :actions="[
+              { label: '新增', icon: 'Plus', type: 'primary' },
+              { label: '编辑', icon: 'Edit', type: 'primary' },
+              { label: '删除', icon: 'Delete', type: 'danger' },
+            ]"
+            @command="(cmd: string) => handleAction(cmd, row as DeptItem)"
+          />
         </template>
       </ResponsiveTable>
     </el-card>
@@ -75,6 +76,7 @@
 import { ref } from 'vue'
 import { getDeptTree, createDept, updateDept, deleteDept, type DeptItem } from '@/api/dept'
 import FormDialog from '@/components/FormDialog/index.vue'
+import MobileAction from '@/components/MobileAction/index.vue'
 import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
 import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
 import { useCrud } from '@/hooks/useCrud'
@@ -148,6 +150,21 @@ const {
 
 const formRules = {
   name: [{ required: true, message: '请输入部门名称', trigger: 'blur' }],
+}
+
+/** MobileAction 的下拉分发：窄屏时操作收进「更多」，点击后按 label 回到原处理函数 */
+function handleAction(cmd: string, row: DeptItem) {
+  switch (cmd) {
+    case '新增':
+      handleAdd({ parentId: row.id })
+      break
+    case '编辑':
+      handleEdit(row)
+      break
+    case '删除':
+      handleDelete(row)
+      break
+  }
 }
 </script>
 

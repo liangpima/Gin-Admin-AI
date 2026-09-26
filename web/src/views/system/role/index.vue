@@ -51,15 +51,16 @@
         </template>
         <template #createdAt="{ row }">{{ formatDateTime(row.createdAt) }}</template>
         <template #actions="{ row }">
-          <el-button type="primary" link size="small" @click="handleEdit(row as RoleItem)"
-            >编辑</el-button
-          >
-          <el-button type="primary" link size="small" @click="handlePermission(row as RoleItem)"
-            >权限</el-button
-          >
-          <el-button type="danger" link size="small" @click="handleDelete(row as RoleItem)"
-            >删除</el-button
-          >
+          <!-- 3 个按钮在窄列里会挤：MobileAction 在 <1024px 收成「更多」下拉，
+               ≥1024px 按同一份 actions 生成按钮（不用页面再写一遍） -->
+          <MobileAction
+            :actions="[
+              { label: '编辑', icon: 'Edit', type: 'primary' },
+              { label: '权限', icon: 'Key', type: 'warning' },
+              { label: '删除', icon: 'Delete', type: 'danger' },
+            ]"
+            @command="(cmd: string) => handleAction(cmd, row as RoleItem)"
+          />
         </template>
       </ResponsiveTable>
 
@@ -134,6 +135,7 @@ import {
 } from '@/api/role'
 import CollapsibleFilter from '@/components/CollapsibleFilter/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
+import MobileAction from '@/components/MobileAction/index.vue'
 import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
 import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
 import { formatDateTime } from '@/utils/format'
@@ -212,6 +214,26 @@ function handleReset() {
 const formRules = {
   name: [{ required: true, message: '请输入角色名称', trigger: 'blur' }],
   code: [{ required: true, message: '请输入角色编码', trigger: 'blur' }],
+}
+
+/**
+ * MobileAction 的下拉分发：窄屏时操作收进「更多」，
+ * 点击后按 label 回到原来那个按钮的处理函数。
+ * 桌面端不走这里 —— MobileAction 在 ≥1024px 直接渲染默认插槽，
+ * 而本页默认插槽里已经没有按钮了，所以桌面端也走这条分支（见组件实现）。
+ */
+function handleAction(cmd: string, row: RoleItem) {
+  switch (cmd) {
+    case '编辑':
+      handleEdit(row)
+      break
+    case '权限':
+      handlePermission(row)
+      break
+    case '删除':
+      handleDelete(row)
+      break
+  }
 }
 
 async function handlePermission(row: RoleItem) {

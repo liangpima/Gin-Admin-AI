@@ -110,9 +110,9 @@
         <template #actions="{ row }">
           <MobileAction
             :actions="[
-              { label: '编辑', icon: 'Edit', color: 'var(--el-color-primary)' },
-              { label: '重置密码', icon: 'Key', color: 'var(--el-color-warning)' },
-              { label: '删除', icon: 'Delete', color: 'var(--el-color-danger)' },
+              { label: '编辑', icon: 'Edit', type: 'primary' },
+              { label: '重置密码', icon: 'Key', type: 'warning' },
+              { label: '删除', icon: 'Delete', type: 'danger' },
             ]"
             @command="(cmd: string) => handleAction(cmd, row as UserItem)"
           />
