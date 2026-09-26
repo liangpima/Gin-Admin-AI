@@ -54,6 +54,44 @@ definitions:
     required:
     - name
     type: object
+  dto.CreateMemberRequest:
+    properties:
+      avatar:
+        maxLength: 512
+        type: string
+      birthday:
+        type: string
+      gender:
+        enum:
+        - 0
+        - 1
+        - 2
+        type: integer
+      levelId:
+        type: integer
+      nickname:
+        maxLength: 64
+        type: string
+      phone:
+        type: string
+      remark:
+        maxLength: 500
+        type: string
+      status:
+        enum:
+        - 0
+        - 1
+        type: integer
+      tagIds:
+        items:
+          type: integer
+        type: array
+      username:
+        maxLength: 64
+        type: string
+    required:
+    - phone
+    type: object
   dto.CreateMemberTagRequest:
     properties:
       color:
@@ -201,6 +239,58 @@ definitions:
     required:
     - id
     type: object
+  dto.UpdateMemberRequest:
+    properties:
+      avatar:
+        maxLength: 512
+        type: string
+      birthday:
+        type: string
+      gender:
+        enum:
+        - 0
+        - 1
+        - 2
+        type: integer
+      id:
+        type: integer
+      levelId:
+        type: integer
+      nickname:
+        maxLength: 64
+        type: string
+      phone:
+        type: string
+      remark:
+        maxLength: 500
+        type: string
+      status:
+        enum:
+        - 0
+        - 1
+        type: integer
+      tagIds:
+        items:
+          type: integer
+        type: array
+      username:
+        maxLength: 64
+        type: string
+    required:
+    - id
+    type: object
+  dto.UpdateMemberStatusRequest:
+    properties:
+      id:
+        type: integer
+      status:
+        enum:
+        - 0
+        - 1
+        type: integer
+    required:
+    - id
+    type: object
   dto.UpdateMemberTagRequest:
     properties:
       color:
@@ -218,6 +308,17 @@ definitions:
         - 0
         - 1
         type: integer
+    required:
+    - id
+    type: object
+  dto.UpdateMemberTagsRequest:
+    properties:
+      id:
+        type: integer
+      tagIds:
+        items:
+          type: integer
+        type: array
     required:
     - id
     type: object
@@ -274,6 +375,18 @@ definitions:
     required:
     - id
     type: object
+  model.CaptchaVerifyRequest:
+    properties:
+      points:
+        items:
+          $ref: '#/definitions/model.Point'
+        type: array
+      token:
+        type: string
+    required:
+    - points
+    - token
+    type: object
   model.DashboardStats:
     properties:
       configCount:
@@ -289,6 +402,13 @@ definitions:
       roleCount:
         type: integer
       userCount:
+        type: integer
+    type: object
+  model.Point:
+    properties:
+      x:
+        type: integer
+      "y":
         type: integer
     type: object
   vo.LoginResponse:
@@ -460,6 +580,39 @@ paths:
       summary: 获取用户信息
       tags:
       - 认证
+  /captcha/generate:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: 生成点选验证码
+      tags:
+      - 验证码
+  /captcha/verify:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 验证码 token 与点击坐标
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/model.CaptchaVerifyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: 校验点选验证码
+      tags:
+      - 验证码
   /dashboard/stats:
     get:
       produces:
@@ -477,6 +630,90 @@ paths:
       summary: 获取统计数据
       tags:
       - 仪表盘
+  /member:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 会员信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateMemberRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 创建会员
+      tags:
+      - 会员
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 会员信息（含 id）
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateMemberRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 更新会员
+      tags:
+      - 会员
+  /member/{id}:
+    delete:
+      parameters:
+      - description: 会员 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 删除会员
+      tags:
+      - 会员
+    get:
+      parameters:
+      - description: 会员 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 会员详情
+      tags:
+      - 会员
   /member/level:
     post:
       consumes:
@@ -542,6 +779,21 @@ paths:
       summary: 删除会员等级
       tags:
       - 会员等级
+  /member/level/all:
+    get:
+      description: 给下拉选项用；`/member/level/list` 是分页版
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 全部会员等级（不分页）
+      tags:
+      - 会员等级
   /member/level/list:
     get:
       parameters:
@@ -571,6 +823,45 @@ paths:
       summary: 等级列表
       tags:
       - 会员等级
+  /member/list:
+    get:
+      parameters:
+      - description: 手机号
+        in: query
+        name: phone
+        type: string
+      - description: 昵称（模糊）
+        in: query
+        name: nickname
+        type: string
+      - description: 等级 ID
+        in: query
+        name: levelId
+        type: integer
+      - description: 状态：0 停用 / 1 正常
+        in: query
+        name: status
+        type: integer
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 会员列表
+      tags:
+      - 会员
   /member/points/list:
     get:
       parameters:
@@ -604,6 +895,29 @@ paths:
       summary: 积分明细列表
       tags:
       - 积分明细
+  /member/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 会员 ID 与目标状态
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateMemberStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 启用 / 停用会员
+      tags:
+      - 会员
   /member/tag:
     post:
       consumes:
@@ -669,6 +983,21 @@ paths:
       summary: 删除会员标签
       tags:
       - 会员标签
+  /member/tag/all:
+    get:
+      description: 给下拉选项用；`/member/tag/list` 是分页版
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 全部会员标签（不分页）
+      tags:
+      - 会员标签
   /member/tag/list:
     get:
       parameters:
@@ -698,6 +1027,102 @@ paths:
       summary: 标签列表
       tags:
       - 会员标签
+  /member/tags:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 会员 ID 与标签 ID 列表
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateMemberTagsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 设置会员标签
+      tags:
+      - 会员
+  /member/visit:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 会员 ID
+        in: body
+        name: id
+        required: true
+        schema:
+          type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 更新最后访问时间
+      tags:
+      - 会员
+  /pay/notify/alipay:
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: |-
+        由支付宝平台发起，**自行验签、不做登录鉴权**；请求体是渠道原始报文。
+        响应为纯文本 `success` 或 `fail`，不是统一 Response 结构。
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: success 或 fail
+          schema:
+            type: string
+      summary: 支付宝支付回调
+      tags:
+      - 支付回调
+  /pay/notify/wechat:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        由微信支付平台发起，**自行验签、不做登录鉴权**；请求体是渠道原始报文。
+        响应为 `{"code":"SUCCESS"}` 或 `{"code":"FAIL","message":"处理失败"}`，
+        不是统一 Response 结构（渠道侧只认它自己的约定）。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 微信支付回调
+      tags:
+      - 支付回调
+  /site/info:
+    get:
+      description: 返回 `site.` 前缀的配置（站点名、logo 等），登录页也要用，故无需鉴权
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      summary: 站点公开信息
+      tags:
+      - 站点
   /system/file/{id}:
     delete:
       parameters:
@@ -866,6 +1291,189 @@ paths:
       summary: 操作日志列表
       tags:
       - 日志
+  /system/pay/order:
+    get:
+      parameters:
+      - description: 订单号
+        in: query
+        name: orderNo
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 按订单号查订单
+      tags:
+      - 支付订单
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 订单标题
+        in: body
+        name: subject
+        required: true
+        schema:
+          type: string
+      - description: 订单描述
+        in: body
+        name: body_
+        schema:
+          type: string
+      - description: 金额（单位：分）
+        in: body
+        name: amount
+        required: true
+        schema:
+          type: integer
+      - description: 支付渠道：wechat / alipay
+        in: body
+        name: channel
+        required: true
+        schema:
+          type: string
+      - description: 微信 openid（JSAPI 支付需要）
+        in: body
+        name: openId
+        schema:
+          type: string
+      - description: 附加数据，原样回传
+        in: body
+        name: extra
+        schema:
+          type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 创建支付订单
+      tags:
+      - 支付订单
+  /system/pay/order/close:
+    post:
+      consumes:
+      - application/json
+      description: 仅未支付的订单可关闭；状态冲突返回 400
+      parameters:
+      - description: 订单号
+        in: body
+        name: orderNo
+        required: true
+        schema:
+          type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 关闭订单
+      tags:
+      - 支付订单
+  /system/pay/order/list:
+    get:
+      parameters:
+      - description: 订单标题（模糊）
+        in: query
+        name: subject
+        type: string
+      - description: 支付渠道
+        in: query
+        name: channel
+        type: string
+      - description: 订单状态（非法值按不过滤处理）
+        in: query
+        name: status
+        type: integer
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页条数
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 支付订单列表
+      tags:
+      - 支付订单
+  /system/pay/order/query:
+    get:
+      description: 只回 orderNo / status / paidAt 三个字段，供前端轮询支付结果
+      parameters:
+      - description: 订单号
+        in: query
+        name: orderNo
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 查询订单状态（轻量）
+      tags:
+      - 支付订单
+  /system/pay/order/refund:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 订单号
+        in: body
+        name: orderNo
+        required: true
+        schema:
+          type: string
+      - description: 退款金额（单位：分）
+        in: body
+        name: refundAmt
+        required: true
+        schema:
+          type: integer
+      - description: 退款单号，不传则自动生成
+        in: body
+        name: refundNo
+        schema:
+          type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 订单退款
+      tags:
+      - 支付订单
   /system/user:
     post:
       consumes:

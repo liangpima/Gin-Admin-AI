@@ -162,6 +162,58 @@
                 }
             }
         },
+        "/captcha/generate": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "验证码"
+                ],
+                "summary": "生成点选验证码",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/captcha/verify": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "验证码"
+                ],
+                "summary": "校验点选验证码",
+                "parameters": [
+                    {
+                        "description": "验证码 token 与点击坐标",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.CaptchaVerifyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/dashboard/stats": {
             "get": {
                 "produces": [
@@ -188,6 +240,80 @@
                                     }
                                 }
                             ]
+                        }
+                    }
+                }
+            }
+        },
+        "/member": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会员"
+                ],
+                "summary": "更新会员",
+                "parameters": [
+                    {
+                        "description": "会员信息（含 id）",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.UpdateMemberRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会员"
+                ],
+                "summary": "创建会员",
+                "parameters": [
+                    {
+                        "description": "会员信息",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.CreateMemberRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
                         }
                     }
                 }
@@ -257,6 +383,31 @@
                         }
                     }
                 ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/member/level/all": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "给下拉选项用；`/member/level/list` 是分页版",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会员等级"
+                ],
+                "summary": "全部会员等级（不分页）",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -346,6 +497,68 @@
                 }
             }
         },
+        "/member/list": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会员"
+                ],
+                "summary": "会员列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "手机号",
+                        "name": "phone",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "昵称（模糊）",
+                        "name": "nickname",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "等级 ID",
+                        "name": "levelId",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "状态：0 停用 / 1 正常",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页条数",
+                        "name": "pageSize",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/member/points/list": {
             "get": {
                 "security": [
@@ -386,6 +599,44 @@
                         "name": "pageSize",
                         "in": "query",
                         "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/member/status": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会员"
+                ],
+                "summary": "启用 / 停用会员",
+                "parameters": [
+                    {
+                        "description": "会员 ID 与目标状态",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.UpdateMemberStatusRequest"
+                        }
                     }
                 ],
                 "responses": {
@@ -472,6 +723,31 @@
                 }
             }
         },
+        "/member/tag/all": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "给下拉选项用；`/member/tag/list` 是分页版",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会员标签"
+                ],
+                "summary": "全部会员标签（不分页）",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/member/tag/list": {
             "get": {
                 "security": [
@@ -541,6 +817,215 @@
                         "required": true
                     }
                 ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/member/tags": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会员"
+                ],
+                "summary": "设置会员标签",
+                "parameters": [
+                    {
+                        "description": "会员 ID 与标签 ID 列表",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.UpdateMemberTagsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/member/visit": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会员"
+                ],
+                "summary": "更新最后访问时间",
+                "parameters": [
+                    {
+                        "description": "会员 ID",
+                        "name": "id",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/member/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会员"
+                ],
+                "summary": "会员详情",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "会员 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会员"
+                ],
+                "summary": "删除会员",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "会员 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/pay/notify/alipay": {
+            "post": {
+                "description": "由支付宝平台发起，**自行验签、不做登录鉴权**；请求体是渠道原始报文。\n响应为纯文本 `success` 或 `fail`，不是统一 Response 结构。",
+                "consumes": [
+                    "application/x-www-form-urlencoded"
+                ],
+                "produces": [
+                    "text/plain"
+                ],
+                "tags": [
+                    "支付回调"
+                ],
+                "summary": "支付宝支付回调",
+                "responses": {
+                    "200": {
+                        "description": "success 或 fail",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/pay/notify/wechat": {
+            "post": {
+                "description": "由微信支付平台发起，**自行验签、不做登录鉴权**；请求体是渠道原始报文。\n响应为 `{\"code\":\"SUCCESS\"}` 或 `{\"code\":\"FAIL\",\"message\":\"处理失败\"}`，\n不是统一 Response 结构（渠道侧只认它自己的约定）。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "支付回调"
+                ],
+                "summary": "微信支付回调",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/site/info": {
+            "get": {
+                "description": "返回 `site.` 前缀的配置（站点名、logo 等），登录页也要用，故无需鉴权",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "站点"
+                ],
+                "summary": "站点公开信息",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -817,6 +1302,301 @@
                     "日志"
                 ],
                 "summary": "清空操作日志",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/pay/order": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "支付订单"
+                ],
+                "summary": "按订单号查订单",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "订单号",
+                        "name": "orderNo",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "支付订单"
+                ],
+                "summary": "创建支付订单",
+                "parameters": [
+                    {
+                        "description": "订单标题",
+                        "name": "subject",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "订单描述",
+                        "name": "body_",
+                        "in": "body",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "金额（单位：分）",
+                        "name": "amount",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "description": "支付渠道：wechat / alipay",
+                        "name": "channel",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "微信 openid（JSAPI 支付需要）",
+                        "name": "openId",
+                        "in": "body",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "附加数据，原样回传",
+                        "name": "extra",
+                        "in": "body",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/pay/order/close": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "仅未支付的订单可关闭；状态冲突返回 400",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "支付订单"
+                ],
+                "summary": "关闭订单",
+                "parameters": [
+                    {
+                        "description": "订单号",
+                        "name": "orderNo",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/pay/order/list": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "支付订单"
+                ],
+                "summary": "支付订单列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "订单标题（模糊）",
+                        "name": "subject",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "支付渠道",
+                        "name": "channel",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "订单状态（非法值按不过滤处理）",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页条数",
+                        "name": "pageSize",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/pay/order/query": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "只回 orderNo / status / paidAt 三个字段，供前端轮询支付结果",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "支付订单"
+                ],
+                "summary": "查询订单状态（轻量）",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "订单号",
+                        "name": "orderNo",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/system/pay/order/refund": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "支付订单"
+                ],
+                "summary": "订单退款",
+                "parameters": [
+                    {
+                        "description": "订单号",
+                        "name": "orderNo",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "退款金额（单位：分）",
+                        "name": "refundAmt",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "description": "退款单号，不传则自动生成",
+                        "name": "refundNo",
+                        "in": "body",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -1316,6 +2096,60 @@
                 }
             }
         },
+        "dto.CreateMemberRequest": {
+            "type": "object",
+            "required": [
+                "phone"
+            ],
+            "properties": {
+                "avatar": {
+                    "type": "string",
+                    "maxLength": 512
+                },
+                "birthday": {
+                    "type": "string"
+                },
+                "gender": {
+                    "type": "integer",
+                    "enum": [
+                        0,
+                        1,
+                        2
+                    ]
+                },
+                "levelId": {
+                    "type": "integer"
+                },
+                "nickname": {
+                    "type": "string",
+                    "maxLength": 64
+                },
+                "phone": {
+                    "type": "string"
+                },
+                "remark": {
+                    "type": "string",
+                    "maxLength": 500
+                },
+                "status": {
+                    "type": "integer",
+                    "enum": [
+                        0,
+                        1
+                    ]
+                },
+                "tagIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "username": {
+                    "type": "string",
+                    "maxLength": 64
+                }
+            }
+        },
         "dto.CreateMemberTagRequest": {
             "type": "object",
             "required": [
@@ -1501,6 +2335,81 @@
                 }
             }
         },
+        "dto.UpdateMemberRequest": {
+            "type": "object",
+            "required": [
+                "id"
+            ],
+            "properties": {
+                "avatar": {
+                    "type": "string",
+                    "maxLength": 512
+                },
+                "birthday": {
+                    "type": "string"
+                },
+                "gender": {
+                    "type": "integer",
+                    "enum": [
+                        0,
+                        1,
+                        2
+                    ]
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "levelId": {
+                    "type": "integer"
+                },
+                "nickname": {
+                    "type": "string",
+                    "maxLength": 64
+                },
+                "phone": {
+                    "type": "string"
+                },
+                "remark": {
+                    "type": "string",
+                    "maxLength": 500
+                },
+                "status": {
+                    "type": "integer",
+                    "enum": [
+                        0,
+                        1
+                    ]
+                },
+                "tagIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "username": {
+                    "type": "string",
+                    "maxLength": 64
+                }
+            }
+        },
+        "dto.UpdateMemberStatusRequest": {
+            "type": "object",
+            "required": [
+                "id"
+            ],
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "integer",
+                    "enum": [
+                        0,
+                        1
+                    ]
+                }
+            }
+        },
         "dto.UpdateMemberTagRequest": {
             "type": "object",
             "required": [
@@ -1527,6 +2436,23 @@
                         0,
                         1
                     ]
+                }
+            }
+        },
+        "dto.UpdateMemberTagsRequest": {
+            "type": "object",
+            "required": [
+                "id"
+            ],
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "tagIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
                 }
             }
         },
@@ -1609,6 +2535,24 @@
                 }
             }
         },
+        "model.CaptchaVerifyRequest": {
+            "type": "object",
+            "required": [
+                "points",
+                "token"
+            ],
+            "properties": {
+                "points": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Point"
+                    }
+                },
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
         "model.DashboardStats": {
             "type": "object",
             "properties": {
@@ -1631,6 +2575,17 @@
                     "type": "integer"
                 },
                 "userCount": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.Point": {
+            "type": "object",
+            "properties": {
+                "x": {
+                    "type": "integer"
+                },
+                "y": {
                     "type": "integer"
                 }
             }

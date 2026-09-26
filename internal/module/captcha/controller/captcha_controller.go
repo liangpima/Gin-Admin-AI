@@ -16,6 +16,11 @@ func NewCaptchaController() *CaptchaController {
 	return &CaptchaController{captchaService: service.NewCaptchaService()}
 }
 
+// @Summary 生成点选验证码
+// @Tags 验证码
+// @Produce json
+// @Success 200 {object} common.Response
+// @Router /captcha/generate [get]
 func (ctl *CaptchaController) Generate(c *gin.Context) {
 	resp, err := ctl.captchaService.Generate(c.ClientIP())
 	if err != nil {
@@ -25,6 +30,13 @@ func (ctl *CaptchaController) Generate(c *gin.Context) {
 	common.Success(c, resp)
 }
 
+// @Summary 校验点选验证码
+// @Tags 验证码
+// @Accept json
+// @Produce json
+// @Param body body model.CaptchaVerifyRequest true "验证码 token 与点击坐标"
+// @Success 200 {object} common.Response
+// @Router /captcha/verify [post]
 func (ctl *CaptchaController) Verify(c *gin.Context) {
 	var req model.CaptchaVerifyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

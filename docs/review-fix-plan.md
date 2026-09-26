@@ -750,10 +750,30 @@ IP 维度的限流（登录失败 5 次/15 分钟、验证码生成 10 次/分�
      **33 个文档接口全部命中真实路由**（同时把 gin 的 `:id` 与 OpenAPI 的 `{id}`
      归一化，否则会得到 6 条假阳性）。
 
-  **遗留（本次未做，属「文档不全」而非「文档不对」）**：实测 **64 条业务路由
-  没有任何 swagger 注解**（payment 与 captcha 两个控制器是 0 注解，
-  system 各模块也只注了一部分）。这不会造成误导，只是文档覆盖不全，
-  且补注解需要逐个确认请求/响应类型，属独立内容工作。
+  **遗留（属「文档不全」而非「文档不对」）**：实测 103 条注册路由里
+  **64 条没有任何 swagger 注解**（payment 与 captcha 两个控制器原本是 0 注解，
+  system 各模块也只注了一部分）。不会造成误导，只是覆盖不全；
+  CI 门禁只查「漂移」不查「覆盖率」，所以不补也不会红。
+
+  **2026-09-26 第一批已补（21 条）**：captcha 2 + site 1 + payment 8 + member 10。
+  文档覆盖 33 → **54 条**，未文档化 64 → **43 条**。
+  - 补注解**不是机械活**，每条都要回代码确认四件事：请求从哪绑（body / query / path）、
+    响应是不是统一 `common.Response`、要不要 `@Security`、以及路径前缀。
+    本次就有两处「不能照抄」的例子：
+    · **两个支付回调的响应不是 `common.Response`** —— 微信回
+      `{"code":"SUCCESS"|"FAIL"}`、支付宝回**纯文本** `success`/`fail`，
+      按真实响应写成 `map[string]string` 与 `{string} string`，
+      并各自标了正确的 `@Produce`（`text/plain`）。套统一结构就是错的文档。
+    · **captcha 与 site 是公开接口**（`router.go` 里注册在 `authorized` 组之前，
+      登录页要用），因此**不写** `@Security BearerAuth`；
+      支付回调同理（渠道侧发起、自行验签）。
+  - 路径一律相对 `@BasePath`（`/member/list`，不是 `/api/v1/member/list`）——
+    这是上一轮修掉 16 处前缀 bug 后定下的写法。
+  - 验证：`runtime/cov/check_swagger_routes.py` 交叉核对仍全绿
+    （54 个文档接口全部命中真实路由），`go build` / `go vet` / golangci-lint /
+    覆盖率门槛均通过。
+  - **剩余 43 条**（system 各模块：config 7、dict 9、role 7、menu 6、dept 5、
+    agreement 5、post 4），按模块分批继续。
 - ~~`views/system/post/index.vue:105` handleDelete 无 try/catch~~
   ~~11 处空 catch 吞错~~
   —— **2026-09-24 复核后已失效，两条都不用做了**：post 页已改走 `useCrud`

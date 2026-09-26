@@ -38,6 +38,19 @@ func NewPaymentController() *PaymentController {
 	return &PaymentController{paymentService: service.NewPaymentService()}
 }
 
+// @Summary 创建支付订单
+// @Tags 支付订单
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param subject body string true "订单标题"
+// @Param body_ body string false "订单描述"
+// @Param amount body int true "金额（单位：分）"
+// @Param channel body string true "支付渠道：wechat / alipay"
+// @Param openId body string false "微信 openid（JSAPI 支付需要）"
+// @Param extra body string false "附加数据，原样回传"
+// @Success 200 {object} common.Response
+// @Router /system/pay/order [post]
 func (ctl *PaymentController) CreateOrder(c *gin.Context) {
 	var req struct {
 		Subject  string `json:"subject" binding:"required"`
@@ -87,6 +100,13 @@ func (ctl *PaymentController) CreateOrder(c *gin.Context) {
 	common.Success(c, result.PayInfo)
 }
 
+// @Summary 按订单号查订单
+// @Tags 支付订单
+// @Produce json
+// @Security BearerAuth
+// @Param orderNo query string true "订单号"
+// @Success 200 {object} common.Response
+// @Router /system/pay/order [get]
 func (ctl *PaymentController) GetOrder(c *gin.Context) {
 	orderNo := c.Query("orderNo")
 	if orderNo == "" {
@@ -104,6 +124,15 @@ func (ctl *PaymentController) GetOrder(c *gin.Context) {
 	common.Success(c, order)
 }
 
+// @Summary 关闭订单
+// @Description 仅未支付的订单可关闭；状态冲突返回 400
+// @Tags 支付订单
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param orderNo body string true "订单号"
+// @Success 200 {object} common.Response
+// @Router /system/pay/order/close [post]
 func (ctl *PaymentController) CloseOrder(c *gin.Context) {
 	var req struct {
 		OrderNo string `json:"orderNo" binding:"required"`
@@ -123,6 +152,17 @@ func (ctl *PaymentController) CloseOrder(c *gin.Context) {
 	common.Success(c, nil)
 }
 
+// @Summary 支付订单列表
+// @Tags 支付订单
+// @Produce json
+// @Security BearerAuth
+// @Param subject query string false "订单标题（模糊）"
+// @Param channel query string false "支付渠道"
+// @Param status query int false "订单状态（非法值按不过滤处理）"
+// @Param page query int false "页码"
+// @Param pageSize query int false "每页条数"
+// @Success 200 {object} common.Response
+// @Router /system/pay/order/list [get]
 func (ctl *PaymentController) FindList(c *gin.Context) {
 	subject := c.Query("subject")
 	channel := c.Query("channel")
@@ -147,6 +187,15 @@ func (ctl *PaymentController) FindList(c *gin.Context) {
 	common.SuccessWithPage(c, list, total, page, pageSize)
 }
 
+// @Summary 微信支付回调
+// @Description 由微信支付平台发起，**自行验签、不做登录鉴权**；请求体是渠道原始报文。
+// @Description 响应为 `{"code":"SUCCESS"}` 或 `{"code":"FAIL","message":"处理失败"}`，
+// @Description 不是统一 Response 结构（渠道侧只认它自己的约定）。
+// @Tags 支付回调
+// @Accept json
+// @Produce json
+// @Success 200 {object} map[string]string
+// @Router /pay/notify/wechat [post]
 func (ctl *PaymentController) WechatNotify(c *gin.Context) {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -182,6 +231,14 @@ func (ctl *PaymentController) WechatNotify(c *gin.Context) {
 	c.JSON(200, gin.H{"code": "SUCCESS", "message": "成功"})
 }
 
+// @Summary 支付宝支付回调
+// @Description 由支付宝平台发起，**自行验签、不做登录鉴权**；请求体是渠道原始报文。
+// @Description 响应为纯文本 `success` 或 `fail`，不是统一 Response 结构。
+// @Tags 支付回调
+// @Accept x-www-form-urlencoded
+// @Produce text/plain
+// @Success 200 {string} string "success 或 fail"
+// @Router /pay/notify/alipay [post]
 func (ctl *PaymentController) AlipayNotify(c *gin.Context) {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
@@ -214,6 +271,14 @@ func (ctl *PaymentController) AlipayNotify(c *gin.Context) {
 	c.String(200, "success")
 }
 
+// @Summary 查询订单状态（轻量）
+// @Description 只回 orderNo / status / paidAt 三个字段，供前端轮询支付结果
+// @Tags 支付订单
+// @Produce json
+// @Security BearerAuth
+// @Param orderNo query string true "订单号"
+// @Success 200 {object} common.Response
+// @Router /system/pay/order/query [get]
 func (ctl *PaymentController) QueryOrder(c *gin.Context) {
 	orderNo := c.Query("orderNo")
 	if orderNo == "" {
@@ -235,6 +300,16 @@ func (ctl *PaymentController) QueryOrder(c *gin.Context) {
 	})
 }
 
+// @Summary 订单退款
+// @Tags 支付订单
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param orderNo body string true "订单号"
+// @Param refundAmt body int true "退款金额（单位：分）"
+// @Param refundNo body string false "退款单号，不传则自动生成"
+// @Success 200 {object} common.Response
+// @Router /system/pay/order/refund [post]
 func (ctl *PaymentController) RefundOrder(c *gin.Context) {
 	var req struct {
 		OrderNo   string `json:"orderNo" binding:"required"`

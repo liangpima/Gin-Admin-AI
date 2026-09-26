@@ -90,6 +90,12 @@ func (ctl *ConfigController) FindList(c *gin.Context) {
 	common.SuccessWithPage(c, list, total, req.Page, req.PageSize)
 }
 
+// @Summary 站点公开信息
+// @Description 返回 `site.` 前缀的配置（站点名、logo 等），登录页也要用，故无需鉴权
+// @Tags 站点
+// @Produce json
+// @Success 200 {object} common.Response
+// @Router /site/info [get]
 func (ctl *ConfigController) SiteInfo(c *gin.Context) {
 	list, err := ctl.configService.FindByPrefix("site.")
 	if err != nil {
