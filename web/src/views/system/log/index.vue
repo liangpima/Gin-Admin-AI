@@ -4,25 +4,27 @@
       <el-tabs v-model="activeTab" @tab-change="handleTabChange">
         <el-tab-pane label="操作日志" name="operation">
           <div class="search-form">
-            <el-form :model="opQuery">
-              <el-row :gutter="16">
-                <el-col :xs="24" :sm="12" :md="8">
-                  <el-form-item label="模块标题">
-                    <el-input
-                      v-model="opQuery.title"
-                      placeholder="请输入"
-                      clearable
-                      @keyup.enter="loadOpLogs"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :sm="12" :md="8">
-                  <el-form-item>
-                    <el-button type="primary" @click="loadOpLogs">搜索</el-button>
-                  </el-form-item>
-                </el-col>
-              </el-row>
-            </el-form>
+            <CollapsibleFilter>
+              <el-form :model="opQuery">
+                <el-row :gutter="16">
+                  <el-col :xs="24" :sm="12" :md="8">
+                    <el-form-item label="模块标题">
+                      <el-input
+                        v-model="opQuery.title"
+                        placeholder="请输入"
+                        clearable
+                        @keyup.enter="loadOpLogs"
+                      />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :xs="24" :sm="12" :md="8">
+                    <el-form-item>
+                      <el-button type="primary" @click="loadOpLogs">搜索</el-button>
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+              </el-form>
+            </CollapsibleFilter>
           </div>
           <ResponsiveTable :data="opLogs" :columns="opColumns" :loading="opLoading" :stripe="true">
             <template #opStatus="{ row }">
@@ -43,25 +45,27 @@
 
         <el-tab-pane label="登录日志" name="login">
           <div class="search-form">
-            <el-form :model="loginQuery">
-              <el-row :gutter="16">
-                <el-col :xs="24" :sm="12" :md="8">
-                  <el-form-item label="用户名">
-                    <el-input
-                      v-model="loginQuery.username"
-                      placeholder="请输入"
-                      clearable
-                      @keyup.enter="loadLoginLogs"
-                    />
-                  </el-form-item>
-                </el-col>
-                <el-col :xs="24" :sm="12" :md="8">
-                  <el-form-item>
-                    <el-button type="primary" @click="loadLoginLogs">搜索</el-button>
-                  </el-form-item>
-                </el-col>
-              </el-row>
-            </el-form>
+            <CollapsibleFilter>
+              <el-form :model="loginQuery">
+                <el-row :gutter="16">
+                  <el-col :xs="24" :sm="12" :md="8">
+                    <el-form-item label="用户名">
+                      <el-input
+                        v-model="loginQuery.username"
+                        placeholder="请输入"
+                        clearable
+                        @keyup.enter="loadLoginLogs"
+                      />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :xs="24" :sm="12" :md="8">
+                    <el-form-item>
+                      <el-button type="primary" @click="loadLoginLogs">搜索</el-button>
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+              </el-form>
+            </CollapsibleFilter>
           </div>
           <ResponsiveTable
             :data="loginLogs"
@@ -94,6 +98,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { getOperationLogs, getLoginLogs, type OperationLogItem, LoginLogItem } from '@/api/log'
 import { formatDateTime } from '@/utils/format'
 import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
+import CollapsibleFilter from '@/components/CollapsibleFilter/index.vue'
 import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
 
 // 两个 Tab 各一份列定义。插槽名刻意加前缀（op*/login*）：

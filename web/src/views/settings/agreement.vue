@@ -1,56 +1,58 @@
 <template>
   <div class="app-container">
     <div class="search-form">
-      <el-form :model="queryParams">
-        <el-row :gutter="16">
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item label="标题">
-              <el-input
-                v-model="queryParams.name"
-                placeholder="请输入标题"
-                clearable
-                @keyup.enter="handleSearch"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item label="类型">
-              <el-select
-                v-model="queryParams.type"
-                placeholder="全部"
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="item in typeOptions"
-                  :key="item.value"
-                  :label="item.label"
-                  :value="item.value"
+      <CollapsibleFilter>
+        <el-form :model="queryParams">
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item label="标题">
+                <el-input
+                  v-model="queryParams.name"
+                  placeholder="请输入标题"
+                  clearable
+                  @keyup.enter="handleSearch"
                 />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item label="状态">
-              <el-select
-                v-model="queryParams.status"
-                placeholder="全部"
-                clearable
-                style="width: 100%"
-              >
-                <el-option label="正常" :value="1" />
-                <el-option label="停用" :value="0" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item>
-              <el-button type="primary" @click="handleSearch">搜索</el-button>
-              <el-button @click="handleReset">重置</el-button>
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item label="类型">
+                <el-select
+                  v-model="queryParams.type"
+                  placeholder="全部"
+                  clearable
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="item in typeOptions"
+                    :key="item.value"
+                    :label="item.label"
+                    :value="item.value"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item label="状态">
+                <el-select
+                  v-model="queryParams.status"
+                  placeholder="全部"
+                  clearable
+                  style="width: 100%"
+                >
+                  <el-option label="正常" :value="1" />
+                  <el-option label="停用" :value="0" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item>
+                <el-button type="primary" @click="handleSearch">搜索</el-button>
+                <el-button @click="handleReset">重置</el-button>
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </el-form>
+      </CollapsibleFilter>
     </div>
 
     <el-card class="table-card">
@@ -149,6 +151,7 @@ import {
 // 注意它**本来就是懒加载的**（协议页是懒加载路由，不点进来不会下载）——
 // 这一步只解决「同一页内重资源阻塞渲染」，不是省流量。
 const WangEditor = defineAsyncComponent(() => import('@/components/WangEditor/index.vue'))
+import CollapsibleFilter from '@/components/CollapsibleFilter/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
 import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
 import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'

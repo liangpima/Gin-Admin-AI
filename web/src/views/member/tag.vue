@@ -1,26 +1,28 @@
 <template>
   <div class="app-container">
     <div class="search-form">
-      <el-form :model="queryParams">
-        <el-row :gutter="16">
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item label="标签名称">
-              <el-input
-                v-model="queryParams.name"
-                placeholder="请输入标签名称"
-                clearable
-                @keyup.enter="handleSearch"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item>
-              <el-button type="primary" @click="handleSearch">搜索</el-button>
-              <el-button @click="handleReset">重置</el-button>
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
+      <CollapsibleFilter>
+        <el-form :model="queryParams">
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item label="标签名称">
+                <el-input
+                  v-model="queryParams.name"
+                  placeholder="请输入标签名称"
+                  clearable
+                  @keyup.enter="handleSearch"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item>
+                <el-button type="primary" @click="handleSearch">搜索</el-button>
+                <el-button @click="handleReset">重置</el-button>
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </el-form>
+      </CollapsibleFilter>
     </div>
 
     <el-card class="table-card">
@@ -94,6 +96,7 @@ import {
   deleteMemberTag,
   type MemberTagItem,
 } from '@/api/member'
+import CollapsibleFilter from '@/components/CollapsibleFilter/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
 import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
 import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'

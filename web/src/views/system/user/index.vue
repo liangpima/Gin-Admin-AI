@@ -1,53 +1,55 @@
 <template>
   <div class="app-container">
     <div class="search-form">
-      <el-form :model="queryParams">
-        <el-row :gutter="16">
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item label="用户名">
-              <el-input
-                v-model="queryParams.username"
-                placeholder="请输入用户名"
-                clearable
-                @keyup.enter="handleSearch"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item label="手机号">
-              <el-input
-                v-model="queryParams.phone"
-                placeholder="请输入手机号"
-                clearable
-                @keyup.enter="handleSearch"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item label="状态">
-              <el-select
-                v-model="queryParams.status"
-                placeholder="全部"
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="opt in statusOptions"
-                  :key="String(opt.value)"
-                  :label="opt.label"
-                  :value="opt.value"
+      <CollapsibleFilter>
+        <el-form :model="queryParams">
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item label="用户名">
+                <el-input
+                  v-model="queryParams.username"
+                  placeholder="请输入用户名"
+                  clearable
+                  @keyup.enter="handleSearch"
                 />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item>
-              <el-button type="primary" @click="handleSearch">搜索</el-button>
-              <el-button @click="handleReset">重置</el-button>
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item label="手机号">
+                <el-input
+                  v-model="queryParams.phone"
+                  placeholder="请输入手机号"
+                  clearable
+                  @keyup.enter="handleSearch"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item label="状态">
+                <el-select
+                  v-model="queryParams.status"
+                  placeholder="全部"
+                  clearable
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="opt in statusOptions"
+                    :key="String(opt.value)"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item>
+                <el-button type="primary" @click="handleSearch">搜索</el-button>
+                <el-button @click="handleReset">重置</el-button>
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </el-form>
+      </CollapsibleFilter>
     </div>
 
     <el-card class="table-card">
@@ -223,6 +225,7 @@ import {
   type UserItem,
   type UserListParams,
 } from '@/api/user'
+import CollapsibleFilter from '@/components/CollapsibleFilter/index.vue'
 import ImagePicker from '@/components/ImagePicker/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
 import MobileAction from '@/components/MobileAction/index.vue'

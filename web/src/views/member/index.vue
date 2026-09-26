@@ -1,66 +1,68 @@
 <template>
   <div class="app-container">
     <div class="search-form">
-      <el-form :model="queryParams">
-        <el-row :gutter="16">
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item label="手机号">
-              <el-input
-                v-model="queryParams.phone"
-                placeholder="请输入手机号"
-                clearable
-                @keyup.enter="handleSearch"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item label="昵称">
-              <el-input
-                v-model="queryParams.nickname"
-                placeholder="请输入昵称"
-                clearable
-                @keyup.enter="handleSearch"
-              />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item label="等级">
-              <el-select
-                v-model="queryParams.levelId"
-                placeholder="全部"
-                clearable
-                style="width: 100%"
-              >
-                <el-option
-                  v-for="level in levelList"
-                  :key="level.id"
-                  :label="level.name"
-                  :value="level.id"
+      <CollapsibleFilter>
+        <el-form :model="queryParams">
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item label="手机号">
+                <el-input
+                  v-model="queryParams.phone"
+                  placeholder="请输入手机号"
+                  clearable
+                  @keyup.enter="handleSearch"
                 />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item label="状态">
-              <el-select
-                v-model="queryParams.status"
-                placeholder="全部"
-                clearable
-                style="width: 100%"
-              >
-                <el-option label="正常" :value="1" />
-                <el-option label="停用" :value="0" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-form-item>
-              <el-button type="primary" @click="handleSearch">搜索</el-button>
-              <el-button @click="handleReset">重置</el-button>
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item label="昵称">
+                <el-input
+                  v-model="queryParams.nickname"
+                  placeholder="请输入昵称"
+                  clearable
+                  @keyup.enter="handleSearch"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item label="等级">
+                <el-select
+                  v-model="queryParams.levelId"
+                  placeholder="全部"
+                  clearable
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="level in levelList"
+                    :key="level.id"
+                    :label="level.name"
+                    :value="level.id"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item label="状态">
+                <el-select
+                  v-model="queryParams.status"
+                  placeholder="全部"
+                  clearable
+                  style="width: 100%"
+                >
+                  <el-option label="正常" :value="1" />
+                  <el-option label="停用" :value="0" />
+                </el-select>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item>
+                <el-button type="primary" @click="handleSearch">搜索</el-button>
+                <el-button @click="handleReset">重置</el-button>
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </el-form>
+      </CollapsibleFilter>
     </div>
 
     <el-card class="table-card">
@@ -242,6 +244,7 @@ import {
   type MemberLevelItem,
   type MemberTagItem,
 } from '@/api/member'
+import CollapsibleFilter from '@/components/CollapsibleFilter/index.vue'
 import ImagePicker from '@/components/ImagePicker/index.vue'
 import FormDialog from '@/components/FormDialog/index.vue'
 import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
