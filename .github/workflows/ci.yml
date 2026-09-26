@@ -13,6 +13,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# 最小权限：两个 job 都只需要读仓库内容（actions/checkout）。
+# 不声明的话 token 默认权限更宽 —— 属于「不需要却拿着」，
+# 一旦某个依赖被投毒就能顺着它改仓库内容。
+permissions:
+  contents: read
+
 jobs:
   backend:
     name: 后端（vet / test / build）

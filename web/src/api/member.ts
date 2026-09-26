@@ -50,7 +50,9 @@ export interface PointsLogItem {
   // `Remark string \`json:"remark"\``，所以接口**确实会返回** remark。
   // 此前这里漏了它，表格里 `prop="remark"` 能显示但类型上不存在 ——
   // 改成列定义（有类型检查）后才暴露出来。
-  remark: string
+  // 标成可选是为了和同文件的 `MemberItem.remark?` 保持一致，
+  // 也让「后端哪天不返回了」不会变成一个类型上的谎言。
+  remark?: string
   createdAt: string
 }
 

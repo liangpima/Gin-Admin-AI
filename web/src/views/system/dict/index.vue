@@ -68,7 +68,7 @@
                 row.status === 1 ? '正常' : '停用'
               }}</el-tag>
             </template>
-            <template #dataActions="{ row }">
+            <template #actions="{ row }">
               <el-button
                 type="primary"
                 link
@@ -184,7 +184,9 @@ const typeColumns: ResponsiveColumn<DictTypeItem>[] = [
   { label: '操作', slot: 'actions', width: 120, hideInCard: true },
 ]
 
-// 数据表的状态/操作插槽名与类型表区分开，避免同名插槽串用
+// 数据表的状态插槽名与类型表区分开，避免同名插槽串用；
+// 但**操作列必须叫 `actions`** —— 卡片底部的操作区由组件的 `#actions` 渲染，
+// 叫别的名字（原先叫 dataActions）会让这一列在手机上整个消失。
 const dataColumns: ResponsiveColumn<DictDataItem>[] = [
   { label: 'ID', prop: 'id', width: 60 },
   { label: '字典标签', prop: 'label', minWidth: 100 },
@@ -192,7 +194,7 @@ const dataColumns: ResponsiveColumn<DictDataItem>[] = [
   { label: '排序', prop: 'sort', width: 60 },
   { label: '回显样式', slot: 'listClass', width: 100 },
   { label: '状态', slot: 'dataStatus', width: 70 },
-  { label: '操作', slot: 'dataActions', width: 120, hideInCard: true },
+  { label: '操作', slot: 'actions', width: 120, hideInCard: true },
 ]
 
 type TagType = 'primary' | 'success' | 'info' | 'warning' | 'danger'

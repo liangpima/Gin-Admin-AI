@@ -12,6 +12,7 @@
   <div class="responsive-table">
     <el-table
       v-if="!isMobile"
+      v-bind="treeAttrs"
       :data="tableData"
       v-loading="loading"
       :border="border"
@@ -20,8 +21,8 @@
       @current-change="onTableCurrentChange"
     >
       <el-table-column
-        v-for="col in columns"
-        :key="columnKey(col)"
+        v-for="(col, ci) in columns"
+        :key="columnKey(col, ci)"
         :prop="col.prop"
         :label="col.label"
         :width="col.width"
@@ -66,8 +67,8 @@
         @click="highlightCurrentRow && emit('currentChange', item.row)"
       >
         <div
-          v-for="col in cardColumns"
-          :key="columnKey(col)"
+          v-for="(col, ci) in cardColumns"
+          :key="columnKey(col, ci)"
           class="record-field"
           :data-label="col.label"
         >
@@ -86,16 +87,21 @@
 </template>
 
 <script setup lang="ts" generic="T">
-import { computed } from 'vue'
+import { computed, useSlots, watchEffect } from 'vue'
 import { useResponsive } from '@/hooks/useResponsive'
 import type { ResponsiveColumn } from './types'
+import { cardRowsOf, columnKeyOf, displayValue, rowKeyOf, treeAttrsOf } from './logic'
 
 const props = withDefaults(
   defineProps<{
     data: T[]
     columns: ResponsiveColumn<T>[]
     loading?: boolean
-    /** 行主键字段名，用于 v-for 的 key（默认 id） */
+    /**
+     * 行主键字段名（默认 id）。两处都用它：
+     * ① 卡片 `v-for` 的 key；② 树形表透传给 el-table 的 `row-key`
+     *    —— **少了 ② 树形表会整个塌掉**，见 `treeAttrs` 的注释。
+     */
     rowKey?: string
     /**
      * 透传给 el-table 的边框/斑马纹。
@@ -122,6 +128,11 @@ const props = withDefaults(
     tree?: boolean
     /** 树形结构的子节点字段名（默认 children） */
     treeChildren?: string
+    /**
+     * 树形表是否默认展开。**不传时跟随 `tree`**（树形表默认全展开，
+     * 与改造前 dept/menu 的 `default-expand-all` 行为一致）；显式传 false 可改为折叠。
+     */
+    defaultExpandAll?: boolean
   }>(),
   {
     loading: false,
@@ -148,6 +159,35 @@ function onTableCurrentChange(row: Record<PropertyKey, unknown> | null) {
 }
 
 const { isMobile } = useResponsive()
+const slots = useSlots()
+
+/**
+ * 树形表要透传给 el-table 的属性（`row-key` 是树形渲染的开关，漏传整棵树就塌了）。
+ * 具体规则与踩坑记录见 `logic.ts` 里 `treeAttrsOf` 的注释。
+ */
+const treeAttrs = computed(() =>
+  treeAttrsOf({
+    tree: props.tree,
+    rowKey: props.rowKey,
+    defaultExpandAll: props.defaultExpandAll,
+  }),
+)
+
+// 开发期护栏：`hideInCard` 的列在卡片里不渲染，若页面又没给 `#actions` 兜底，
+// 那一列的内容会在手机上凭空消失 —— 而桌面端完全正常，是最难发现的一类漏接
+// （system/dict 的数据表就这么漏过一次：手机上编辑/删除按钮全没了）。
+// 只在开发构建里生效，生产构建会被摇掉。
+if (import.meta.env.DEV) {
+  watchEffect(() => {
+    const hidden = props.columns.filter((c) => c.hideInCard)
+    if (hidden.length && !slots.actions) {
+      console.warn(
+        `[ResponsiveTable] 列「${hidden.map((c) => c.label).join('、')}」标了 hideInCard，` +
+          `但本组件没收到 #actions 插槽 —— 这些内容在手机上不会渲染。`,
+      )
+    }
+  })
+}
 
 // el-table 的 `data` 声明为 `DefaultRow[]`（即 `Record<PropertyKey, any>`），
 // 与泛型 T 不兼容，这里显式桥接一次。
@@ -160,45 +200,26 @@ const tableData = computed(() => props.data as unknown as Record<PropertyKey, un
 const cardColumns = computed(() => props.columns.filter((c) => !c.hideInCard))
 
 /** 卡片要渲染的行（树形时按深度优先摊平，并记录层级用于缩进） */
-const cardRows = computed(() => {
-  if (!props.tree) {
-    return props.data.map((row, i) => ({ row, level: 0, key: rowKeyOf(row, i) }))
-  }
-  const out: { row: T; level: number; key: string }[] = []
-  const walk = (rows: T[], level: number) => {
-    rows.forEach((row, i) => {
-      out.push({ row, level, key: `${level}-${rowKeyOf(row, i)}` })
-      const children = (row as Record<string, unknown>)[props.treeChildren]
-      if (Array.isArray(children) && children.length) {
-        walk(children as T[], level + 1)
-      }
-    })
-  }
-  walk(props.data, 0)
-  return out
-})
+const cardRows = computed(() =>
+  cardRowsOf(props.data, {
+    tree: props.tree,
+    treeChildren: props.treeChildren,
+    rowKey: props.rowKey,
+  }),
+)
 
-// key 必须稳定且唯一：prop 可能缺失（纯 slot 列），label 也可能重复，
-// 所以两者拼接后再退化到下标 —— 用下标当唯一 key 会在列表重排时错位。
-function columnKey(col: ResponsiveColumn<T>, index?: number) {
-  return col.prop ?? col.slot ?? `${col.label}-${index ?? 0}`
-}
-
-function rowKeyOf(row: T, index: number) {
-  const v = (row as Record<string, unknown>)[props.rowKey]
-  return v === undefined || v === null ? `idx-${index}` : String(v)
-}
+/** 列在 v-for 里的 key（index 必传，见 logic.ts 的说明） */
+const columnKey = columnKeyOf
 
 /** 卡片是否处于选中态（与表格的 highlight-current-row 对应） */
 function isCurrent(row: T, index: number) {
   if (!props.highlightCurrentRow || props.currentRowKey === undefined) return false
-  return rowKeyOf(row, index) === String(props.currentRowKey)
+  return rowKeyOf(row, props.rowKey, index) === String(props.currentRowKey)
 }
 
+/** 卡片里某一列的取值文案 */
 function display(row: T, col: ResponsiveColumn<T>): string {
-  if (col.formatter) return col.formatter(row)
-  const v = col.prop ? (row as Record<string, unknown>)[col.prop] : ''
-  return v === undefined || v === null || v === '' ? '-' : String(v)
+  return displayValue(row, col)
 }
 </script>
 
