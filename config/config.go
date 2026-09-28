@@ -345,10 +345,19 @@ const (
 
 // 请求体大小上限的默认值（MB）。
 //
-// 取 64 而不是贴着 upload.max_size（10）：上限若与上传上限相等，
-// 任何 multipart 的边界开销都会让合法上传刚好超限。留出余量也更便于
-// 将来临时调大上传限制而不必同步改这里。
-const defaultMaxBodySize = 64
+// 取值依据是 `upload.max_size`（10MB）留出余量，而不是「越大越保险」：
+//
+//   - **下限**：必须严格大于上传上限。上限若与上传上限相等，multipart 的
+//     边界开销会让合法上传刚好超限。
+//   - **上限**：不能远大于所需。这个数字直接决定「一个请求最坏能占多少内存」——
+//     操作日志中间件对 JSON body 会 `io.ReadAll` 之后再 `json.Unmarshal`
+//     出一份完整副本（截断到 2000 字符发生在这之后），峰值约 2× body。
+//     取 64 时：单个已登录用户一个请求 128MB，几十个并发就 OOM，影响所有租户。
+//     而本项目的 JSON 业务体都是 KB 级（最大的是批量保存配置），
+//     64MB 没有任何正当用途。
+//
+// 14 是 10MB 的 1.4 倍：够覆盖 multipart 开销，又把最坏内存压到约 28MB。
+const defaultMaxBodySize = 14
 
 // MaxBodyBytes 请求体上限（字节），供请求体限流中间件使用。
 func (c *ServerConfig) MaxBodyBytes() int64 {

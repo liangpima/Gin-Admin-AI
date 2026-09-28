@@ -3,6 +3,7 @@ package middleware
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -18,6 +19,15 @@ const (
 	maskedValue = "******"
 	// maxBodyLogLength 请求体落库的最大长度（字符），防止大 body 撑爆日志表
 	maxBodyLogLength = 2000
+	// maxBodyParseBytes JSON 解析上限（字节）：超过它的 body 不再 Unmarshal。
+	//
+	// 日志最终只保留 maxBodyLogLength(2000) 个字符，而 Unmarshal 会为
+	// **整个** body 建出 parse tree，再 Marshal 一遍 —— 峰值约 2× body。
+	// 请求体总上限已由 server.max_body_size 兜住（默认 14MB），这里再收一道：
+	// 「为了记 2000 字符而先占几十 MB」在任何情况下都不该发生。
+	maxBodyParseBytes = 1 << 20
+	// maxBodyPrefixBytes 超长 body 记录的前缀长度（字节）
+	maxBodyPrefixBytes = 256
 )
 
 // sensitiveNameFragments 判定「字段名 / 配置项名」是否敏感所用的片段（子串匹配）。
@@ -160,6 +170,21 @@ func maskSensitiveFields(v interface{}) interface{} {
 func sanitizeRequestBody(body []byte) string {
 	if len(body) == 0 {
 		return ""
+	}
+
+	// 超长 body 不解析，只记长度 + 一小段前缀。
+	//
+	// 这是内存防线而不是可读性取舍：下面的 Unmarshal→mask→Marshal 会为
+	// 整个 body 建出一份 parse tree，峰值约 2× body，而最终落库的只有
+	// 2000 个字符 —— 用几十 MB 换 2000 字符不成立。
+	if len(body) > maxBodyParseBytes {
+		head := body
+		if len(head) > maxBodyPrefixBytes {
+			head = head[:maxBodyPrefixBytes]
+		}
+		// 截断可能切在多字节字符中间，ToValidUTF8 先修掉残字，避免落库乱码
+		return fmt.Sprintf("[body too large to parse: %d bytes] %s",
+			len(body), strings.ToValidUTF8(string(head), ""))
 	}
 
 	var parsed interface{}

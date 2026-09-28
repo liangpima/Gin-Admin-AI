@@ -78,6 +78,16 @@ func TestBodyLimitRejectsDeclaredOversizeWithoutReading(t *testing.T) {
 	if code := respCode(t, w); code != common.CodePayloadTooLarge {
 		t.Errorf("超限应返回业务码 %d，实际 %d", common.CodePayloadTooLarge, code)
 	}
+	// **HTTP 状态码同样必须是 413**，不能是 200。
+	//
+	// 这条断言此前缺失，而上面的注释一直写着「返回 413」—— 实现用 common.Error
+	// （固定 c.JSON(200, …)）时用例照样通过。后果不是前端（拦截器按业务码判定），
+	// 而是**边缘完全无声**：nginx / LB / WAF 的访问日志与错误率统计里，
+	// 被拒绝的超大请求与正常请求长得一模一样，防护触发时没有任何信号；
+	// curl -f 这类按状态码判断的调用方还会当成功。
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("超限应返回 HTTP 413，实际 %d", w.Code)
+	}
 	if handlerRan {
 		t.Error("超限请求不应进入下游 handler")
 	}
@@ -245,36 +255,73 @@ func TestBodyLimitFromConfigUsesConfiguredSize(t *testing.T) {
 }
 
 // TestBodyLimitFromConfigFallsBackToDefault 未配置时（MaxBodySize <= 0）
-// 必须回落到默认 64MB，而不是「不限制」。
+// 必须回落到内置默认值，而不是「不限制」。
 //
 // 「不限制」是本中间件要修的那个问题本身 —— 若默认值丢了，
 // 所有未显式配置的部署都等于没接这道防线。
+//
+// 断言方式刻意**不写死默认值**：先取 `MaxBodyBytes()` 算出的实际上限，
+// 再分别试探「上限 +1」与「上限 -1」。早前这里写死了 64MB/65MB/1MB，
+// 默认值从 64 收到 14 后，用例照样通过但注释与理由全部失真 ——
+// 「声明 65MB 应被拒」的理由已经变成「超过 14MB 上限」，
+// 而读注释的人会以为默认值仍是 64。
 func TestBodyLimitFromConfigFallsBackToDefault(t *testing.T) {
 	prev := config.Cfg.Server.MaxBodySize
 	defer func() { config.Cfg.Server.MaxBodySize = prev }()
 
 	config.Cfg.Server.MaxBodySize = 0
+	limit := config.Cfg.Server.MaxBodyBytes()
+	if limit <= 0 {
+		t.Fatalf("默认请求体上限丢失（MaxBodyBytes 返回 %d）", limit)
+	}
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(BodyLimitFromConfig())
 	r.POST("/x", func(c *gin.Context) { c.Status(http.StatusOK) })
 
-	// 声明 65MB：超过默认 64MB，应被拒
+	// 默认上限 + 1 字节：必须被拒
 	over := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(""))
-	over.ContentLength = 65 << 20
+	over.ContentLength = limit + 1
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, over)
 	if code := respCode(t, w); code != common.CodePayloadTooLarge {
-		t.Errorf("未配置时应按默认 64MB 拒绝 65MB 请求，实际业务码 %d", code)
+		t.Errorf("未配置时应按默认上限 %d 字节拒绝 %d 字节请求，实际业务码 %d",
+			limit, limit+1, code)
 	}
 
-	// 声明 1MB：默认上限之内，应放行
+	// 默认上限 - 1 字节：必须放行
 	under := httptest.NewRequest(http.MethodPost, "/x", strings.NewReader("{}"))
-	under.ContentLength = 1 << 20
+	under.ContentLength = limit - 1
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, under)
 	if code := respCode(t, w); code != 0 {
 		t.Errorf("默认上限内应放行，实际业务码 %d", code)
+	}
+}
+
+// TestDefaultMaxBodySizeStaysCloseToUploadLimit 默认上限必须「贴着」上传上限，
+// 不能远大于所需。
+//
+// 这个数字直接决定单个请求最坏占多少内存：操作日志中间件对 JSON body 会
+// 读一份、再 Unmarshal 一份（峰值约 2× body）。取 64MB 时，
+// 50 个并发就是 6.4GB —— 而本项目的 JSON 业务体都是 KB 级，
+// 64MB 没有任何正当用途。
+//
+// 上界 16MB 是**设计约束**而非实现细节：请求体上限只需要覆盖
+// upload.max_size(10MB) 的 multipart 边界开销。若将来上传上限调大，
+// 这条断言应同步调整（那正是它存在的意义 —— 强制这次调整被人看见）。
+func TestDefaultMaxBodySizeStaysCloseToUploadLimit(t *testing.T) {
+	prev := config.Cfg.Server.MaxBodySize
+	defer func() { config.Cfg.Server.MaxBodySize = prev }()
+
+	config.Cfg.Server.MaxBodySize = 0
+	limitMB := config.Cfg.Server.MaxBodyBytes() >> 20
+
+	if limitMB > 16 {
+		t.Errorf("默认请求体上限 %d MB 过大：它会成倍放大单请求内存占用，应贴着 upload.max_size 取值", limitMB)
+	}
+	if limitMB <= 0 {
+		t.Errorf("默认请求体上限非法: %d MB", limitMB)
 	}
 }

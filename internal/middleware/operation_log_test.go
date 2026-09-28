@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -129,6 +130,67 @@ func TestSanitizeRequestBodyKeepsShortBodyIntact(t *testing.T) {
 	}
 	if parsed["b"] != "x" {
 		t.Errorf("普通字段应原样保留，实际 %v", parsed["b"])
+	}
+}
+
+// TestSanitizeRequestBodySkipsParseForHugeBody 超过解析上限的 body 不再 Unmarshal。
+//
+// 这条守的是**内存**而不是可读性：落库的只有 maxBodyLogLength(2000) 个字符，
+// 而 Unmarshal → mask → Marshal 会为整个 body 建出一份完整副本
+// （峰值约 2× body）。若去掉这道上限，一个 1MB 的 JSON 请求就会
+// 让审计中间件额外占 2MB —— 而这还是被 server.max_body_size 收紧之后的值。
+func TestSanitizeRequestBodySkipsParseForHugeBody(t *testing.T) {
+	// body 长度刻意用**字面量** 2MB，而不是 maxBodyParseBytes：
+	// 用例若拿被测常量去构造输入，一旦把这个常量调大（做变异验证时就会），
+	// 测试会先去分配一个巨大的字符串而 OOM —— 变异就永远看不到结果。
+	const huge = 2 << 20
+
+	// 构造一个「结构合法、但体积超过解析上限」的 JSON
+	body := []byte(`{"nickname":"` + strings.Repeat("a", huge) + `"}`)
+
+	got := sanitizeRequestBody(body)
+
+	if !strings.Contains(got, "too large to parse") {
+		t.Errorf("超长 body 应跳过解析，实际: %q", tail(got, 60))
+	}
+	// 必须记录真实字节数：否则「body 为什么没记下来」无从判断
+	if !strings.Contains(got, strconv.Itoa(len(body))) {
+		t.Errorf("应记录真实字节数 %d，实际: %q", len(body), tail(got, 60))
+	}
+	// **记录长度必须有上界**：只存前缀，不能把整个 body 搬进日志条目
+	if n := len(got); n > maxBodyPrefixBytes+128 {
+		t.Errorf("超长 body 的日志长度 %d 失控（只应保留 %d 字节前缀）", n, maxBodyPrefixBytes)
+	}
+}
+
+// TestSanitizeRequestBodyHugeBodyKeepsValidUTF8 记录前缀时不能切出非法 UTF-8。
+//
+// 前缀是按**字节**截断的，多字节字符正好跨在边界上时会被切开 ——
+// 落库后就是乱码。
+func TestSanitizeRequestBodyHugeBodyKeepsValidUTF8(t *testing.T) {
+	body := []byte(`{"nickname":"` + strings.Repeat("中", 2<<20) + `"}`)
+
+	got := sanitizeRequestBody(body)
+
+	if !utf8.ValidString(got) {
+		t.Error("超长 body 的前缀截断产生了非法 UTF-8")
+	}
+}
+
+// TestSanitizeRequestBodyStillParsesBelowLimit 解析上限之下必须保持原有行为。
+//
+// 反向验证：把上限改成「一律不解析」也能让上面两条通过，
+// 但那样所有请求体日志都会退化成裸前缀，脱敏直接失效。
+func TestSanitizeRequestBodyStillParsesBelowLimit(t *testing.T) {
+	body := []byte(`{"username":"alice","password":"Secret123"}`)
+
+	got := sanitizeRequestBody(body)
+
+	if strings.Contains(got, "too large") {
+		t.Errorf("上限之内的 body 不应被跳过解析: %s", got)
+	}
+	if strings.Contains(got, "Secret123") {
+		t.Errorf("仍在解析上限内时必须继续脱敏，实际泄漏了明文密码: %s", got)
 	}
 }
 

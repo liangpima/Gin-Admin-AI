@@ -40,7 +40,7 @@ import (
 //
 // # 上限取值
 //
-// 来自 `server.max_body_size`（MB，缺省 64），`Validate()` 会强制它
+// 来自 `server.max_body_size`（MB，缺省 14），`Validate()` 会强制它
 // **大于** `upload.max_size` —— 否则「配了上传大小限制」会变成
 // 「所有上传都被请求体上限拒绝」，而且错误来自这里、与上传配置毫无关联。
 //
@@ -58,9 +58,16 @@ func BodyLimit(limit int64) gin.HandlerFunc {
 
 		// 已声明长度且超限：直接拒绝，不读 body。
 		// ContentLength 为 -1 表示未声明（chunked），交给下面的 MaxBytesReader。
+		//
+		// 这里必须用 ErrorWithHttpStatus 而不是 Error：后者固定 `c.JSON(200, …)`，
+		// 于是「被拒绝的超大请求」在 HTTP 层是 200 —— nginx / LB / WAF 的访问日志
+		// 与错误率统计里看不到任何异常，**一个安全防护触发时在边缘完全无声**；
+		// 按状态码判断的调用方（curl -f、部分 SDK）还会把它当成功，
+		// 然后拿一段 error JSON 去解析。
+		// 业务码仍然带上 CodePayloadTooLarge，前端拦截器按 code 判定，不受影响。
 		if c.Request.ContentLength > limit {
-			common.Error(c, common.CodePayloadTooLarge,
-				"请求体过大，最大允许 "+humanSize(limit))
+			common.ErrorWithHttpStatus(c, http.StatusRequestEntityTooLarge,
+				common.CodePayloadTooLarge, "请求体过大，最大允许 "+humanSize(limit))
 			c.Abort()
 			return
 		}

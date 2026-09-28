@@ -24,12 +24,15 @@ import (
 type UserService interface {
 	Create(tenantID uint, req *dto.CreateUserRequest, operatorID uint) error
 	Update(tenantID uint, req *dto.UpdateUserRequest, operatorID uint) error
-	Delete(tenantID, id uint) error
+	// Delete / UpdateStatus 必须带 operatorID：它们对「持有 admin 角色的账号」
+	// 是高危操作（删号 / 强制下线），需要与 UpdateRoles 同样做授权收敛。
+	// 早前这两个方法连 operatorID 都没有，从结构上就不可能做这个判定。
+	Delete(tenantID, operatorID, id uint) error
 	FindByID(tenantID, id uint) (interface{}, error)
 	FindList(tenantID uint, req *dto.UserListRequest) ([]interface{}, int64, error)
 	// ExportList 导出用列表：同样的筛选条件，但不做分页截断
 	ExportList(tenantID uint, req *dto.UserListRequest) ([]interface{}, error)
-	UpdateStatus(tenantID uint, req *dto.StatusRequest) error
+	UpdateStatus(tenantID, operatorID uint, req *dto.StatusRequest) error
 	UpdateRoles(tenantID, operatorID uint, req *dto.UpdateUserRolesRequest) error
 	UpdateDept(tenantID uint, req *dto.UpdateUserDeptRequest) error
 	ResetPassword(tenantID uint, req *dto.ResetPasswordRequest) error
@@ -103,6 +106,60 @@ func (s *userService) normalizeDeptID(tenantID, deptID uint) (uint, error) {
 // 除归属外还要做**授权收敛**校验（EnsureRolesGrantable）：把角色绑到用户上
 // 等价于把该角色的全部权限授予该用户，若只校验归属，一个只有 user:edit 权限的
 // 管理员就能把超管角色绑给自己或新建的账号 —— 这是比改角色菜单更短的一条提权路径。
+// ensureTargetAdminGrantable 把「撤销方向」的授权收敛补齐。
+//
+// 为什么需要**独立**于 normalizeRoleIDs 的一层：
+//
+//	· 那条路径对**空 roleIds** 会提前 return（「我这次不提交任何角色」），
+//	  于是 `PUT /system/user/roles {"id":<超管ID>,"roleIds":[]}` 直接
+//	  ReplaceRoles(id, nil) 把超管的角色绑定清空 —— 权限归零，且不报错；
+//	· UpdateStatus / Delete 根本不经过 normalizeRoleIDs，签名里连 operatorID
+//	  都没有，结构上不可能做「操作者能否动这个账号」的判定。
+//
+// 因此实现「授予」与「撤销」对称：**目标账号当前持有 admin 角色时，
+// 只有同样持有 admin 角色的操作者才可改动它**。
+//
+// 判定依据是目标账号的**现有**角色，与本次请求提交了什么无关 —— 这正是
+// 「提交空数组来清空超管」也会被拦下的原因。这里刻意不复用
+// EnsureRolesGrantable：后者对**非 admin**角色会做权限码比对，套到
+// 删号/停用上会把「管理员停用一个普通账号」也一并拒掉，属于行为收紧过头。
+//
+// operatorID 为 0 时 fail-closed：拿不到操作者身份就拒绝，而不是放行 ——
+// 这是最高危的三条操作，宁可误拒也不能静默放行。
+func (s *userService) ensureTargetAdminGrantable(tenantID, operatorID, targetUserID uint) error {
+	roleIDs, err := s.userRepo.FindRoleIDsByUserID(targetUserID)
+	if err != nil {
+		return err
+	}
+	if len(roleIDs) == 0 {
+		return nil
+	}
+
+	roles, err := s.roleService.FindByIDs(tenantID, roleIDs)
+	if err != nil {
+		return err
+	}
+	targetCodes := make([]string, 0, len(roles))
+	for _, r := range roles {
+		targetCodes = append(targetCodes, r.Code)
+	}
+	if !middleware.HasAdminRole(targetCodes) {
+		return nil
+	}
+
+	if operatorID == 0 {
+		return common.NewForbiddenError("超级管理员账号仅限超级管理员操作")
+	}
+	operatorRoles, err := middleware.RoleCodesFor(tenantID, operatorID)
+	if err != nil {
+		return err
+	}
+	if middleware.HasAdminRole(operatorRoles) {
+		return nil
+	}
+	return common.NewForbiddenError("超级管理员账号仅限超级管理员操作")
+}
+
 func (s *userService) normalizeRoleIDs(tenantID, operatorID uint, roleIDs []uint) ([]uint, error) {
 	unique := common.UniqueNonZeroIDs(roleIDs)
 	if len(unique) == 0 {
@@ -329,7 +386,11 @@ func (s *userService) Update(tenantID uint, req *dto.UpdateUserRequest, operator
 	return nil
 }
 
-func (s *userService) Delete(tenantID, id uint) error {
+func (s *userService) Delete(tenantID, operatorID, id uint) error {
+	// 删超管是不可逆动作：必须先确认操作者有权动这个账号，再执行删除。
+	if err := s.ensureTargetAdminGrantable(tenantID, operatorID, id); err != nil {
+		return err
+	}
 	if err := s.userRepo.Delete(tenantID, id); err != nil {
 		return common.NotFoundOrErr(err, "用户不存在")
 	}
@@ -442,7 +503,13 @@ func (s *userService) query(tenantID uint, req *dto.UserListRequest, page, pageS
 	return result, total, nil
 }
 
-func (s *userService) UpdateStatus(tenantID uint, req *dto.StatusRequest) error {
+func (s *userService) UpdateStatus(tenantID, operatorID uint, req *dto.StatusRequest) error {
+	// 禁用超管等于让平台失去管理员：与删除同样需要收敛。
+	// 注意这里在**写入之前**判定 —— 否则「先禁用、再发现无权」时
+	// 账号已经被踢下线了，撤销不掉。
+	if err := s.ensureTargetAdminGrantable(tenantID, operatorID, req.ID); err != nil {
+		return err
+	}
 	// 仓储会先确认目标属于本租户（不属于则返回 ErrRecordNotFound），
 	// 因此下面的吊销只可能作用在本租户用户上 —— 早前不校验归属时，
 	// 枚举 ID 就能强制下线其他租户的用户。
@@ -464,6 +531,12 @@ func (s *userService) UpdateRoles(tenantID, operatorID uint, req *dto.UpdateUser
 		// 于是数据库故障被报成「用户不存在」—— 用户按提示反复刷新，
 		// 而监控里一条 5xx 都没有，故障可以静默持续（违反规则 5）。
 		return common.NotFoundOrErr(err, "用户不存在")
+	}
+
+	// 撤销方向的收敛：目标若是超管，本次请求**哪怕提交空数组**也必须经超管放行。
+	// normalizeRoleIDs 对空数组会提前返回，没有这一层就能把超管的角色清空。
+	if err := s.ensureTargetAdminGrantable(tenantID, operatorID, req.ID); err != nil {
+		return err
 	}
 
 	// 校验角色归属与授权收敛：这是「更新角色」接口，也是跨租户提权

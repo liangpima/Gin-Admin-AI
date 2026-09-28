@@ -131,7 +131,8 @@ func TestUserServiceStatusResetAndDelete(t *testing.T) {
 	}
 
 	// 禁用：同时会吊销该用户 token（Redis 不可用时只记日志，不能影响主流程）
-	if err := svc.UpdateStatus(1, &dto.StatusRequest{ID: u.ID, Status: 0}); err != nil {
+	// operatorID 传 1：目标是无角色的普通账号，撤销方向的收敛判定不介入
+	if err := svc.UpdateStatus(1, 1, &dto.StatusRequest{ID: u.ID, Status: 0}); err != nil {
 		t.Fatalf("改状态失败: %v", err)
 	}
 	var fresh model.SysUser
@@ -165,7 +166,7 @@ func TestUserServiceStatusResetAndDelete(t *testing.T) {
 		t.Error("新密码的哈希应可校验通过")
 	}
 
-	if err := svc.Delete(1, u.ID); err != nil {
+	if err := svc.Delete(1, 1, u.ID); err != nil {
 		t.Fatalf("删除失败: %v", err)
 	}
 	if _, err := svc.FindByID(1, u.ID); err == nil {

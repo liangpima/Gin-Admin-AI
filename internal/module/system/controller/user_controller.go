@@ -87,7 +87,8 @@ func (ctl *UserController) Delete(c *gin.Context) {
 	}
 
 	tenantID := common.GetTenantID(c)
-	if err := ctl.userService.Delete(tenantID, id); err != nil {
+	operatorID := common.GetCurrentUserID(c)
+	if err := ctl.userService.Delete(tenantID, operatorID, id); err != nil {
 		common.FailWith(c, err)
 		return
 	}
@@ -241,7 +242,8 @@ func (ctl *UserController) UpdateStatus(c *gin.Context) {
 	}
 
 	tenantID := common.GetTenantID(c)
-	if err := ctl.userService.UpdateStatus(tenantID, &req); err != nil {
+	operatorID := common.GetCurrentUserID(c)
+	if err := ctl.userService.UpdateStatus(tenantID, operatorID, &req); err != nil {
 		common.FailWith(c, err)
 		return
 	}

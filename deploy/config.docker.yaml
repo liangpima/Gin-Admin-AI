@@ -22,7 +22,9 @@ server:
   # 请求体大小上限（MB），必须大于 upload.max_size（启动时 Validate 会校验）。
   # nginx 侧的 client_max_body_size 只在经过 nginx 时生效，而 nginx 的
   # proxy_pass 与后端端口并非同一层防护，这里再兜一层。
-  max_body_size: 64
+  # 取值贴着 upload.max_size(10) 留一点余量即可：写大只会放大「单个请求
+  # 最坏占多少内存」（操作日志会复制一份 body，峰值约 2×）。
+  max_body_size: 14
   # 本部署**确定**在 nginx 之后（见 deploy/nginx/default.conf 的 proxy_pass），
   # 因此必须声明可信代理网段，否则 X-Forwarded-For 一律不被采信，
   # c.ClientIP() 会退化成 nginx 容器的地址 —— 表现为：
