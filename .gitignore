@@ -72,8 +72,9 @@ temp/
 docs/code-review-*.md
 
 # 内部规划文档：与审查报告同属「过程记录」，仅保留本地。
-#   · review-fix-plan.md   —— 两轮审查的修复进度与逐项说明
-#   · plan-p3-optional.md  —— P3 两个可选小项的实施方案
+#   · review-fix-plan.md          —— 两轮审查的修复进度与逐项说明
+#   · plan-p3-optional.md         —— P3 两个可选小项的实施方案
+#   · plan-framework-hardening.md —— 框架加固与能力补齐计划（第四轮起的入口）
 # 不放仓库的理由有两条，第二条才是关键：
 #   1. 含未修复项的描述与攻击路径，性质同审查报告；
 #   2. 它们的价值在于「写的时候把前因后果想清楚」，而**执行进度注定会失真** ——
@@ -82,3 +83,4 @@ docs/code-review-*.md
 #      错误来源。进度以 `git log` 为准，代码里的注释才是权威说明。
 docs/review-fix-plan.md
 docs/plan-p3-optional.md
+docs/plan-framework-hardening.md
