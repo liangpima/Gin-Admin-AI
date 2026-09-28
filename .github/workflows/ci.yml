@@ -46,6 +46,24 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # ────────────────────────────────────────────────────────────
+      # MySQL：迁移检查需要它，而且要真的**执行**迁移。
+      #
+      # 此前 CI 对迁移只做 `go build ./cmd/migrate` —— 证明它能编译，仅此而已。
+      # 而「迁移写错」（漏判 information_schema、重复建索引、引用还不存在的列）
+      # 编译期全都看不出来，要等上线执行时才炸。
+      # ────────────────────────────────────────────────────────────
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -147,6 +165,101 @@ jobs:
           python3 -m pip install --disable-pip-version-check --quiet pyyaml
           make check-deploy
 
+      # ────────────────────────────────────────────────────────
+      # 迁移在真实 MySQL 上执行：**阻断项**。
+      #
+      # 三层验证（见 scripts/check-migrations.sh 头部注释）：
+      #   ① init.sql 能在空库上跑通
+      #   ② cmd/migrate 能把全部迁移应用，且再跑一次是 no-op
+      #   ③ 把全部 .sql 原样重放 3 轮不报 ERROR（幂等）
+      #
+      # ③ 是核心：cmd/migrate 明确不做事务回滚（MySQL 的 DDL 会隐式提交，
+      # 事务包不住），所以每个迁移脚本**必须幂等** —— 而幂等性只能靠真的
+      # 跑第二遍发现，静态检查一点办法都没有。
+      # ────────────────────────────────────────────────────────
+      - name: 迁移在真实 MySQL 上执行
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: "3306"
+          MYSQL_USER: root
+          MYSQL_PASSWORD: root
+          MIGRATION_CHECK_DB: gin_migration_check
+        run: bash scripts/check-migrations.sh
+
+      # ────────────────────────────────────────────────────────
+      # 依赖漏洞扫描：**阻断项**。
+      #
+      # 首轮基线是 35 个漏洞（2 个依赖模块 + 标准库），全部已修：
+      # 升 Go 到 1.25.14（标准库那批的修复版本都在 1.25.2/1.25.3）+
+      # x/text v0.39.0 / x/net v0.56.0 / excelize v2.11.0。
+      #
+      # 版本钉死：`@latest` 会随上游发布漂移，而「版本漂移导致观察项失效」
+      # 本项目已经踩过两次（golangci-lint 因版本不兼容一直没在跑；
+      # swag 用 latest 会让 docs.go 随机变红）。
+      # ────────────────────────────────────────────────────────
+      - name: 依赖漏洞扫描（govulncheck）
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+      # ────────────────────────────────────────────────────────
+      # 密钥泄漏扫描：**阻断项**。
+      #
+      # 扫**全历史**而不是只扫工作区：密钥一旦提交过就删不掉了（历史会一直
+      # 带着它），必须在合并前拦住，而不是等发现后再去改写历史。
+      #
+      # ⚠️ 不用 `gitleaks dir .`：实测它扫出 235 处「泄漏」，全部来自
+      # node_modules 里的第三方测试夹具（507 MB 噪音）。那些目录本就不入库。
+      #
+      # 安装路径是 zricethezav/gitleaks —— 模块已迁移到 gitleaks/gitleaks，
+      # 但**旧路径下发布的版本 go.mod 里声明的仍是旧路径**，
+      # 用新路径 `go install` 会因 "declares its path as ..." 直接失败。
+      # ────────────────────────────────────────────────────────
+      - name: 密钥泄漏扫描（gitleaks）
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          "$(go env GOPATH)/bin/gitleaks" git . --no-banner --redact
+
+  # ────────────────────────────────────────────────────────────
+  # 数据竞争检测（-race）：**阻断项**。
+  #
+  # 为什么单独一个 job 而不是并进 backend：
+  #  · -race 让测试耗时涨 2~5 倍，与 backend 并行跑才不会拖慢整体反馈
+  #  · 失败时步骤名直接指向「数据竞争」，不必在一堆检查里翻
+  #
+  # 为什么这条**只能在 CI 上跑**：-race 需要 cgo（gcc），而本项目的开发机是
+  # Windows 且没有 MinGW（`go env CGO_ENABLED` 为 0）—— 也就是说，
+  # 这是仓库里少数几项「本地跑不了、只能靠 CI」的检查。
+  #
+  # 它针对的是框架里的并发热点：token 吊销、middleware 的角色缓存
+  # （sync.RWMutex）、订单分片锁、会员编号计数器、平台证书缓存（限速+单飞）。
+  # 这类缺陷的特征是「偶发、压测才现、事后解释不清」，静态审查抓不到。
+  # ────────────────────────────────────────────────────────────
+  race:
+    name: 数据竞争检测（-race）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      # 刻意**不挂覆盖率门槛**：race 模式下覆盖率统计会显著变慢，
+      # 而且这里要的是「有没有竞争」，不是「覆盖了多少」。
+      - name: go test -race
+        run: go test -race -count=1 ./...
+
   frontend:
     name: 前端（类型检查 / lint / 测试 / 构建）
     runs-on: ubuntu-latest
@@ -212,6 +325,23 @@ jobs:
       # ────────────────────────────────────────────────────────
       - name: 构建 + 产物体积门禁
         run: npm run build
+
+      # ────────────────────────────────────────────────────────
+      # 依赖漏洞扫描：**阻断项，但门槛定在 high**。
+      #
+      # 首轮基线 6 个（4 high / 2 moderate），其中 4 个 high 已由
+      # `npm audit fix` 修掉（immutable / nanoid / postcss 等，均为非破坏性）。
+      #
+      # 剩下 2 个 moderate 来自 vitest 依赖的 @vitest/mocker，
+      # 修复需要升到 vitest@5 —— 那是**破坏性升级**，要单独评估，
+      # 不该被一个安全门禁推着做。所以门槛定在 high：
+      # 高危阻断，中低危记录待观察。
+      #
+      # 这也意味着**不能**用 `--audit-level=moderate`：那会让 CI 长期红，
+      # 而长期红的检查等于没有检查（本项目踩过两次）。
+      # ────────────────────────────────────────────────────────
+      - name: 依赖漏洞扫描（npm audit）
+        run: npm audit --audit-level=high
 
   # ────────────────────────────────────────────────────────────
   # golangci-lint：**阻断项**。

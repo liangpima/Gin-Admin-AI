@@ -3,6 +3,8 @@ package service
 import (
 	"crypto/rsa"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -77,6 +79,101 @@ func TestUnknownSerialThrottle(t *testing.T) {
 			t.Errorf("50 次请求只应放行 1 次出网，实际 %d 次", allowed)
 		}
 	})
+}
+
+// TestUnknownSerialThrottleConcurrent 并发调用下，间隔内**恰好只有一个**请求获准。
+//
+// 上面那条串行用例只能证明「重复调用会被拒」，证明不了**锁**的作用：
+// 把 allow() 里的 mu.Lock() 去掉（或改成「先读 last、判断、再赋值」的写法），
+// 串行版本照样通过 —— 而并发时多个 goroutine 会同时看到「上一次为空」，
+// 一起获准，出网就被放大成 N 倍。
+//
+// 而这正是限速器存在的唯一目的：触发它的 serial 来自**未鉴权的请求头**，
+// 攻击者的默认打法就是并发轰炸，不是老老实实一次一次来。
+// ⚠️ **本用例的区分力依赖 `-race`，本机无法验证**（Windows 无 MinGW，
+// CGO_ENABLED=0）。写下这条是为了不让后人误以为它已经在本地验过：
+//
+// 竞态窗口是 `读 last → 判断 → 写 last` 这三步之间，而它们中间**没有可让出点**
+// （实测过：把锁删掉后，64 个 goroutine × 50 轮、再加 Gosched 让出，
+// 普通模式下依然从不交错 —— 把 Gosched 放在 `nowFn()` 里反而让所有
+// goroutine 在「判断之前」对齐，执行更有序了）。
+//
+// 普通模式下这条用例只能捕获「逻辑性」失效（比如某次实现改成放行多个），
+// 真正的 data race 检测由 CI 的 race job 完成 —— `-race` 靠 happens-before
+// 分析发现 `t.last` 的读写无同步，**不需要真的交错**，因此能稳定捕获。
+func TestUnknownSerialThrottleConcurrent(t *testing.T) {
+	// 时钟返回固定时刻：整个用例落在同一个 interval 内，
+	// 所以无论多少并发，能获准的都只该有一个。
+	throttle, _ := throttleAt(30*time.Second, time.Unix(1000, 0))
+
+	const goroutines = 64
+	var allowed int64
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start // 尽量让它们同时冲进临界区
+			if throttle.allow() {
+				atomic.AddInt64(&allowed, 1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if allowed != 1 {
+		t.Errorf("间隔内并发 %d 个请求只应放行 1 个，实际 %d —— 限速器在并发下失效，出网会被放大",
+			goroutines, allowed)
+	}
+}
+
+// TestCertCacheConcurrentAccess 并发读写证书缓存不得产生数据竞争。
+//
+// 读路径（cachedPlatformPublicKey / certCacheFresh）走 RLock，
+// 写路径（拉取成功后整体替换 map）走 Lock。
+//
+// 这条用例配合 `go test -race` 才有完整意义：
+//   · 普通模式下它能发现的是**极端**情况 —— map 并发读写会直接 panic
+//     （"concurrent map read and map write"）
+//   · -race 才能发现「读写交错但恰好没崩」的那些
+//
+// ⚠️ 本机是 Windows 且无 MinGW（CGO_ENABLED=0），-race 跑不了 ——
+// 这条的竞态检测在 CI 的 race job 上完成（见 .github/workflows/ci.yml）。
+// 这么写不是偷懒：缓存的读多写少、且写是「整体替换 map」，
+// 一旦 RWMutex 用错（比如写路径漏了 Lock），普通模式下的 panic 是**偶发**的，
+// 必须靠 -race 才能稳定复现。
+func TestCertCacheConcurrentAccess(t *testing.T) {
+	key := &rsa.PublicKey{}
+	withCertCache(t, map[string]*rsa.PublicKey{"S1": key}, time.Now())
+
+	const goroutines = 32
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 50; j++ {
+				if i%2 == 0 {
+					_ = cachedPlatformPublicKey("S1")
+					_ = certCacheFresh()
+					continue
+				}
+				// 模拟「拉取成功后整体替换缓存」
+				certCacheMu.Lock()
+				certCache = map[string]*rsa.PublicKey{"S1": key}
+				certCacheTime = time.Now()
+				certCacheMu.Unlock()
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
 }
 
 // withCertCache 替换包级证书缓存，用例结束自动还原（用例之间不互相污染）。

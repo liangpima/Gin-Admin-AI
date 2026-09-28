@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+#
+# 提交前密钥扫描：拦住「还没进历史」的那一步。
+#
+# # 为什么需要它
+#
+# CI 上的 gitleaks 是**事后**防线：它能阻断合并，但那时密钥已经进了本地历史，
+# 想清干净就得改写历史（`git filter-repo` 那一套，代价很大，而且对已经
+# 推送出去的仓库基本不可逆）。钩子跑在 `git commit` 之前，拦的正是那一步。
+#
+# # 启用方式
+#
+# 钩子不随仓库自动生效（`.git/hooks` 不入库），每个 clone 各执行一次：
+#
+#     git config core.hooksPath scripts/git-hooks
+#
+# 停用：
+#
+#     git config --unset core.hooksPath
+#
+# # 为什么没装 gitleaks 时是「跳过」而不是「失败」
+#
+# 钩子是便利设施，不该让没装工具的人提交不了代码 —— CI 那一层仍然会拦住。
+# （这与 `make check-secrets` 里「缺工具就报错退出」的取舍不同：
+#  那是显式调用的检查，用户明确要求扫，静默跳过才是错的。）
+#
+set -u
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "[pre-commit] 未安装 gitleaks，跳过密钥扫描。" >&2
+  echo "             安装：go install github.com/zricethezav/gitleaks/v8@latest" >&2
+  exit 0
+fi
+
+if ! gitleaks git --staged --no-banner --redact; then
+  echo >&2
+  echo "[pre-commit] 暂存区里发现疑似密钥，提交已中止。" >&2
+  echo "             核对后若确认是误报，在 .gitleaks.toml 里按「路径 + 正则」" >&2
+  echo "             精确豁免 —— 别整文件豁免，那等于以后往该文件贴真密钥也放行。" >&2
+  exit 1
+fi

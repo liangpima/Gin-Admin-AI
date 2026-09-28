@@ -1,0 +1,33 @@
+# gitleaks 配置：密钥泄漏扫描的规则与豁免。
+#
+# 目录约定：本文件入库（与 .gitignore 相反）—— 它描述的是「什么算泄漏」，
+# 需要被 CI、本地 `make check-secrets` 和将来的贡献者共用同一份口径。
+#
+# ⚠️ 豁免条目必须**锚定到具体路径 + 正则**，绝不整文件豁免：
+# 整文件豁免等于以后往那个文件里贴真私钥也不会被发现。
+
+[extend]
+# 继承 gitleaks 内置规则集，本文件只做增补
+useDefault = true
+
+# ────────────────────────────────────────────────────────────────
+# 豁免 1：微信支付私钥的 PEM 标记常量
+#
+# 全历史扫描的唯一一处命中（提交 8ee4e5d，2026-06-29）。经核对是**误报**：
+# wechat_pay.go 的 parsePrivateKey 需要把 PEM 头尾从配置字符串里剥掉、
+# 解析时再拼回去，因此代码里出现了 `-----BEGIN PRIVATE KEY-----` 这个字面量。
+# 它是个格式标记，不是密钥内容。
+#
+# 正则刻意锚定到**该代码形态**（strings.ReplaceAll(key, "-----BEGIN...")），
+# 而不是只匹配 PEM 标记本身 —— 后者会顺带放过任何真私钥，
+# 因为真私钥的内容里也带着这一行。
+# ────────────────────────────────────────────────────────────────
+[[allowlists]]
+description = "PEM 标记作为代码常量出现在 strkey 剥离逻辑中，非密钥内容"
+paths = [
+  '''internal/module/payment/service/wechat_pay\.go$''',
+]
+regexTarget = "line"
+regexes = [
+  '''strings\.ReplaceAll\(\s*key,\s*"-----BEGIN PRIVATE KEY-----"''',
+]
