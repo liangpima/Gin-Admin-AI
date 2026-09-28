@@ -2,9 +2,7 @@ package controller
 
 import (
 	"go-admin/internal/common"
-	"go-admin/internal/logger"
 	"go-admin/internal/module/system/service"
-	"go-admin/pkg/upload"
 
 	"github.com/gin-gonic/gin"
 )
@@ -112,24 +110,11 @@ func (ctl *FileController) Delete(c *gin.Context) {
 		return
 	}
 	tenantID := common.GetTenantID(c)
-	file, err := ctl.fileService.FindByID(tenantID, id)
-	if err != nil {
-		common.FailWith(c, err)
-		return
-	}
-
-	// 先删库记录，再删磁盘文件 —— 顺序不能反。
-	// 反过来的话，一旦库记录删除失败，就会留下一条指向已删文件的坏记录，
-	// 前端展示时会 404；而先删记录则最坏只留下一个孤儿文件（不占用户可见面），
-	// 属于可接受的残留。
+	// 顺带删除磁盘文件由 Service 负责（规则 1）：它不是「参数接收或返回结果」，
+	// 而是删除这条业务规则的收尾步骤，已下沉到 fileService.Delete。
 	if err := ctl.fileService.Delete(tenantID, id); err != nil {
 		common.FailWith(c, err)
 		return
-	}
-
-	// 孤儿文件不影响功能，但会白占磁盘，必须留下痕迹以便排查与清理
-	if err := upload.Delete(file.Path); err != nil {
-		logger.Log.Errorf("[file] 删除磁盘文件失败，已产生孤儿文件: path=%s err=%v", file.Path, err)
 	}
 
 	common.Success(c, nil)

@@ -6,6 +6,7 @@ import (
 
 	"go-admin/config"
 	"go-admin/internal/common"
+	"go-admin/internal/logger"
 	"go-admin/internal/module/system/model"
 	"go-admin/internal/module/system/repository"
 	"go-admin/pkg/upload"
@@ -89,7 +90,29 @@ func (s *fileService) FindList(tenantID uint, name, mimeType, sortOrder string, 
 	return s.fileRepo.FindList(tenantID, name, mimeType, sortOrder, page, pageSize)
 }
 
+// Delete 删除文件记录，并清理对应的磁盘/对象存储文件。
+//
+// 磁盘清理原先写在 Controller 里（并直连 `upload.Delete`），属于业务规则的
+// 收尾动作，已按规则 1 下沉 —— Controller 现在只做参数接收与返回。
 func (s *fileService) Delete(tenantID, id uint) error {
+	// 取路径要在删记录**之前**：删完就查不到了
+	file, err := s.FindByID(tenantID, id)
+	if err != nil {
+		return err
+	}
+
 	// 仓储在「记录不存在或不属于本租户」时返回 gorm.ErrRecordNotFound → 404
-	return common.NotFoundOrErr(s.fileRepo.Delete(tenantID, id), "文件不存在")
+	if err := common.NotFoundOrErr(s.fileRepo.Delete(tenantID, id), "文件不存在"); err != nil {
+		return err
+	}
+
+	// 先删库记录、再删磁盘文件 —— 顺序不能反。
+	// 反过来的话，一旦库记录删除失败，就会留下一条指向已删文件的坏记录，
+	// 前端展示时会 404；而先删记录则最坏只留下一个孤儿文件（不占用户可见面），
+	// 属于可接受的残留。
+	if err := upload.Delete(file.Path); err != nil {
+		// 孤儿文件不影响功能，但会白占磁盘，必须留下痕迹以便排查与清理
+		logger.Log.Errorf("[file] 删除磁盘文件失败，已产生孤儿文件: path=%s err=%v", file.Path, err)
+	}
+	return nil
 }

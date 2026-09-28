@@ -1,15 +1,9 @@
 package controller
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
-	"time"
-
 	"go-admin/internal/common"
 	"go-admin/internal/module/system/model"
 	"go-admin/internal/module/system/service"
-	"go-admin/pkg/upload"
 
 	"github.com/gin-gonic/gin"
 )
@@ -206,9 +200,6 @@ func (ctl *ConfigController) BatchSave(c *gin.Context) {
 		return
 	}
 
-	if req.Prefix == "oss." {
-		upload.Reload(service.LoadOSSConfig())
-	}
 	common.Success(c, nil)
 }
 
@@ -227,37 +218,12 @@ func (ctl *ConfigController) UploadCert(c *gin.Context) {
 		return
 	}
 
-	ext := filepath.Ext(file.Filename)
-	allowedExts := map[string]bool{".pem": true, ".key": true, ".crt": true, ".cer": true}
-	if !allowedExts[ext] {
-		common.Error(c, common.CodeBadRequest, "仅支持 .pem/.key/.crt/.cer 文件")
-		return
-	}
-
-	if file.Size > 2*1024*1024 {
-		common.Error(c, common.CodeBadRequest, "文件大小不能超过 2MB")
-		return
-	}
-
-	// 证书必须存放在静态服务目录之外：
-	// uploads/ 通过 r.Static("/uploads") 对外匿名可读，
-	// 把商户私钥/证书放在那里等同于公密钥（GET /uploads/certs/xxx.key 即可下载）。
-	saveDir := filepath.Join("runtime", "certs")
-	if err := os.MkdirAll(saveDir, 0700); err != nil {
+	// 扩展名白名单、大小限制、落盘目录与文件名生成都在 Service 里（规则 1）
+	res, err := ctl.configService.UploadCert(file)
+	if err != nil {
 		common.FailWith(c, err)
 		return
 	}
 
-	filename := fmt.Sprintf("wechat_%d%s", time.Now().UnixMilli(), ext)
-	savePath := filepath.Join(saveDir, filename)
-
-	if err := c.SaveUploadedFile(file, savePath); err != nil {
-		common.FailWith(c, err)
-		return
-	}
-
-	common.Success(c, gin.H{
-		"path":     savePath,
-		"filename": file.Filename,
-	})
+	common.Success(c, res)
 }

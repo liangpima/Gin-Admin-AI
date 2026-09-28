@@ -2,12 +2,19 @@ package service
 
 import (
 	"errors"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"go-admin/internal/common"
 	"go-admin/internal/logger"
 	"go-admin/internal/module/system/model"
 	"go-admin/internal/module/system/repository"
+	"go-admin/pkg/upload"
 
 	"gorm.io/gorm"
 )
@@ -57,6 +64,90 @@ type ConfigService interface {
 	// FindByPrefixRaw 供内部读取配置使用，返回真实值
 	FindByPrefixRaw(prefix string) ([]interface{}, error)
 	BatchSave(prefix string, items []ConfigItem, operatorID uint) error
+	// UploadCert 保存支付证书（商户私钥 / 平台证书），返回落盘路径
+	UploadCert(file *multipart.FileHeader) (*CertUploadResult, error)
+}
+
+// 支付证书上传的约束。
+//
+// 证书是敏感凭证，与普通业务附件（pkg/upload 的白名单、uploads/ 目录）
+// 走完全不同的存储策略，所以这里不复用那份白名单。
+const (
+	// certMaxSize 证书大小上限（2MB）。证书与私钥都是 KB 级，
+	// 这个上限只是给误传大文件一个明确的拒绝点。
+	certMaxSize = 2 * 1024 * 1024
+	// certSaveDir 证书保存目录。
+	//
+	// 必须在静态服务目录**之外**：`uploads/` 由 router 以 r.Static("/uploads")
+	// 对外匿名可读，把商户私钥放进去等于公开发布
+	// （GET /uploads/certs/xxx.key 即可下载）。这里用 runtime/ 下的独立目录，权限 0700。
+	certSaveDir = "runtime/certs"
+)
+
+// certAllowedExts 证书允许的扩展名，仅这四种。
+var certAllowedExts = map[string]bool{".pem": true, ".key": true, ".crt": true, ".cer": true}
+
+// CertUploadResult 证书上传结果。
+//
+// 用结构体而不是 gin.H：Service 层不得依赖 gin（规则 2）。
+// 字段名与既有接口响应保持一致，前端无需改动。
+type CertUploadResult struct {
+	Path     string `json:"path"`
+	Filename string `json:"filename"`
+}
+
+// UploadCert 校验并保存支付证书。
+//
+// 这套逻辑原先整体写在 Controller 里（扩展名白名单、大小限制、MkdirAll、
+// SaveUploadedFile、文件名生成），属于业务规则，已按规则 1 下沉。
+// Controller 现在只做「取文件 → 调这里 → 返回」。
+func (s *configService) UploadCert(file *multipart.FileHeader) (*CertUploadResult, error) {
+	ext := filepath.Ext(file.Filename)
+	if !certAllowedExts[ext] {
+		return nil, common.NewBizError("仅支持 .pem/.key/.crt/.cer 文件")
+	}
+	if file.Size > certMaxSize {
+		return nil, common.NewBizError("文件大小不能超过 2MB")
+	}
+
+	if err := os.MkdirAll(certSaveDir, 0o700); err != nil {
+		return nil, err
+	}
+
+	// 落盘文件名只由「时间戳 + 已校验的扩展名」拼成，**不用原始文件名**：
+	// 原始名可含路径分隔符或 `..`，拼进路径就能写到目录之外
+	// （filepath.Join 会规整 `..`）。原始名仍然原样回给前端展示用。
+	filename := fmt.Sprintf("wechat_%d%s", time.Now().UnixMilli(), ext)
+	savePath := filepath.Join(certSaveDir, filename)
+
+	if err := saveMultipartFile(file, savePath); err != nil {
+		return nil, fmt.Errorf("保存证书失败: %w", err)
+	}
+
+	return &CertUploadResult{Path: savePath, Filename: file.Filename}, nil
+}
+
+// saveMultipartFile 把上传文件写到 dst。
+//
+// 等价于 gin 的 `c.SaveUploadedFile`，但 Service 层拿不到 gin.Context，
+// 也不该为了这个动作去依赖它。
+func saveMultipartFile(file *multipart.FileHeader, dst string) error {
+	src, err := file.Open()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = src.Close() }()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, src); err != nil {
+		_ = out.Close()
+		return err
+	}
+	// 显式返回 Close 的错误而不是 defer 掉：写入的落盘错误在这里才暴露
+	return out.Close()
 }
 
 type configService struct {
@@ -201,7 +292,7 @@ func (s *configService) FindByPrefixRaw(prefix string) ([]interface{}, error) {
 // 「前几项已生效、后面几项没写」的混合状态。对支付/OSS 这类成组配置尤其危险 ——
 // 密钥写了一半的现象是「签名失败」「上传失败」，完全指不到是配置没存全。
 func (s *configService) BatchSave(prefix string, items []ConfigItem, operatorID uint) error {
-	return s.configRepo.Transaction(func(txRepo repository.ConfigRepository) error {
+	err := s.configRepo.Transaction(func(txRepo repository.ConfigRepository) error {
 		for _, item := range items {
 			// 前端原样回传打码占位符，说明该项未被修改，跳过以保留原值
 			if item.Value == maskedValue {
@@ -222,6 +313,19 @@ func (s *configService) BatchSave(prefix string, items []ConfigItem, operatorID 
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	// 保存的是 OSS 配置时，立刻把新值推给上传模块。
+	//
+	// 这个动作必须放在**事务提交之后**（事务里推会导致回滚后上传模块带着
+	// 一份不存在的配置运行），也必须放在 Service 层 —— 早前它写在 Controller 里，
+	// 属于「保存配置」这条业务规则的收尾步骤，落进 Controller 就违反了规则 1。
+	if prefix == "oss." {
+		upload.Reload(LoadOSSConfig())
+	}
+	return nil
 }
 
 // LoadOSSConfig 从 sys_config 表读取 oss.* 配置，返回 key-value map。
