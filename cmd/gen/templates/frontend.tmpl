@@ -1,0 +1,208 @@
+[[define "api"]]import { http } from './index'
+import type { Result, PageResult } from './index'
+
+export interface [[.Pascal]]Item {
+  id: number
+  name: string
+  status: number
+  sort: number
+  remark?: string
+  createdAt: string
+}
+
+// 写入用的请求体。与 [[.Pascal]]Item 分开而不是 Partial<X>：
+// Item 含 id / createdAt 这类服务端生成或只读字段，而请求体不含它们。
+// 混用会让「提交时漏传必填项」在编译期查不出来。
+export interface [[.Pascal]]FormData {
+  id?: number
+  name: string
+  status?: number
+  sort?: number
+  remark?: string
+}
+
+export function get[[.Pascal]]List(params: { name?: string; page: number; pageSize: number }) {
+  return http.get<Result<PageResult<[[.Pascal]]Item>>>('/[[.Name]]/list', { params })
+}
+
+export function create[[.Pascal]](data: [[.Pascal]]FormData) {
+  return http.post<Result<unknown>>('/[[.Name]]', data)
+}
+
+export function update[[.Pascal]](data: [[.Pascal]]FormData) {
+  return http.put<Result<unknown>>('/[[.Name]]', data)
+}
+
+export function delete[[.Pascal]](id: number) {
+  return http.delete<Result<unknown>>(`/[[.Name]]/${id}`)
+}
+[[end]]
+
+[[define "view"]]<template>
+  <div class="app-container">
+    <div class="search-form">
+      <CollapsibleFilter>
+        <el-form :model="queryParams">
+          <el-row :gutter="16">
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item label="名称">
+                <el-input
+                  v-model="queryParams.name"
+                  placeholder="请输入名称"
+                  clearable
+                  @keyup.enter="handleSearch"
+                />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-form-item>
+                <el-button type="primary" @click="handleSearch">搜索</el-button>
+                <el-button @click="handleReset">重置</el-button>
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </el-form>
+      </CollapsibleFilter>
+    </div>
+
+    <el-card class="table-card">
+      <template #header>
+        <div class="card-header">
+          <span>[[.Title]]</span>
+          <el-button type="primary" @click="handleAdd()">新增[[.Title]]</el-button>
+        </div>
+      </template>
+
+      <ResponsiveTable :data="tableData" :columns="columns" :loading="loading">
+        <template #status="{ row }">
+          <el-tag :type="row.status === 1 ? 'success' : 'info'" size="small">{{
+            row.status === 1 ? '正常' : '停用'
+          }}</el-tag>
+        </template>
+        <template #actions="{ row }">
+          <el-button type="primary" link size="small" @click="handleEdit(row as [[.Pascal]]Item)"
+            >编辑</el-button
+          >
+          <el-button type="danger" link size="small" @click="handleDelete(row as [[.Pascal]]Item)"
+            >删除</el-button
+          >
+        </template>
+      </ResponsiveTable>
+
+      <Pagination
+        v-model:page="page"
+        v-model:limit="pageSize"
+        :total="total"
+        @pagination="loadData"
+        layout="total, prev, pager, next"
+        :background="false"
+      />
+    </el-card>
+
+    <FormDialog v-model="dialogVisible" :title="dialogTitle" :loading="submitLoading">
+      <el-form ref="formRef" :model="form" :rules="formRules" label-width="80px">
+        <el-form-item label="名称" prop="name">
+          <el-input v-model="form.name" placeholder="请输入名称" />
+        </el-form-item>
+        <el-form-item label="排序">
+          <el-input-number v-model="form.sort" :min="0" />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-switch v-model="form.status" :active-value="1" :inactive-value="0" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="选填" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitLoading" @click="handleSubmit">确定</el-button>
+      </template>
+    </FormDialog>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { reactive } from 'vue'
+import {
+  get[[.Pascal]]List,
+  create[[.Pascal]],
+  update[[.Pascal]],
+  delete[[.Pascal]],
+  type [[.Pascal]]Item,
+} from '@/api/[[.Name]]'
+import CollapsibleFilter from '@/components/CollapsibleFilter/index.vue'
+import FormDialog from '@/components/FormDialog/index.vue'
+import ResponsiveTable from '@/components/ResponsiveTable/index.vue'
+import type { ResponsiveColumn } from '@/components/ResponsiveTable/types'
+import { useCrud } from '@/hooks/useCrud'
+
+interface [[.Pascal]]Form {
+  id: number
+  name: string
+  sort: number
+  status: number
+  remark: string
+}
+
+// 列定义是唯一来源：桌面端表格列与手机端卡片字段都从这里派生。
+// 操作列的 slot 名必须是 `actions`（该列通常 hideInCard: true，
+// 换个名字会让这一列在手机上整个消失）。
+const columns: ResponsiveColumn<[[.Pascal]]Item>[] = [
+  { label: 'ID', prop: 'id', width: 60 },
+  { label: '名称', prop: 'name', minWidth: 120 },
+  { label: '排序', prop: 'sort', width: 70, align: 'center' },
+  { label: '状态', slot: 'status', width: 80 },
+  { label: '操作', slot: 'actions', width: 160, hideInCard: true },
+]
+
+// 搜索条件只放本页自己的字段。page/pageSize 由 useCrud 管理 ——
+// 原先把它们混在同一个 queryParams 里，重置时要记得一并复位，很容易漏。
+const queryParams = reactive({ name: '' })
+
+const {
+  loading,
+  submitLoading,
+  tableData,
+  total,
+  page,
+  pageSize,
+  dialogVisible,
+  dialogTitle,
+  form,
+  formRef,
+  loadData,
+  handleSearch,
+  handleAdd,
+  handleEdit,
+  handleSubmit,
+  handleDelete,
+} = useCrud<[[.Pascal]]Item, [[.Pascal]]Form, { name?: string; page: number; pageSize: number }>({
+  list: (params) => get[[.Pascal]]List(params),
+  create: (payload) => create[[.Pascal]](payload),
+  update: (payload) => update[[.Pascal]](payload),
+  remove: (id) => delete[[.Pascal]](id),
+  createForm: () => ({ id: 0, name: '', sort: 0, status: 1, remark: '' }),
+  query: () => ({ name: queryParams.name }),
+  titles: { add: '新增[[.Title]]', edit: '编辑[[.Title]]' },
+  deleteConfirm: '确认删除该[[.Title]]？',
+})
+
+function handleReset() {
+  queryParams.name = ''
+  handleSearch()
+}
+
+const formRules = {
+  name: [{ required: true, message: '请输入名称', trigger: 'blur' }],
+}
+</script>
+
+<style lang="scss" scoped>
+.table-card {
+  :deep(.el-card__header) {
+    border-bottom-color: var(--color-border-lighter);
+  }
+}
+</style>
+[[end]]

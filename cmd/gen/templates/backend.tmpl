@@ -1,0 +1,418 @@
+[[define "model"]]package model
+
+import (
+	"go-admin/internal/common"
+)
+
+// [[.Pascal]] [[.Title]]。
+//
+// 由 cmd/gen 生成。注意三件事：
+//
+//  1. 继承 TenantBaseModel ⇒ 本表是**租户内**数据。所有查询/写入都必须带
+//     tenant_id，Repository 的方法签名已经强制接收 tenantID。
+//  2. 改字段后要同步 sql/ 下的建表语句与索引，并补一个迁移脚本
+//     （sql/migrations/YYYY-MM-DD-<描述>.sql）—— 迁移**必须幂等**
+//     （cmd/migrate 不做事务回滚，MySQL 的 DDL 会隐式提交）。
+//  3. 复合唯一索引（含 tenant_id）只能在 DDL 里建：GORM 不能把索引字段
+//     指到嵌入结构体里的 TenantID，给单个字段打 uniqueIndex 会建出
+//     **全局**唯一索引，语义正好是反的。
+type [[.Pascal]] struct {
+	common.TenantBaseModel
+	Name   string `gorm:"type:varchar(128);comment:名称" json:"name"`
+	Status int8   `gorm:"type:tinyint;default:1;comment:状态 0停用 1正常" json:"status"`
+	Sort   int    `gorm:"default:0;comment:排序" json:"sort"`
+}
+
+func ([[.Pascal]]) TableName() string {
+	return "[[.Table]]"
+}
+[[end]]
+
+[[define "dto"]]package dto
+
+import "go-admin/internal/common"
+
+// Create[[.Pascal]]Request 创建[[.Title]]。
+type Create[[.Pascal]]Request struct {
+	Name   string `json:"name" binding:"required,max=128"`
+	Status int8   `json:"status" binding:"oneof=0 1"`
+	Sort   int    `json:"sort" binding:"gte=0"`
+	Remark string `json:"remark" binding:"max=500"`
+}
+
+// Update[[.Pascal]]Request 更新[[.Title]]。
+//
+// 可空字段用指针：接口支持**部分更新**（未提供即不改）。
+// 用值类型会把「没传」和「传了零值」混为一谈 —— 那正是
+// 「只改等级却把状态重置成停用」这类静默数据损坏的成因。
+type Update[[.Pascal]]Request struct {
+	ID     uint    `json:"id" binding:"required"`
+	Name   string  `json:"name" binding:"max=128"`
+	Status *int8   `json:"status" binding:"omitempty,oneof=0 1"`
+	Sort   *int    `json:"sort" binding:"omitempty,gte=0"`
+	Remark *string `json:"remark" binding:"omitempty,max=500"`
+}
+
+// [[.Pascal]]ListRequest 列表查询条件。
+type [[.Pascal]]ListRequest struct {
+	Name string `json:"name" form:"name"`
+	// 分页参数统一内嵌：绑定与归一化走 common.BindPage
+	common.PageQuery
+}
+[[end]]
+
+[[define "repository"]]package repository
+
+import (
+	"go-admin/internal/common"
+	"go-admin/internal/database"
+	"go-admin/internal/module/[[.Name]]/model"
+
+	"gorm.io/gorm"
+)
+
+// [[.Pascal]]Repository [[.Title]]的数据访问层。
+//
+// ⚠️ 每个方法都带 tenantID 是**刻意**的：本项目的表按 TenantBaseModel
+// 隔离，而 common.TenantScope(db, 0) 表示「不过滤」（平台级账号的语义）。
+// 也就是说**漏传 tenantID 会静默退化成全表查询**，直接造成跨租户数据泄漏。
+// 把它放进签名是从类型层面强制，不依赖调用方记得传。
+type [[.Pascal]]Repository interface {
+	Create(item *model.[[.Pascal]]) error
+	Update(tenantID uint, item *model.[[.Pascal]]) error
+	Delete(tenantID, id uint) error
+	FindByID(tenantID, id uint) (*model.[[.Pascal]], error)
+	FindList(tenantID uint, name string, page, pageSize int) ([]model.[[.Pascal]], int64, error)
+}
+
+type [[.Camel]]Repository struct{}
+
+func New[[.Pascal]]Repository() [[.Pascal]]Repository {
+	return &[[.Camel]]Repository{}
+}
+
+// Create 创建。TenantID 由 Service 层赋值 —— Controller 拿不到也不该拿。
+func (r *[[.Camel]]Repository) Create(item *model.[[.Pascal]]) error {
+	return database.DB.Create(item).Error
+}
+
+// Update 更新。先按租户确认记录归属，再保存：
+// 直接 Save 会让别租户的 ID 也能被改写（越权写入）。
+func (r *[[.Camel]]Repository) Update(tenantID uint, item *model.[[.Pascal]]) error {
+	var count int64
+	if err := common.TenantScope(database.DB, tenantID).
+		Model(&model.[[.Pascal]]{}).
+		Where("id = ?", item.ID).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return database.DB.Save(item).Error
+}
+
+// Delete 软删除。受租户过滤，命中 0 行即返回 ErrRecordNotFound（→ 404）。
+func (r *[[.Camel]]Repository) Delete(tenantID, id uint) error {
+	res := common.TenantScope(database.DB, tenantID).
+		Where("id = ?", id).
+		Delete(&model.[[.Pascal]]{})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (r *[[.Camel]]Repository) FindByID(tenantID, id uint) (*model.[[.Pascal]], error) {
+	var item model.[[.Pascal]]
+	err := common.TenantScope(database.DB, tenantID).Where("id = ?", id).First(&item).Error
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+func (r *[[.Camel]]Repository) FindList(tenantID uint, name string, page, pageSize int) ([]model.[[.Pascal]], int64, error) {
+	var items []model.[[.Pascal]]
+	var total int64
+
+	query := common.TenantScope(database.DB, tenantID).Model(&model.[[.Pascal]]{})
+	if name != "" {
+		// EscapeLike：不转义时用户输入的 % / _ 会被当通配符，
+		// 搜 "100%" 会匹配到一大堆无关记录
+		query = query.Where("name LIKE ?", "%"+common.EscapeLike(name)+"%")
+	}
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := query.Order("sort ASC, id DESC").
+		Offset((page - 1) * pageSize).Limit(pageSize).
+		Find(&items).Error
+	return items, total, err
+}
+[[end]]
+
+[[define "service"]]package service
+
+import (
+	"go-admin/internal/common"
+	"go-admin/internal/module/[[.Name]]/dto"
+	"go-admin/internal/module/[[.Name]]/model"
+	"go-admin/internal/module/[[.Name]]/repository"
+)
+
+type [[.Pascal]]Service interface {
+	Create(req *dto.Create[[.Pascal]]Request, operatorID, tenantID uint) error
+	Update(req *dto.Update[[.Pascal]]Request, operatorID, tenantID uint) error
+	Delete(tenantID, id uint) error
+	FindByID(tenantID, id uint) (*model.[[.Pascal]], error)
+	FindList(tenantID uint, req *dto.[[.Pascal]]ListRequest) ([]model.[[.Pascal]], int64, error)
+}
+
+type [[.Camel]]Service struct {
+	repo repository.[[.Pascal]]Repository
+}
+
+func New[[.Pascal]]Service() [[.Pascal]]Service {
+	return &[[.Camel]]Service{repo: repository.New[[.Pascal]]Repository()}
+}
+
+// Create 创建[[.Title]]。
+//
+// 业务校验失败必须用 common.NewBizError("..."): 它对外是 400 + 原文案
+// （用户看得懂、也知道该改什么）。直接 `return err` 会被 FailWith 归到
+// 系统错误 → 对外只剩「服务器内部错误」+ 500，用户完全不知道发生了什么。
+// 反之，DB / IO 失败**不要**包装成 BizError —— 那会把 5xx 说成 4xx，
+// 让监控失去告警能力。
+func (s *[[.Camel]]Service) Create(req *dto.Create[[.Pascal]]Request, operatorID, tenantID uint) error {
+	item := &model.[[.Pascal]]{
+		Name:   req.Name,
+		Status: req.Status,
+		Sort:   req.Sort,
+	}
+	item.TenantID = tenantID
+	item.CreateBy = operatorID
+	item.UpdateBy = operatorID
+	item.Remark = req.Remark
+
+	return s.repo.Create(item)
+}
+
+// Update 部分更新：只覆盖显式提供的字段。
+//
+// 无条件赋值会把未提供的字段清成零值 —— 表现为「只改名称，状态被重置」。
+func (s *[[.Camel]]Service) Update(req *dto.Update[[.Pascal]]Request, operatorID, tenantID uint) error {
+	item, err := s.FindByID(tenantID, req.ID)
+	if err != nil {
+		// 只把 gorm.ErrRecordNotFound 转成 404，其余（连接断开等）
+		// 原样透出成 500 —— 否则 DB 故障会被报成「记录不存在」，
+		// 用户按提示反复重试，而监控里一条 5xx 都没有。
+		return common.NotFoundOrErr(err, "记录不存在")
+	}
+
+	if req.Name != "" {
+		item.Name = req.Name
+	}
+	if req.Status != nil {
+		item.Status = *req.Status
+	}
+	if req.Sort != nil {
+		item.Sort = *req.Sort
+	}
+	if req.Remark != nil {
+		item.Remark = *req.Remark
+	}
+	item.UpdateBy = operatorID
+
+	return s.repo.Update(tenantID, item)
+}
+
+func (s *[[.Camel]]Service) Delete(tenantID, id uint) error {
+	return common.NotFoundOrErr(s.repo.Delete(tenantID, id), "记录不存在")
+}
+
+func (s *[[.Camel]]Service) FindByID(tenantID, id uint) (*model.[[.Pascal]], error) {
+	item, err := s.repo.FindByID(tenantID, id)
+	if err != nil {
+		return nil, common.NotFoundOrErr(err, "记录不存在")
+	}
+	return item, nil
+}
+
+func (s *[[.Camel]]Service) FindList(tenantID uint, req *dto.[[.Pascal]]ListRequest) ([]model.[[.Pascal]], int64, error) {
+	page, pageSize := common.NormalizePageParams(req.Page, req.PageSize)
+	return s.repo.FindList(tenantID, req.Name, page, pageSize)
+}
+[[end]]
+
+[[define "controller"]]package controller
+
+import (
+	"go-admin/internal/common"
+	"go-admin/internal/module/[[.Name]]/dto"
+	"go-admin/internal/module/[[.Name]]/service"
+
+	"github.com/gin-gonic/gin"
+)
+
+// [[.Pascal]]Controller [[.Title]]接口层。
+//
+// 按规则 1，这里**只做**三件事：接收参数、校验（binding tag）、返回统一响应。
+// 任何业务判断、数据组装、事务、文件操作都属于 Service ——
+// 本项目有过「上传校验与落盘整套写在 Controller 里」的实例，
+// 连带把目录权限与文件名规则也挪到了接口层。
+type [[.Pascal]]Controller struct {
+	service service.[[.Pascal]]Service
+}
+
+func New[[.Pascal]]Controller() *[[.Pascal]]Controller {
+	return &[[.Pascal]]Controller{service: service.New[[.Pascal]]Service()}
+}
+
+// @Summary 创建[[.Title]]
+// @Tags [[.Title]]
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body dto.Create[[.Pascal]]Request true "[[.Title]]信息"
+// @Success 200 {object} common.Response
+// @Router /[[.Name]] [post]
+func (ctl *[[.Pascal]]Controller) Create(c *gin.Context) {
+	var req dto.Create[[.Pascal]]Request
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.Error(c, common.CodeBadRequest, err.Error())
+		return
+	}
+
+	tenantID := common.GetTenantID(c)
+	operatorID := common.GetCurrentUserID(c)
+	if err := ctl.service.Create(&req, operatorID, tenantID); err != nil {
+		common.FailWith(c, err)
+		return
+	}
+	common.Success(c, nil)
+}
+
+// @Summary 更新[[.Title]]
+// @Tags [[.Title]]
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body dto.Update[[.Pascal]]Request true "[[.Title]]信息"
+// @Success 200 {object} common.Response
+// @Router /[[.Name]] [put]
+func (ctl *[[.Pascal]]Controller) Update(c *gin.Context) {
+	var req dto.Update[[.Pascal]]Request
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.Error(c, common.CodeBadRequest, err.Error())
+		return
+	}
+
+	tenantID := common.GetTenantID(c)
+	operatorID := common.GetCurrentUserID(c)
+	if err := ctl.service.Update(&req, operatorID, tenantID); err != nil {
+		common.FailWith(c, err)
+		return
+	}
+	common.Success(c, nil)
+}
+
+// @Summary 删除[[.Title]]
+// @Tags [[.Title]]
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "ID"
+// @Success 200 {object} common.Response
+// @Router /[[.Name]]/{id} [delete]
+func (ctl *[[.Pascal]]Controller) Delete(c *gin.Context) {
+	id, err := common.GetUintParam(c, "id")
+	if err != nil {
+		common.Error(c, common.CodeBadRequest, "参数错误")
+		return
+	}
+
+	tenantID := common.GetTenantID(c)
+	if err := ctl.service.Delete(tenantID, id); err != nil {
+		common.FailWith(c, err)
+		return
+	}
+	common.Success(c, nil)
+}
+
+// @Summary [[.Title]]详情
+// @Tags [[.Title]]
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "ID"
+// @Success 200 {object} common.Response
+// @Router /[[.Name]]/{id} [get]
+func (ctl *[[.Pascal]]Controller) FindByID(c *gin.Context) {
+	id, err := common.GetUintParam(c, "id")
+	if err != nil {
+		common.Error(c, common.CodeBadRequest, "参数错误")
+		return
+	}
+
+	tenantID := common.GetTenantID(c)
+	item, err := ctl.service.FindByID(tenantID, id)
+	if err != nil {
+		common.FailWith(c, err)
+		return
+	}
+	common.Success(c, item)
+}
+
+// @Summary [[.Title]]列表
+// @Tags [[.Title]]
+// @Produce json
+// @Security BearerAuth
+// @Param name query string false "名称"
+// @Param page query int false "页码"
+// @Param pageSize query int false "每页条数"
+// @Success 200 {object} common.Response
+// @Router /[[.Name]]/list [get]
+func (ctl *[[.Pascal]]Controller) FindList(c *gin.Context) {
+	var req dto.[[.Pascal]]ListRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		common.Error(c, common.CodeBadRequest, err.Error())
+		return
+	}
+
+	tenantID := common.GetTenantID(c)
+	list, total, err := ctl.service.FindList(tenantID, &req)
+	if err != nil {
+		common.FailWith(c, err)
+		return
+	}
+	common.SuccessWithPage(c, list, total, req.Page, req.PageSize)
+}
+[[end]]
+[[define "migration"]]-- 迁移脚本：建 [[.Title]] 表
+--
+-- 生成自 cmd/gen。表结构与 model/[[.Name]].go 的字段一一对应，
+-- 改字段时**两边一起改**，并同步 sql/init.sql（全新部署走它，不走迁移）。
+--
+-- 幂等性说明：cmd/migrate 不做事务回滚（MySQL 的 DDL 会隐式提交），
+-- 因此本脚本可重复执行 —— CREATE TABLE IF NOT EXISTS 对已存在的表是无操作。
+-- 加列、加索引这类无法幂等的操作不要直接写在这里，
+-- 先查 information_schema 再执行（参考 2026-09-16-post-tenant.sql 的写法）。
+CREATE TABLE IF NOT EXISTS [[.Table]] (
+  id         bigint unsigned NOT NULL AUTO_INCREMENT,
+  tenant_id  bigint unsigned NOT NULL COMMENT '租户ID',
+  name       varchar(128) NOT NULL DEFAULT '' COMMENT '名称',
+  status     tinyint NOT NULL DEFAULT 1 COMMENT '状态 0停用 1正常',
+  sort       int NOT NULL DEFAULT 0 COMMENT '排序',
+  create_by  bigint unsigned NOT NULL DEFAULT 0 COMMENT '创建者ID',
+  update_by  bigint unsigned NOT NULL DEFAULT 0 COMMENT '更新者ID',
+  created_at datetime(3) NULL COMMENT '创建时间',
+  updated_at datetime(3) NULL COMMENT '更新时间',
+  deleted_at datetime(3) NULL COMMENT '删除时间',
+  remark     varchar(500) NOT NULL DEFAULT '' COMMENT '备注',
+  PRIMARY KEY (id),
+  KEY idx_tenant_deleted (tenant_id, deleted_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='[[.Title]]';
+[[end]]]

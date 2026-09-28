@@ -36,7 +36,10 @@ Repository (数据层)
 
 ```
 go-admin/
-├── cmd/server/main.go              # 唯一入口
+├── cmd/
+│   ├── server/main.go              # 服务入口
+│   ├── migrate/                    # 迁移工具（按文件名序应用 sql/migrations，-status 查看状态）
+│   └── gen/                        # 业务模块脚手架生成器（见「新业务模块接入清单」）
 ├── config/
 │   ├── config.yaml                 # 应用配置
 │   ├── config.go                   # 配置加载
@@ -644,6 +647,14 @@ export REDIS_PASSWORD="your_redis_password"
 - Swagger 文档仅在非 release 模式暴露
 
 ## 新业务模块接入清单
+
+> **优先用生成器**：`go run ./cmd/gen -name <模块名> -title <中文名>`。
+> 它会一次性生成下面 1~4、6、9、10 的骨架文件与 8 的建表迁移（幂等的
+> CREATE TABLE IF NOT EXISTS），并把 7 的权限码与路由注册自动插入
+> `router/router.go` 的四处 `gen:` 锚点，随后自动跑 `go build` 与 `swag init` 自检。
+> 生成后仍需手工做的只剩：改字段（model / 迁移 / init.sql 三处同步）、
+> 跑迁移、挂菜单（8 的菜单部分）、13 的实测验证。
+> 锚点注释被删时生成器会报错拒绝执行 —— 恢复锚点即可，不要绕过。
 
 1. 在 `internal/module/<模块名>/model/` 创建数据模型（多租户表继承 `TenantBaseModel`，全局表继承 `BaseModel`）
 2. 在 `internal/module/<模块名>/repository/` 创建数据访问层（多租户表的方法**必须接收 `tenantID`**）

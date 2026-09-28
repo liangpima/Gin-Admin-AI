@@ -15,6 +15,7 @@ import (
 	memberController "go-admin/internal/module/member/controller"
 	paymentController "go-admin/internal/module/payment/controller"
 	"go-admin/internal/module/system/controller"
+	// gen:imports —— cmd/gen 在**本行之后**追加新模块的 controller 导入。不要删除该注释。
 
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
@@ -95,6 +96,7 @@ const (
 	permPayOrderCreate = "payment:order:create"
 	permPayOrderRefund = "payment:order:refund"
 	permPayOrderClose  = "payment:order:close"
+	// gen:perms —— cmd/gen 在**本行之后**追加新模块的权限码。不要删除该注释。
 )
 
 // protected 注册一条受保护路由，并登记其所需权限码。
@@ -160,6 +162,7 @@ func Setup(mode string) *gin.Engine {
 	memberLevelCtrl := memberController.NewMemberLevelController()
 	memberTagCtrl := memberController.NewMemberTagController()
 	pointsLogCtrl := memberController.NewPointsLogController()
+	// gen:controllers —— cmd/gen 在**本行之后**实例化新模块的 controller。不要删除该注释。
 
 	r.GET("/", func(c *gin.Context) {
 		c.JSON(200, gin.H{
@@ -248,6 +251,7 @@ func Setup(mode string) *gin.Engine {
 	authorized.Use(middleware.OperationLog())
 	{
 		// 自助接口：仅要求登录态（权限码传空串）
+		// gen:routes —— cmd/gen 在**本行之后**插入新模块的路由组。不要删除该注释。
 		protected(authorized, http.MethodPost, "/auth/logout", "", authController.Logout)
 		protected(authorized, http.MethodGet, "/auth/userInfo", "", authController.GetUserInfo)
 		protected(authorized, http.MethodGet, "/dashboard/stats", "", dashboardController.GetStats)
