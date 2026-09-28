@@ -164,6 +164,77 @@ if uploads_block and re.search(r"\b(root|alias)\b", uploads_block.group(1)):
 checks += 1
 print("[OK] nginx 关键行为（SPA 回退 / 反代 / uploads 未直接映射）")
 
+# ---------- 7. nginx 安全响应头：add_header 不继承，必须逐处 include ----------
+# nginx 的规则是「本层只要出现一条 add_header，就完全不继承上层的 add_header」。
+# 于是某个 location 为了写 Cache-Control 而加了一条 add_header，就会**静默丢掉**
+# server 级的 X-Frame-Options / X-Content-Type-Options / Referrer-Policy。
+#
+# 这不是假设，是本项目真实踩过的缺陷：`location = /index.html` 带了 Cache-Control，
+# 而它正是后台主文档的响应者（`location /` 的 try_files 内部重定向到它），
+# 结果整个后台可以被第三方站点 iframe 嵌套（点击劫持）；`location /assets/` 同样丢头。
+# 而 `location /api/`、`location /` 因为没写 add_header 一直正常 —— 更容易误判为「没问题」。
+#
+# 这类失效不报错、不影响功能，只有抓响应头才看得出来，所以只能靠断言兜住。
+SECURITY_HEADERS = ["X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy"]
+SNIPPET_PATH = "deploy/nginx/snippets/security-headers.conf"
+SNIPPET_INCLUDE = "/etc/nginx/snippets/security-headers.conf"
+
+if not os.path.exists(SNIPPET_PATH):
+    fail(f"缺少安全响应头片段 {SNIPPET_PATH}（default.conf 的 include 会指向它）")
+else:
+    snippet = open(SNIPPET_PATH, encoding="utf-8").read()
+    for header in SECURITY_HEADERS:
+        if not re.search(rf"add_header\s+{re.escape(header)}\b", snippet):
+            fail(f"{SNIPPET_PATH} 未声明 {header}")
+    for line in snippet.splitlines():
+        stripped = line.strip()
+        # 不带 always 时 nginx 只为 2xx/3xx/204/304 添加响应头 → 4xx/5xx 错误页丢头
+        if stripped.startswith("add_header") and "always" not in stripped:
+            fail(f"{SNIPPET_PATH} 的 add_header 缺少 always: {stripped!r}（4xx/5xx 响应会丢掉该头）")
+
+# 逐 location 花括号配对，检查「带 add_header 的块是否都 include 了片段」
+#
+# 扫描前先剥掉**整行注释**：注释文字里也会出现 "location" 这个词
+# （本配置的说明就写着「这个 location 是后台主文档的实际响应者」），
+# 不剥的话正则会把注释行当成块的起点，块名与块边界都会错 ——
+# 那样断言虽然偶尔也能报警，但报的是错误的位置，且可能漏报。
+nginx_code = "\n".join(
+    line for line in nginx.splitlines() if not line.lstrip().startswith("#")
+)
+
+location_re = re.compile(r"location\s+([^{]*?)\{")
+missing_include: list[str] = []
+for match in location_re.finditer(nginx_code):
+    open_brace = match.end() - 1
+    depth = 0
+    close_brace = len(nginx_code) - 1
+    for i in range(open_brace, len(nginx_code)):
+        if nginx_code[i] == "{":
+            depth += 1
+        elif nginx_code[i] == "}":
+            depth -= 1
+            if depth == 0:
+                close_brace = i
+                break
+    block = nginx_code[open_brace:close_brace]
+    if "add_header" in block and SNIPPET_INCLUDE not in block:
+        missing_include.append(match.group(1).strip())
+
+if missing_include:
+    fail(
+        "deploy/nginx/default.conf 中这些 location 自带 add_header 却没有 "
+        f"include {SNIPPET_INCLUDE} —— nginx 的 add_header 不继承上层，"
+        "会静默丢掉 X-Frame-Options / nosniff / Referrer-Policy（后台可被 iframe 嵌套）："
+        + ", ".join(repr(x) for x in missing_include)
+    )
+
+# 片段必须真的被复制进镜像，否则 nginx 启动时 include 找不到文件而直接失败
+web_dockerfile = open("web/Dockerfile", encoding="utf-8").read()
+if f"COPY {SNIPPET_PATH}" not in web_dockerfile:
+    fail(f"web/Dockerfile 未 COPY {SNIPPET_PATH} —— nginx 会因 include 找不到文件而启动失败")
+checks += 1
+print(f"[OK] nginx 安全响应头（片段声明 {len(SECURITY_HEADERS)} 个头 + 所有带 add_header 的 location 均已 include）")
+
 # ---------- 汇总 ----------
 print()
 if errors:

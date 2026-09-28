@@ -33,6 +33,13 @@ FROM nginx:1.27-alpine
 # 覆盖默认站点配置：SPA history 回退 + /api 与 /uploads 反代
 COPY deploy/nginx/default.conf /etc/nginx/conf.d/default.conf
 
+# 安全响应头片段。default.conf 里凡是自带 add_header 的 location 都会
+# `include /etc/nginx/snippets/security-headers.conf;`（nginx 的 add_header
+# 不继承上层，逐处 include 才能保住 X-Frame-Options 等头）。
+# **漏掉这一行会让 nginx 启动直接失败**（include 找不到文件），
+# 好在是启动期就炸而不是静默失效。
+COPY deploy/nginx/snippets/security-headers.conf /etc/nginx/snippets/security-headers.conf
+
 COPY --from=builder /src/dist /usr/share/nginx/html
 
 EXPOSE 80

@@ -23,6 +23,10 @@ jobs:
   backend:
     name: 后端（vet / test / build）
     runs-on: ubuntu-latest
+    # 每个 job 都必须有超时上限。默认值是 360 分钟，一旦某一步卡住
+    # （等 Redis 连接、go test 里有 goroutine 死锁、下载依赖无响应），
+    # 这个 runner 会被占满 6 小时才释放，期间后续排队的工作流全部堵住。
+    timeout-minutes: 20
     # ────────────────────────────────────────────────────────────
     # Redis：middleware 的 Auth 用例需要它才能覆盖「token 合法」之后的路径
     # （吊销检查 fail-closed 的取舍、平台级身份校验、用户级吊销）。
@@ -70,6 +74,12 @@ jobs:
       # 用 `make swagger` 而不是手写命令：与本地跑的是同一条，
       # 避免「CI 绿了但本地其实是另一回事」（同前端构建那条注释）。
       #
+      # ⚠️ 这一步只覆盖「生成物与注解是否一致」。**注解本身漏写**它查不出来 ——
+      # 新接口一条注解都没写时，重新生成的结果与仓库里的完全相同，git diff 为空。
+      # 「文档是否覆盖了每一条真实路由」「引用的安全方案是否都有定义」
+      # 这两项由 `router/swagger_routes_test.go` 在 go test 阶段把关（同为阻断项）。
+      # 此前那项核对是一个放在 runtime/（已 gitignore）下的一次性脚本，从未入库。
+      #
       # 版本必须钉死：swag 不同版本生成的 docs.go 有差异，用 latest 会让 CI
       # 随上游发布随机变红 —— 与 golangci-lint 那次「观察项本身失效」同源。
       # 生成物是 LF（swag 在 Windows 与 Linux 都写 LF，仓库里存的也是 LF），
@@ -111,9 +121,35 @@ jobs:
       - name: 编译迁移工具
         run: go build -o /dev/null ./cmd/migrate
 
+      # ────────────────────────────────────────────────────────
+      # 部署文件静态校验：**阻断项**。
+      #
+      # 本环境无法真正 docker build，deploy/validate.py 做能做到的静态校验
+      # （YAML、compose 引用完整性、构建上下文、Dockerfile 的 COPY 源、
+      #  应用配置关键项、nginx 关键行为与安全响应头）。
+      #
+      # 接进来的理由不是「它有用」，而是它此前**从不被执行** ——
+      # 一个只能手动跑、也不在任何门禁里的脚本，等于不存在。
+      #
+      # 其中 nginx 那条断言针对一个真实缺陷：`add_header` 在本层出现后就不再继承
+      # 上层，于是带了 Cache-Control 的 location 会**静默丢掉** X-Frame-Options /
+      # nosniff / Referrer-Policy。`location = /index.html` 正是后台主文档的
+      # 响应者（`location /` 的 try_files 内部重定向到它），丢了 X-Frame-Options
+      # 就等于整个后台可被第三方站点 iframe 嵌套（点击劫持）。
+      # 这类失效不报错、不影响功能，只有抓响应头才看得出来，只能靠断言兜住。
+      #
+      # 用 `make check-deploy` 而不是直接调脚本：与本地跑的是同一条命令，
+      # 且 PyYAML 缺失时的提示与本地一致。
+      # ────────────────────────────────────────────────────────
+      - name: 部署文件静态校验
+        run: |
+          python3 -m pip install --disable-pip-version-check --quiet pyyaml
+          make check-deploy
+
   frontend:
     name: 前端（类型检查 / lint / 测试 / 构建）
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: web
@@ -198,13 +234,24 @@ jobs:
   lint:
     name: 静态检查（golangci-lint）
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - uses: golangci/golangci-lint-action@v8
+      # 第三方 action 必须钉到**不可变的 commit SHA**，不能钉 tag。
+      #
+      # 第一方 action（actions/checkout、actions/setup-go）钉大版本是可接受的
+      # 惯例，但第三方仓库不同：tag 可以被上游（或入侵者）重新指向任意 commit，
+      # 而 `@v8` 这种大版本 tag 本来就是"跟着漂移"的语义。
+      # 一旦该仓库被投毒，CI 里会直接执行它带来的代码 —— 而 CI 持有
+      # 仓库读写凭据，等于把供应链攻击面接到了本仓库上。
+      #
+      # 4afd733... 对应 golangci-lint-action v8.0.0（annotated tag
+      # 25e2cdc5 指向的 commit）。升级时请同时更新 SHA 与下面的注释。
+      - uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v8.0.0
         with:
           version: v2.13.2
           args: --timeout=5m

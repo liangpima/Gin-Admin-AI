@@ -280,3 +280,27 @@ cd web && npm ci && npm run build     # 产物在 web/dist
 
 nginx 配置可直接参考 `deploy/nginx/default.conf`（注意把 `app:8080`
 改成后端实际地址，如 `127.0.0.1:8080`）。
+
+## 部署文件离线校验
+
+没有 Docker 的机器上也能做静态校验（本仓库 CI 与 `make check` 都会跑这一步）：
+
+```bash
+pip install pyyaml          # 仅在本地首次需要
+make check-deploy           # 等价于 python3 deploy/validate.py
+```
+
+`deploy/validate.py` 覆盖：compose 的 YAML 与引用完整性、build 上下文与 Dockerfile
+是否真实存在、Dockerfile 的关键 COPY 源有没有被 `.dockerignore` 排除、
+应用配置的关键项（mode / host / cors / 密钥留空）、nginx 的关键行为与**安全响应头**。
+
+其中 nginx 那条断言针对一个真实踩过的缺陷：**nginx 的 `add_header` 不继承上层** ——
+某个 location 一旦自己写了 `add_header Cache-Control`，server 级的
+`X-Frame-Options` / `X-Content-Type-Options` / `Referrer-Policy` 就全部失效。
+`location = /index.html` 正是后台主文档的响应者（`location /` 的 `try_files`
+内部重定向到它），丢掉 `X-Frame-Options` 就等于整个后台可以被第三方站点
+iframe 嵌套（点击劫持）。
+
+因此安全响应头集中放在 `deploy/nginx/snippets/security-headers.conf`，
+**任何自带 `add_header` 的 location 都必须 `include` 它** —— 校验脚本会强制这一点，
+且 `web/Dockerfile` 必须把该片段复制进镜像（否则 nginx 启动即失败）。
