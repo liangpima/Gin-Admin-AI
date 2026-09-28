@@ -22,9 +22,13 @@ type mockOrderRepo struct {
 	// 状态流转」。用于复现「条件更新返回 0 行，但订单其实已是已支付」这一分支 ——
 	// 它与「订单已被关闭」共用同一个 !affected 出口，处置方式却相反。
 	markPaidHook func(orderNo string)
-	// claimMu 保护状态流转，模拟数据库条件更新的原子性。
-	// 没有它，并发测试就失去意义（mock 的读改写不是原子的）。
-	claimMu sync.Mutex
+	// mu 保护 mock 的全部共享状态（orders / nextID / 各计数器）。
+	//
+	// 只锁「写」是不够的 —— CI 的 -race 实测抓到过：并发退款用例里，
+	// ClaimRefund/UpdateRefund 各自持锁写入，而 FindByOrderNo 等读方法
+	// 裸读同一个 map，照样是 DATA RACE。真实仓储由数据库的行锁与快照
+	// 语义兜底，mock 必须自己模拟出等价的「读写互斥」。
+	mu sync.Mutex
 }
 
 func newMockRepo() *mockOrderRepo {
@@ -38,6 +42,8 @@ func (m *mockOrderRepo) Create(order *model.PayOrder) error {
 	if m.createFn != nil {
 		return m.createFn(order)
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	order.ID = m.nextID
 	m.nextID++
 	m.orders[order.OrderNo] = order
@@ -47,8 +53,8 @@ func (m *mockOrderRepo) Create(order *model.PayOrder) error {
 // CloseIfPending 模拟数据库条件更新：仅当订单仍为待支付（status=0）时才关闭。
 // 与真实实现一致地保证「判断 + 修改」的原子性（真实实现依赖 UPDATE ... WHERE 的行锁）。
 func (m *mockOrderRepo) CloseIfPending(tenantID uint, orderNo string) (bool, error) {
-	m.claimMu.Lock()
-	defer m.claimMu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	o, ok := m.orders[orderNo]
 	if !ok || o.Status != model.StatusPending {
@@ -66,11 +72,14 @@ func (m *mockOrderRepo) CloseIfPending(tenantID uint, orderNo string) (bool, err
 // 先取快照再触发 findHook：hook 代表「读之后、写之前」落库的并发写入，
 // 它不应影响本次已读到的快照 —— 这正是真实数据库的语义。
 func (m *mockOrderRepo) FindByOrderNo(tenantID uint, orderNo string) (*model.PayOrder, error) {
+	m.mu.Lock()
 	o, ok := m.orders[orderNo]
 	if !ok {
+		m.mu.Unlock()
 		return nil, fmt.Errorf("record not found")
 	}
 	cp := *o
+	m.mu.Unlock()
 	if m.findHook != nil {
 		m.findHook()
 	}
@@ -78,6 +87,8 @@ func (m *mockOrderRepo) FindByOrderNo(tenantID uint, orderNo string) (*model.Pay
 }
 
 func (m *mockOrderRepo) FindByTradeNo(tenantID uint, tradeNo string) (*model.PayOrder, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for _, o := range m.orders {
 		if o.TradeNo == tradeNo {
 			return o, nil
@@ -87,6 +98,8 @@ func (m *mockOrderRepo) FindByTradeNo(tenantID uint, tradeNo string) (*model.Pay
 }
 
 func (m *mockOrderRepo) FindByID(tenantID, id uint) (*model.PayOrder, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for _, o := range m.orders {
 		if o.ID == id {
 			return o, nil
@@ -96,13 +109,21 @@ func (m *mockOrderRepo) FindByID(tenantID, id uint) (*model.PayOrder, error) {
 }
 
 func (m *mockOrderRepo) FindByOrderNoForNotify(orderNo string) (*model.PayOrder, error) {
+	// 返回副本而非共享指针：回调链路里调用方可能并发读这份订单，
+	// 而其它请求正在通过条件更新写同一行 —— 与 GORM 的真实行为一致
+	// （每次查询都是新结构体），否则 mock 自身就是 DATA RACE 源。
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if o, ok := m.orders[orderNo]; ok {
-		return o, nil
+		cp := *o
+		return &cp, nil
 	}
 	return nil, fmt.Errorf("record not found")
 }
 
 func (m *mockOrderRepo) FindList(tenantID uint, subject string, status int8, channel string, page, pageSize int) ([]model.PayOrder, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var result []model.PayOrder
 	for _, o := range m.orders {
 		if subject != "" && o.Subject != subject {
@@ -123,8 +144,11 @@ func (m *mockOrderRepo) FindList(tenantID uint, subject string, status int8, cha
 // 返回是否由本次调用完成状态流转
 func (m *mockOrderRepo) MarkPaidIfPending(orderNo, tradeNo string, paidAt *time.Time, rawNotify string) (bool, error) {
 	if m.markPaidHook != nil {
+		// hook 刻意在锁外：它代表「本次条件更新之前发生的并发写入」
 		m.markPaidHook(orderNo)
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	o, ok := m.orders[orderNo]
 	if !ok {
 		return false, nil
@@ -142,8 +166,8 @@ func (m *mockOrderRepo) MarkPaidIfPending(orderNo, tradeNo string, paidAt *time.
 // ClaimRefund 模拟数据库条件更新：仅当订单为「已支付」时才置为「退款中」，
 // 并保证「判断 + 修改」的原子性（真实实现依赖 UPDATE ... WHERE status=1 的行锁）
 func (m *mockOrderRepo) ClaimRefund(orderNo string) (bool, error) {
-	m.claimMu.Lock()
-	defer m.claimMu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	o, ok := m.orders[orderNo]
 	if !ok || o.Status != model.StatusPaid {
@@ -160,8 +184,8 @@ func (m *mockOrderRepo) ClaimRefund(orderNo string) (bool, error) {
 // 否则部分退款的回归测试会失去意义 —— 旧实现正是「覆盖金额 + 恒置已退款」，
 // 那会导致第二次部分退款抹掉第一次的金额，且剩余额度再也退不了。
 func (m *mockOrderRepo) UpdateRefund(orderNo string, refundAmt int64, refundAt time.Time, status int8) (bool, error) {
-	m.claimMu.Lock()
-	defer m.claimMu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	o, ok := m.orders[orderNo]
 	if !ok || o.Status != model.StatusRefunding {
@@ -174,8 +198,8 @@ func (m *mockOrderRepo) UpdateRefund(orderNo string, refundAmt int64, refundAt t
 }
 
 func (m *mockOrderRepo) ReleaseRefundClaim(orderNo string) error {
-	m.claimMu.Lock()
-	defer m.claimMu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	if o, ok := m.orders[orderNo]; ok && o.Status == model.StatusRefunding {
 		o.Status = model.StatusPaid
