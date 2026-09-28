@@ -40,6 +40,12 @@ func (s *menuService) Create(req *dto.CreateMenuRequest, operatorID uint) error 
 	if err := s.ensureParentExists(req.ParentID); err != nil {
 		return err
 	}
+	if err := s.checkNameUnique(req.Name, 0); err != nil {
+		return err
+	}
+	if err := validatePermissionCode(req.Permission); err != nil {
+		return err
+	}
 
 	menu := &model.SysMenu{
 		BaseModel: common.BaseModel{
@@ -66,6 +72,64 @@ func (s *menuService) Create(req *dto.CreateMenuRequest, operatorID uint) error 
 		return err
 	}
 	s.syncPolicies()
+	return nil
+}
+
+// validatePermissionCode 校验菜单上的权限标识是「真实存在且会被鉴权检查」的权限码。
+//
+// 背景（这是一条真实的提权链，不要删掉这个校验）：
+//  1. 菜单的 permission 会被 middleware.SyncPoliciesFromRoleMenus 原样编译成
+//     Casbin 策略 `{roleCode, default, permission, "*"}`；
+//  2. model.conf 的 matcher 含 `p.obj == "*" || r.obj == p.obj`；
+//  3. 因此把任一菜单的 permission 改成 `*`，持有该菜单的角色就获得
+//     **全部 protected 路由**的通行权，而项目为此专门实现的授权收敛
+//     （OperatorHoldsPermissions / checkMenusGrantable）会被完全旁路 ——
+//     因为拿到 `*` 之后「授予是否越权」的所有判定都恒真。
+//
+// 除 `*` 之外的非法值不会造成放行（未登记的权限码永远匹配不到任何路由），
+// 但会让菜单看起来「配了权限却不生效」，所以一并拒绝并给出明确文案。
+func validatePermissionCode(code string) error {
+	if code == "" {
+		// 目录型菜单没有权限码，是合法取值
+		return nil
+	}
+	if code == "*" {
+		return common.NewBizError("权限标识不能为通配符 *，请填写具体权限码")
+	}
+	if !middleware.IsRegisteredPermission(code) {
+		return common.NewBizError("权限标识不是有效的权限码：" + code)
+	}
+	return nil
+}
+
+// checkNameUnique 校验菜单标识（name）全局唯一。
+//
+// 为什么必须校验：name 会被原样写进 Vue Router 的 route.name，而项目有两处
+// 直接依赖它：
+//   - `store/modules/tagsView.ts` 的 addCachedView 用 route.name 维护
+//     keep-alive 的 `include` 列表；
+//   - `store/modules/user.ts` 登出时按 route.name 逐个 removeRoute。
+//
+// 重名时 vue-router 只保留最后一次注册，前者的缓存/清理都会落到别的页面上，
+// 表现为「打开 A 页面却复用了 B 的缓存」这类极难定位的现象，且**没有任何报错**。
+// 前端表单此前根本没有 name 输入项（见 H11），所以这条路径长期不可达；
+// 补上输入项之后它就成了一个用户随手就能踩到的坑。
+//
+// 局限：`sys_menu` 上没有 name 的唯一索引（只有 idx_parent_id / idx_deleted_at），
+// 因此这里只是应用层校验，并发创建仍可能穿透 —— 与角色 code 不同，后者有
+// 唯一索引兜底。要彻底封死需补一条迁移加 `uk_name`，本次未做（改动面更大，
+// 且既有数据需先确认无重名）。
+func (s *menuService) checkNameUnique(name string, excludeID uint) error {
+	if name == "" {
+		return nil
+	}
+	count, err := s.menuRepo.CountByName(name, excludeID)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return common.NewBizError("菜单标识已存在：" + name)
+	}
 	return nil
 }
 
@@ -119,6 +183,9 @@ func (s *menuService) Update(req *dto.UpdateMenuRequest, operatorID uint) error 
 	}
 
 	if req.Name != "" {
+		if err := s.checkNameUnique(req.Name, req.ID); err != nil {
+			return err
+		}
 		menu.Name = req.Name
 	}
 	if req.Path != nil {
@@ -140,6 +207,9 @@ func (s *menuService) Update(req *dto.UpdateMenuRequest, operatorID uint) error 
 		menu.Type = *req.Type
 	}
 	if req.Permission != nil {
+		if err := validatePermissionCode(*req.Permission); err != nil {
+			return err
+		}
 		menu.Permission = *req.Permission
 	}
 	if req.Sort != nil {
@@ -182,7 +252,9 @@ func (s *menuService) Delete(id uint) error {
 	}
 
 	if err := s.menuRepo.Delete(id); err != nil {
-		return err
+		// 仓储在菜单不存在时返回 gorm.ErrRecordNotFound → 转 404，
+		// 否则用户传了个不存在的 ID 会得到「服务器内部错误」
+		return common.NotFoundOrErr(err, "菜单不存在")
 	}
 	s.syncPolicies()
 	return nil

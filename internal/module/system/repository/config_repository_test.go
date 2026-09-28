@@ -301,3 +301,31 @@ func TestConfigRepositoryUpsertByKey(t *testing.T) {
 		}
 	})
 }
+
+// TestConfigRepositoryUpdateDuplicateKey 改名撞唯一索引必须被识别成业务错误。
+//
+// `uk_config_key` 是全局唯一索引。仓储若不把 MySQL 的 1062 包装成
+// common.ErrDuplicateKey，Service 就无从判断这是「键名重复」还是
+// 「数据库故障」，只能落到 500「服务器内部错误」——
+// 用户看到的是「改个名字服务器就崩了」，完全不知道是自己把键名改重了。
+// 同仓的 Create 早已这么包装，Update 这条路径此前漏了。
+func TestConfigRepositoryUpdateDuplicateKey(t *testing.T) {
+	repo := newConfigRepoWithDB(t)
+	seedConfig(t, repo, "站点名", "site.name", "A")
+	other := seedConfig(t, repo, "微信密钥", "pay.wechat_key", "B")
+
+	other.ConfigKey = "site.name"
+	err := repo.Update(other)
+	if !errors.Is(err, common.ErrDuplicateKey) {
+		t.Fatalf("改名撞唯一索引应返回 ErrDuplicateKey，实际: %v", err)
+	}
+
+	// 值也不应被写进去（整个 Updates 被拒绝）
+	got, err := repo.FindByKey("pay.wechat_key")
+	if err != nil {
+		t.Fatalf("回读失败: %v", err)
+	}
+	if got.Value != "B" {
+		t.Errorf("更新被拒后原记录不应变化，实际 value=%q", got.Value)
+	}
+}

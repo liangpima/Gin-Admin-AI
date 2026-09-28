@@ -80,3 +80,59 @@ func TestRoutePermissionConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// ---- 权限码白名单（菜单 permission 的写入校验依赖它）----
+
+// TestIsRegisteredPermission 登记过的权限码必须被识别，未登记的必须不被识别。
+//
+// 这是「菜单 permission 写入前按白名单校验」的基础设施（见 menu_service
+// 的 validatePermissionCode）。若这里退化成「恒返回 true」，白名单校验
+// 就形同虚设；若退化成「恒返回 false」，所有正常的菜单保存都会失败。
+func TestIsRegisteredPermission(t *testing.T) {
+	RegisterPermission("GET", "/api/v1/_test_perm_whitelist", "test:perm:whitelist")
+
+	if !IsRegisteredPermission("test:perm:whitelist") {
+		t.Error("已登记的权限码应被识别")
+	}
+	if IsRegisteredPermission("test:perm:not-registered") {
+		t.Error("未登记的权限码不应被识别")
+	}
+}
+
+// TestIsRegisteredPermissionRejectsWildcard 通配符 `*` 绝不能被识别为合法权限码。
+//
+// 这是整个 C1 修复的核心：`*` 会被 SyncPoliciesFromRoleMenus 编译成
+// Casbin 策略 `{roleCode, default, *, *}`，而 model.conf 的 matcher 对
+// `p.obj == "*"` 直接放行 —— 拿到它等于拿到全接口通行证，
+// 且会让 roleService 的 OperatorHoldsPermissions 收敛模型整体失效。
+// 因此它必须**永远**不在白名单里，哪怕有人真的注册了这么一条路由。
+func TestIsRegisteredPermissionRejectsWildcard(t *testing.T) {
+	if IsRegisteredPermission("*") {
+		t.Fatal("通配符 * 必须被判定为非法权限码")
+	}
+}
+
+// TestRegisteredPermissionCount 计数应随登记增长，且空权限码不计入。
+//
+// 空权限码表示「仅要求登录态」，不是可授权的权限码，计入会让计数虚高，
+// 也会让「白名单里有没有这一条」的语义变得含糊。
+func TestRegisteredPermissionCount(t *testing.T) {
+	before := RegisteredPermissionCount()
+
+	RegisterPermission("GET", "/api/v1/_test_count_a", "test:count:a")
+	if got := RegisteredPermissionCount(); got != before+1 {
+		t.Errorf("登记一个新权限码后计数应 +1，实际 %d → %d", before, got)
+	}
+
+	// 空权限码不计入集合
+	RegisterPermission("GET", "/api/v1/_test_count_empty", "")
+	if got := RegisteredPermissionCount(); got != before+1 {
+		t.Errorf("空权限码不应计入计数，实际 %d → %d", before+1, got)
+	}
+
+	// 重复登记同一权限码不重复计数
+	RegisterPermission("POST", "/api/v1/_test_count_a2", "test:count:a")
+	if got := RegisteredPermissionCount(); got != before+1 {
+		t.Errorf("重复的权限码不应重复计数，实际 %d → %d", before+1, got)
+	}
+}

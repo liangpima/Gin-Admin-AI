@@ -175,7 +175,11 @@ func (ctl *PaymentController) FindList(c *gin.Context) {
 			status = -1
 		}
 	}
-	page, pageSize := common.GetPageInfo(c)
+	page, pageSize, err := common.GetPageInfo(c)
+	if err != nil {
+		common.Error(c, common.CodeBadRequest, err.Error())
+		return
+	}
 	tenantID := common.GetTenantID(c)
 
 	list, total, err := ctl.paymentService.FindList(tenantID, subject, int8(status), channel, page, pageSize)

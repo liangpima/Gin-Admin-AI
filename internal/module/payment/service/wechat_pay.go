@@ -43,6 +43,15 @@ type WechatPayConfig struct {
 type WechatPayGateway struct {
 	config WechatPayConfig
 	client *httpx.Client
+
+	// fetchCerts 拉取平台证书。为 nil 时走真实出网（fetchPlatformPublicKeys）。
+	//
+	// 留这个接缝**不是**为了在单测里 mock 掉网络层，而是因为「未知 serial 的
+	// 限速与单飞」这段逻辑的全部价值就在「到底有没有出网」上 ——
+	// 不能观察出网次数，就等于没测到它（与 middleware 那次的教训同源：
+	// 接线类缺陷只有真请求或真实调用计数能发现）。
+	// 生产路径永远为 nil，行为与没有它时完全一致。
+	fetchCerts func() (map[string]*rsa.PublicKey, error)
 }
 
 func NewWechatPayGateway(cfg WechatPayConfig) *WechatPayGateway {
@@ -275,12 +284,101 @@ var (
 // certCacheTTL 平台证书缓存时长。微信平台证书轮换周期远长于此，10 分钟是安全与性能的折中
 const certCacheTTL = 10 * time.Minute
 
+// certFetchTimeout 单次拉取平台证书的出网上限。
+//
+// 不用裸的 context.Background()：这条路径由**外部请求**触发，
+// 没有上限就意味着一个卡住的出网连接能一直占着 goroutine。
+const certFetchTimeout = 10 * time.Second
+
+// certUnknownRefetchInterval 「未知 serial」触发的重新拉取的最小间隔。
+//
+// 为什么需要它：待验签的 serial 直接来自请求头 `Wechatpay-Serial`，
+// 而支付回调端点**不需要鉴权**（渠道侧发起、靠验签自证）。
+// 若「缓存里没有这个 serial」就无条件重新拉取，匿名调用方只要每次换一个
+// 随机 serial，就能让每个请求换来一次带签名的出网调用 —— 既放大出网/CPU，
+// 也可能触发微信侧的频率限制，反过来影响**正常**回调的验签。
+//
+// 30 秒是「证书轮换能被及时发现」与「出网频率可控」之间的折中：
+// 轮换后新 serial 最多晚 30 秒被认出来，而期间的续期由渠道重试覆盖
+// （微信回调会重试多次），不会丢单。
+const certUnknownRefetchInterval = 30 * time.Second
+
+// unknownSerialThrottle 固定间隔限速器：把「因未知 serial 而出网」限制成
+// 全局每 interval 一次（不是每 serial 一次 —— 那样攻击者换 serial 就能绕过）。
+//
+// 做成带 `now` 注入的小类型而不是直接操作包级时间变量，是为了能单测：
+// 真实实现用 time.Now，用例用可控时钟，不依赖 sleep（见 wechat_pay_test.go）。
+type unknownSerialThrottle struct {
+	mu       sync.Mutex
+	last     time.Time
+	interval time.Duration
+	now      func() time.Time
+}
+
+// allow 尝试占用一次出网额度，返回是否获准。
+func (t *unknownSerialThrottle) allow() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	nowFn := t.now
+	if nowFn == nil {
+		nowFn = time.Now
+	}
+	now := nowFn()
+	if !t.last.IsZero() && now.Sub(t.last) < t.interval {
+		return false
+	}
+	t.last = now
+	return true
+}
+
+// certUnknownThrottle 进程级的未知 serial 限速器。
+// 单副本部署下这是准确的上限；多副本时每个副本各自限速（仍远优于不限速）。
+var certUnknownThrottle = &unknownSerialThrottle{interval: certUnknownRefetchInterval, now: time.Now}
+
+// certCacheFresh 缓存是否仍在有效期内。
+func certCacheFresh() bool {
+	certCacheMu.RLock()
+	defer certCacheMu.RUnlock()
+	return !certCacheTime.IsZero() && time.Since(certCacheTime) <= certCacheTTL
+}
+
 func (g *WechatPayGateway) getPlatformPublicKey(serial string) (*rsa.PublicKey, error) {
 	if pub := cachedPlatformPublicKey(serial); pub != nil {
 		return pub, nil
 	}
 
-	keys, err := g.fetchPlatformPublicKeys()
+	// 单飞：并发回调同时遇到缓存未命中时，只让一个真正出网，其余等它。
+	// 没有这层时，N 个并发请求就是 N 次带签名的 HTTPS 往返。
+	certFetchMu.Lock()
+	defer certFetchMu.Unlock()
+
+	// 双检：等锁期间可能已经有人刷新过缓存了
+	if pub := cachedPlatformPublicKey(serial); pub != nil {
+		return pub, nil
+	}
+
+	// 走到这里有两种可能，处置方式不同：
+	//   · 缓存**已过期** → 正常的刷新时机，不限速；
+	//   · 缓存**仍新鲜**但没这个 serial → 它大概率是伪造的（serial 来自
+	//     未鉴权的请求头）。但仍要放行一次重新拉取，因为证书轮换后确实会
+	//     出现「缓存里没有」的新 serial；只是必须限速。
+	//
+	// ⚠️ 限速判断必须放在**锁内、双检之后**：
+	//   若放在锁外，一次过期刷新之后所有排队等锁的请求都会各自再拉一遍 ——
+	//   单飞就白做了（N 个并发请求 = N 次串行的出网调用）。
+	//   放在这里时，第二个及以后的请求看到的是刚刷新好的新鲜缓存，
+	//   于是被限速拦下，只产生 1 次出网。
+	if certCacheFresh() && !certUnknownThrottle.allow() {
+		return nil, fmt.Errorf(
+			"wechatpay platform certificate with serial %q not found (refetch throttled)", serial)
+	}
+
+	fetch := g.fetchCerts
+	if fetch == nil {
+		fetch = g.fetchPlatformPublicKeys
+	}
+	keys, err := fetch()
 	if err != nil {
 		// 拉取失败时退回旧缓存：宁可用可能过期的证书，也不要让回调整体中断
 		if pub := cachedPlatformPublicKey(serial, true); pub != nil {
@@ -301,6 +399,12 @@ func (g *WechatPayGateway) getPlatformPublicKey(serial string) (*rsa.PublicKey, 
 	return pub, nil
 }
 
+// certFetchMu 让「拉取平台证书」同一时刻只有一个在飞（单飞 / single-flight）。
+//
+// 注意它必须在 certCacheMu **之外**持有：拉取期间其它 goroutine 仍要能读缓存
+// （命中时直接返回，不受慢出网阻塞）。
+var certFetchMu sync.Mutex
+
 // cachedPlatformPublicKey 读取缓存的平台公钥。
 // allowStale 为 true 时忽略过期判断（用于拉取失败时降级）
 func cachedPlatformPublicKey(serial string, allowStale ...bool) *rsa.PublicKey {
@@ -317,7 +421,9 @@ func cachedPlatformPublicKey(serial string, allowStale ...bool) *rsa.PublicKey {
 func (g *WechatPayGateway) fetchPlatformPublicKeys() (map[string]*rsa.PublicKey, error) {
 	// Fetch platform certificates from WeChat Pay API
 	certsURL := "https://api.mch.weixin.qq.com/v3/certificates"
-	resp, err := g.doRequest(context.Background(), "GET", certsURL, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), certFetchTimeout)
+	defer cancel()
+	resp, err := g.doRequest(ctx, "GET", certsURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("fetch platform certificates failed: %w", err)
 	}
@@ -502,6 +608,18 @@ func parsePrivateKey(key string) (*rsa.PrivateKey, error) {
 	return jwt.ParseRSAPrivateKeyFromPEM([]byte("-----BEGIN PRIVATE KEY-----\n" + key + "\n-----END PRIVATE KEY-----"))
 }
 
+// 微信 V3 退款单状态。
+//
+// 关键前提：微信 V3 的退款接口在**业务失败时同样返回 HTTP 200**，
+// 真正的结果在响应体的 status 字段里。只看 HTTP 状态码会把
+// ABNORMAL（余额不足、账户异常等）与 PROCESSING 误判成「退款成功」。
+const (
+	wechatRefundSuccess    = "SUCCESS"
+	wechatRefundProcessing = "PROCESSING"
+	wechatRefundClosed     = "CLOSED"
+	wechatRefundAbnormal   = "ABNORMAL"
+)
+
 // WechatRefund applies refund via WeChat Pay V3 API
 func (g *WechatPayGateway) Refund(ctx context.Context, orderNo, refundNo string, amount, refundAmount int64) error {
 	body := map[string]interface{}{
@@ -515,9 +633,41 @@ func (g *WechatPayGateway) Refund(ctx context.Context, orderNo, refundNo string,
 		},
 	}
 
-	bodyBytes, _ := json.Marshal(body)
-	_, err := g.doRequest(ctx, "POST", "https://api.mch.weixin.qq.com/v3/refund/domestic/refunds", bodyBytes)
-	return err
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("序列化退款请求失败: %w", err)
+	}
+
+	resp, err := g.doRequest(ctx, "POST", "https://api.mch.weixin.qq.com/v3/refund/domestic/refunds", bodyBytes)
+	if err != nil {
+		return err
+	}
+
+	// 必须解析响应体：HTTP 200 只代表「请求被受理」，不代表退款成功。
+	// 早前这里直接丢弃响应体（`_, err := g.doRequest(...)`），于是
+	// ABNORMAL / PROCESSING 都被当成成功 → 订单落定「已退款」而钱没退出去，
+	// 且状态机锁死后连重试都被 validateRefund 拒绝，只能人工改库。
+	var result struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return fmt.Errorf("解析退款响应失败: %w", err)
+	}
+
+	switch result.Status {
+	case wechatRefundSuccess:
+		return nil
+	case wechatRefundProcessing:
+		// 已受理、结果未定。不能当失败处理（回滚退款权会导致重复退款），
+		// 也不能当成功处理（钱可能还没退）。交由调用方保留「退款中」。
+		return fmt.Errorf("%w（微信退款单 %s）", ErrRefundPending, refundNo)
+	case wechatRefundClosed, wechatRefundAbnormal:
+		// 确定失败，钱未退出，回滚退款权让用户重试是安全的
+		return fmt.Errorf("微信退款失败，渠道状态 %s（退款单 %s）", result.Status, refundNo)
+	default:
+		// 未知状态一律按「未确认成功」处理，同样不允许回滚退款权
+		return fmt.Errorf("%w（微信返回未知状态 %q，退款单 %s）", ErrRefundPending, result.Status, refundNo)
+	}
 }
 
 // WechatQueryRefund queries refund status

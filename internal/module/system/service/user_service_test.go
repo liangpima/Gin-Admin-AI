@@ -26,7 +26,7 @@ func (s *stubRoleService) Create(req *dto.CreateRoleRequest, operatorID, tenantI
 func (s *stubRoleService) Update(req *dto.UpdateRoleRequest, operatorID, tenantID uint) error {
 	return nil
 }
-func (s *stubRoleService) Delete(tenantID, id uint) error { return nil }
+func (s *stubRoleService) Delete(tenantID, operatorID, id uint) error { return nil }
 func (s *stubRoleService) FindByID(tenantID, id uint) (interface{}, error) {
 	return nil, nil
 }
@@ -37,8 +37,10 @@ func (s *stubRoleService) FindByIDs(tenantID uint, ids []uint) ([]model.SysRole,
 func (s *stubRoleService) FindList(tenantID uint, req *dto.RoleListRequest) ([]interface{}, int64, error) {
 	return nil, 0, nil
 }
-func (s *stubRoleService) UpdateStatus(tenantID uint, req *dto.StatusRequest) error { return nil }
-func (s *stubRoleService) FindAll(tenantID uint) ([]model.SysRole, error)          { return nil, nil }
+func (s *stubRoleService) UpdateStatus(tenantID, operatorID uint, req *dto.StatusRequest) error {
+	return nil
+}
+func (s *stubRoleService) FindAll(tenantID uint) ([]model.SysRole, error) { return nil, nil }
 
 // EnsureRolesGrantable 在这些用例里不做拦截：本文件的重点是租户归属校验，
 // 授权收敛的判定逻辑由 role_service_test.go 覆盖。

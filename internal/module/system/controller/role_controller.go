@@ -82,8 +82,9 @@ func (ctl *RoleController) Delete(c *gin.Context) {
 		return
 	}
 
+	operatorID := common.GetCurrentUserID(c)
 	tenantID := common.GetTenantID(c)
-	if err := ctl.roleService.Delete(tenantID, id); err != nil {
+	if err := ctl.roleService.Delete(tenantID, operatorID, id); err != nil {
 		common.FailWith(c, err)
 		return
 	}
@@ -157,8 +158,9 @@ func (ctl *RoleController) UpdateStatus(c *gin.Context) {
 		return
 	}
 
+	operatorID := common.GetCurrentUserID(c)
 	tenantID := common.GetTenantID(c)
-	if err := ctl.roleService.UpdateStatus(tenantID, &req); err != nil {
+	if err := ctl.roleService.UpdateStatus(tenantID, operatorID, &req); err != nil {
 		common.FailWith(c, err)
 		return
 	}

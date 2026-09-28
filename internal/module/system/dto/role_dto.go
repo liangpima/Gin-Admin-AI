@@ -2,13 +2,16 @@ package dto
 
 import "go-admin/internal/common"
 
+// MenuIds 的长度上限：见 user_dto.go 中「ID 数组类字段的长度上限」的说明。
+// 上限取 500（当前种子菜单 69 条），既容纳「全选授权」这类合法请求，
+// 又挡住「一个请求塞进数百万 ID」的放大攻击。
 type CreateRoleRequest struct {
 	Name      string `json:"name" binding:"required,min=2,max=64"`
 	Code      string `json:"code" binding:"required,min=2,max=64"`
 	Sort      int    `json:"sort"`
 	Status    int8   `json:"status" binding:"oneof=0 1"`
 	DataScope int8   `json:"dataScope" binding:"oneof=1 2 3 4 5"`
-	MenuIds   []uint `json:"menuIds"`
+	MenuIds   []uint `json:"menuIds" binding:"omitempty,max=500"`
 	Remark    string `json:"remark" binding:"max=500"`
 }
 
@@ -27,7 +30,7 @@ type UpdateRoleRequest struct {
 	Sort      *int    `json:"sort"`
 	Status    *int8   `json:"status" binding:"omitempty,oneof=0 1"`
 	DataScope *int8   `json:"dataScope" binding:"omitempty,oneof=1 2 3 4 5"`
-	MenuIds   []uint  `json:"menuIds"`
+	MenuIds   []uint  `json:"menuIds" binding:"omitempty,max=500"`
 	Remark    *string `json:"remark" binding:"omitempty,max=500"`
 }
 

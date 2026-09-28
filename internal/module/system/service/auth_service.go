@@ -126,6 +126,20 @@ func (s *authService) authenticate(req *dto.LoginRequest) (*vo.LoginResponse, er
 		return nil, common.NewBizError("用户已被禁用")
 	}
 
+	// 清掉上一次吊销留下的用户级标记。
+	//
+	// 该标记的语义是「此刻之前签发的 token 全部作废」，而不是「该账号永久不可用」，
+	// 它本身不区分具体 token。若不清除，改密/重置密码后重新登录拿到的**新** token
+	// 也会被 Auth 拒绝 —— 表现为「密码改完就登不进去」，要等标记自然过期才恢复。
+	//
+	// 必须放在密码与状态校验**之后**：禁用、已删除的账号走不到这里，
+	// 因此无法借登录来清除自己的吊销标记（否则停用就能被自己绕过）。
+	if err := cache.Del(context.Background(), cache.UserTokenRevokedKey(user.ID)); err != nil {
+		// 清除失败只影响「刚签发的 token 能否立即生效」，不应让登录整体失败，
+		// 但要留下排查线索 —— 否则用户会看到「登录成功却立刻被踢回登录页」。
+		logger.Log.Warnf("[auth] 清除用户级 token 吊销标记失败: userID=%d err=%v", user.ID, err)
+	}
+
 	accessToken, err := auth.GenerateAccessToken(user.ID, user.Username, user.TenantID, user.DeptID)
 	if err != nil {
 		return nil, err
@@ -178,7 +192,7 @@ func (s *authService) RefreshToken(req *dto.RefreshTokenRequest) (*vo.LoginRespo
 	//
 	// 查询失败必须拒绝（fail-closed）：Redis 抖动时把「查不了」当成「未吊销」，
 	// 会让已停用账号继续换发新 access token。
-	revoked, revokedErr := cache.Exists(ctx, fmt.Sprintf("user:token_revoked:%d", claims.UserID))
+	revoked, revokedErr := cache.Exists(ctx, cache.UserTokenRevokedKey(claims.UserID))
 	if revokedErr != nil {
 		return nil, fmt.Errorf("查询token吊销状态失败: %w", revokedErr)
 	}

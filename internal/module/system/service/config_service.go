@@ -116,7 +116,14 @@ func (s *configService) Update(id uint, name, key, value string, typ int8, opera
 		config.Value = value
 	}
 
-	return s.configRepo.Update(config)
+	if err := s.configRepo.Update(config); err != nil {
+		// 改名撞 uk_config_key 时给出可读提示，而不是落到 500
+		if errors.Is(err, common.ErrDuplicateKey) {
+			return common.NewBizError("配置项已存在，请更换配置键名")
+		}
+		return err
+	}
+	return nil
 }
 
 // isMaskedSensitiveSubmit 判断本次提交是否只是「把打码占位符原样交回来」。
@@ -133,7 +140,8 @@ func isMaskedSensitiveSubmit(value, submittedKey, storedKey string) bool {
 }
 
 func (s *configService) Delete(id uint) error {
-	return s.configRepo.Delete(id)
+	// 仓储在记录不存在时返回 gorm.ErrRecordNotFound → 转成 404 而不是 500
+	return common.NotFoundOrErr(s.configRepo.Delete(id), "配置不存在")
 }
 
 func (s *configService) FindByID(id uint) (interface{}, error) {
@@ -187,26 +195,33 @@ func (s *configService) FindByPrefixRaw(prefix string) ([]interface{}, error) {
 	return result, nil
 }
 
+// BatchSave 批量保存配置。
+//
+// 整批必须一次提交：逐条 UpsertByKey 各自开事务时，中途失败会留下
+// 「前几项已生效、后面几项没写」的混合状态。对支付/OSS 这类成组配置尤其危险 ——
+// 密钥写了一半的现象是「签名失败」「上传失败」，完全指不到是配置没存全。
 func (s *configService) BatchSave(prefix string, items []ConfigItem, operatorID uint) error {
-	for _, item := range items {
-		// 前端原样回传打码占位符，说明该项未被修改，跳过以保留原值
-		if item.Value == maskedValue {
-			continue
-		}
+	return s.configRepo.Transaction(func(txRepo repository.ConfigRepository) error {
+		for _, item := range items {
+			// 前端原样回传打码占位符，说明该项未被修改，跳过以保留原值
+			if item.Value == maskedValue {
+				continue
+			}
 
-		config := &model.SysConfig{
-			BaseModel: common.BaseModel{
-				UpdateBy: operatorID,
-			},
-			ConfigKey: prefix + item.Key,
-			Value:     item.Value,
-			Type:      1,
+			config := &model.SysConfig{
+				BaseModel: common.BaseModel{
+					UpdateBy: operatorID,
+				},
+				ConfigKey: prefix + item.Key,
+				Value:     item.Value,
+				Type:      1,
+			}
+			if err := txRepo.UpsertByKey(config); err != nil {
+				return err
+			}
 		}
-		if err := s.configRepo.UpsertByKey(config); err != nil {
-			return err
-		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // LoadOSSConfig 从 sys_config 表读取 oss.* 配置，返回 key-value map。

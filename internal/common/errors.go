@@ -6,7 +6,11 @@ const (
 	CodeUnauthorized  = 401
 	CodeForbidden     = 403
 	CodeNotFound      = 404
-	CodeInternalError = 500
+	// CodePayloadTooLarge 请求体超过 server.max_body_size。
+	// 与 CodeFileTooLarge(3001) 区分：那个是「单个文件超出 upload.max_size」，
+	// 这个是「整个请求体超出传输层上限」，来源不同、用户可采取的动作也不同。
+	CodePayloadTooLarge = 413
+	CodeInternalError   = 500
 
 	CodeUserNotFound      = 1001
 	CodeUserDisabled      = 1002
@@ -32,6 +36,7 @@ var ErrorCodeMessages = map[int]string{
 	CodeUnauthorized:       "未登录或Token已过期",
 	CodeForbidden:          "没有权限",
 	CodeNotFound:           "资源不存在",
+	CodePayloadTooLarge:    "请求体过大",
 	CodeInternalError:      "服务器内部错误",
 	CodeUserNotFound:       "用户不存在",
 	CodeUserDisabled:       "用户已被禁用",

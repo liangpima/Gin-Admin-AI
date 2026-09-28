@@ -10,6 +10,7 @@ import (
 
 	"go-admin/internal/cache"
 	"go-admin/internal/common"
+	"go-admin/internal/database"
 	"go-admin/internal/logger"
 	"go-admin/internal/module/member/dto"
 	"go-admin/internal/module/member/model"
@@ -97,7 +98,7 @@ func (s *memberService) normalizeLevelID(tenantID, levelID uint) (uint, error) {
 // 租户隔离无法靠 TenantScope 完成，只能在写入前按租户查出被引用方并比对数量 ——
 // 这正是 AGENTS.md 规则 7 的要求（用户模块已照此实现，会员模块此前漏了）。
 func (s *memberService) normalizeTagIDs(tenantID uint, tagIDs []uint) ([]uint, error) {
-	unique := dedupeNonZeroIDs(tagIDs)
+	unique := common.UniqueNonZeroIDs(tagIDs)
 	if len(unique) == 0 {
 		return nil, nil
 	}
@@ -112,25 +113,24 @@ func (s *memberService) normalizeTagIDs(tenantID uint, tagIDs []uint) ([]uint, e
 	return unique, nil
 }
 
-// dedupeNonZeroIDs 去重并剔除 0。
-// 0 不是合法主键，通常是前端下拉框未选择时的默认值，不应写进关联表。
-func dedupeNonZeroIDs(ids []uint) []uint {
-	if len(ids) == 0 {
-		return nil
+// dedupeNonZeroIDs 已上移到 common.UniqueNonZeroIDs（system 模块另有一份，一并收敛）。
+
+// phoneConflictOrErr 把仓储返回的**唯一键冲突**翻译成业务错误。
+//
+// 为什么需要它：手机号查重是「先查再写」，两步之间并发请求可以插进来
+// （另一人同时建会员或改号），所以预检查一定会漏 —— 唯一索引才是最终裁判。
+// 但索引返回的是驱动原始错误（MySQL 1062 / SQLite 2067），直接交给
+// `common.FailWith` 会被归一成 500「服务器内部错误」，
+// 用户看到的提示与真实原因（手机号冲突）毫无关系。
+//
+// ⚠️ **只翻译唯一键冲突，其余错误原样返回**：把 DB 故障也说成「手机号已注册」
+// 会让监控失去按 5xx 告警的能力（违反规则 5）。判定用
+// `database.IsDuplicateKey`（按错误码，不匹配错误文本）。
+func phoneConflictOrErr(err error) error {
+	if database.IsDuplicateKey(err) {
+		return common.NewBizError("手机号已注册")
 	}
-	seen := make(map[uint]struct{}, len(ids))
-	out := make([]uint, 0, len(ids))
-	for _, id := range ids {
-		if id == 0 {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, id)
-	}
-	return out
+	return err
 }
 
 func (s *memberService) Create(req *dto.CreateMemberRequest, operatorID, tenantID uint) error {
@@ -138,6 +138,11 @@ func (s *memberService) Create(req *dto.CreateMemberRequest, operatorID, tenantI
 	digits := s.memberNoDigits()
 
 	if req.Phone != "" {
+		// 查重范围是**租户内**，与 pay_member 的
+		// `uk_tenant_phone`(tenant_id, phone) 索引范围一致（见 model.Member 的说明）。
+		// 两边范围必须一致：不一致时会出现「校验通过却插入报 1062」，
+		// 对外表现为 500「服务器内部错误」，与真实原因毫无关系。
+		//
 		// 判定依据只能是 err，且**不能吞掉它**：
 		//   · FindByPhone 无论查没查到都返回非 nil 指针（&member, err），
 		//     所以 `existing, _ := ...; if existing != nil` 恒为真；
@@ -201,7 +206,8 @@ func (s *memberService) Create(req *dto.CreateMemberRequest, operatorID, tenantI
 	}
 
 	if err := s.memberRepo.Create(member); err != nil {
-		return err
+		// 预检查与写入之间有并发窗口，唯一索引是最终裁判 —— 见 phoneConflictOrErr
+		return phoneConflictOrErr(err)
 	}
 
 	if len(tagIDs) > 0 {
@@ -218,7 +224,9 @@ func (s *memberService) Create(req *dto.CreateMemberRequest, operatorID, tenantI
 func (s *memberService) Update(req *dto.UpdateMemberRequest, operatorID, tenantID uint) error {
 	member, err := s.memberRepo.FindByID(tenantID, req.ID)
 	if err != nil {
-		return common.NewNotFoundError("会员不存在")
+		// 只把「记录不存在」转成 404：无条件转 404 会把数据库故障
+		// 说成「会员不存在」，监控按 5xx 告警的能力随之失效（违反规则 5）
+		return common.NotFoundOrErr(err, "会员不存在")
 	}
 
 	// 同 Create：关联归属先校验再落库。
@@ -252,7 +260,27 @@ func (s *memberService) Update(req *dto.UpdateMemberRequest, operatorID, tenantI
 	if req.Avatar != "" {
 		member.Avatar = req.Avatar
 	}
-	if req.Phone != "" {
+	if req.Phone != "" && req.Phone != member.Phone {
+		// 改手机号必须**显式查重**（排除自己）。
+		//
+		// 不查的后果：一路撞到唯一索引 → 1062 → common.FailWith 归一成
+		// 500「服务器内部错误」，提示与真实原因毫无关系，用户只会以为系统坏了。
+		// 与 Create 的查重同一套判定（依据只能是 err，不能吞）。
+		//
+		// 查重范围是**租户内**，与 uk_tenant_phone(tenant_id, phone) 一致：
+		// 两个租户可以各自拥有同一手机号。别把这里改成「全平台唯一」——
+		// 那是 H13 之前的设计，已按产品口径改掉。
+		existing, err := s.memberRepo.FindByPhone(tenantID, req.Phone)
+		switch {
+		case err == nil:
+			if existing != nil && existing.ID > 0 && existing.ID != member.ID {
+				return common.NewBizError("手机号已注册")
+			}
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			// 未被占用，可以继续
+		default:
+			return err
+		}
 		member.Phone = req.Phone
 	}
 	if req.Gender != nil {
@@ -278,7 +306,8 @@ func (s *memberService) Update(req *dto.UpdateMemberRequest, operatorID, tenantI
 	}
 
 	if err := s.memberRepo.Update(member); err != nil {
-		return err
+		// 预检查与写入之间有并发窗口，唯一索引是最终裁判 —— 见 phoneConflictOrErr
+		return phoneConflictOrErr(err)
 	}
 
 	if req.TagIds != nil {
@@ -291,7 +320,9 @@ func (s *memberService) Update(req *dto.UpdateMemberRequest, operatorID, tenantI
 }
 
 func (s *memberService) Delete(tenantID, id uint) error {
-	return s.memberRepo.Delete(tenantID, id)
+	// 仓储在「不存在或不属于本租户」时返回 gorm.ErrRecordNotFound，
+	// 不转换就会被当成系统错误回 500（与 post/tag 的 Delete 保持一致）。
+	return common.NotFoundOrErr(s.memberRepo.Delete(tenantID, id), "会员不存在")
 }
 
 func (s *memberService) FindByID(tenantID, id uint) (*model.Member, error) {
@@ -323,17 +354,61 @@ func (s *memberService) FindList(tenantID uint, req *dto.MemberListRequest) ([]i
 		Tags []model.MemberTag `json:"tags"`
 	}
 
+	// 标签关联改成两次批量查询，而不是「每行各查两次」。
+	//
+	// 原实现是循环里对每个会员查一次关联表 + 一次标签表，pageSize 上限 100
+	// 时一次列表请求最多 201 次查询 —— 页码越靠后越慢，且随页大小线性放大。
+	// 现在无论多少行都只有 2 次查询。
+	//
+	// 出错处理刻意保持「记日志 + 留空标签」而不是让整个列表失败：
+	// 标签只是列表的附属信息，为它牺牲整页数据不划算（会员列表是核心页面）。
+	// 但**不能静默**—— 此前标签查询因 SQL 引用不存在的列而恒定失败，
+	// 错误被 `_` 吞掉，表现为「会员列表标签恒为空」且长期无人察觉。
+	memberIDs := make([]uint, len(members))
+	for i, m := range members {
+		memberIDs[i] = m.ID
+	}
+
+	tagIDsByMember, err := s.memberRepo.FindTagIDsByMemberIDs(tenantID, memberIDs)
+	if err != nil {
+		logger.Log.Warnf("批量查询会员标签关联失败, tenant=%d, members=%d: %v", tenantID, len(memberIDs), err)
+		tagIDsByMember = map[uint][]uint{}
+	}
+
+	// 把整页用到的 tagID 去重后一次性取回详情，再在内存里做映射，
+	// 避免同一标签被多个会员共用时重复查询。
+	allTagIDs := make([]uint, 0, len(memberIDs))
+	seen := make(map[uint]struct{}, len(memberIDs))
+	for _, tagIDs := range tagIDsByMember {
+		for _, id := range tagIDs {
+			if _, dup := seen[id]; dup {
+				continue
+			}
+			seen[id] = struct{}{}
+			allTagIDs = append(allTagIDs, id)
+		}
+	}
+
+	tagByID := make(map[uint]model.MemberTag, len(allTagIDs))
+	if len(allTagIDs) > 0 {
+		tags, err := s.tagRepo.FindByIDs(tenantID, allTagIDs)
+		if err != nil {
+			logger.Log.Warnf("批量查询标签详情失败, tenant=%d, tags=%d: %v", tenantID, len(allTagIDs), err)
+		}
+		for _, tag := range tags {
+			tagByID[tag.ID] = tag
+		}
+	}
+
 	result := make([]interface{}, len(members))
 	for i, m := range members {
-		// 不再用 `_` 丢弃错误：标签查询此前因 SQL 引用不存在的列而恒定失败，
-		// 错误被吞掉，表现为「会员列表标签恒为空」且长期无人察觉。
-		tagIDs, err := s.memberRepo.FindTagIDsByMemberID(tenantID, m.ID)
-		if err != nil {
-			logger.Log.Warnf("查询会员标签关联失败, memberID=%d: %v", m.ID, err)
-		}
-		tags, err := s.tagRepo.FindByIDs(tenantID, tagIDs)
-		if err != nil {
-			logger.Log.Warnf("查询标签详情失败, memberID=%d: %v", m.ID, err)
+		tags := make([]model.MemberTag, 0, len(tagIDsByMember[m.ID]))
+		for _, id := range tagIDsByMember[m.ID] {
+			// 标签被删除（或跨租户）时详情查不到，跳过即可 ——
+			// 直接追加零值会渲染出一个 ID 为 0 的空标签。
+			if tag, ok := tagByID[id]; ok {
+				tags = append(tags, tag)
+			}
 		}
 		result[i] = memberWithTag{Member: m, Tags: tags}
 	}
@@ -341,7 +416,9 @@ func (s *memberService) FindList(tenantID uint, req *dto.MemberListRequest) ([]i
 }
 
 func (s *memberService) UpdateStatus(tenantID uint, req *dto.UpdateMemberStatusRequest) error {
-	return s.memberRepo.UpdateStatus(tenantID, req.ID, req.Status)
+	// 仓储会先确认目标属于本租户（不属于则返回 ErrRecordNotFound），
+	// 这里把「不存在」转成 404，DB 故障仍走 500
+	return common.NotFoundOrErr(s.memberRepo.UpdateStatus(tenantID, req.ID, req.Status), "会员不存在")
 }
 
 func (s *memberService) generateMemberNo(digits int) (string, error) {
@@ -353,9 +430,15 @@ func (s *memberService) generateMemberNo(digits int) (string, error) {
 	key := "member:no"
 	format := fmt.Sprintf("%%0%dd", digits)
 
-	// 使用 Redis INCR 原子递增，避免并发重复
-	seq, err := cache.Incr(ctx, key)
-	if err != nil {
+	// 先确认计数器是否已初始化，再取号。
+	//
+	// 为什么不能沿用「先 INCR，看到 seq==1 再对齐」：并发首次发号时，
+	// 多个调用者分别拿到 seq = 1、2、3…，而只有 seq==1 的那个走对齐分支，
+	// 其余直接按 2、3 发号 —— 发出去的正是 000002 这种与历史编号冲突的畸形值。
+	// 判定「是否已初始化」只能看键存不存在：INCR 的返回值区分不出
+	// 「计数器刚被创建」与「计数器恰好等于 2」，EXISTS 可以。
+	initialized, existsErr := cache.Exists(ctx, key)
+	if existsErr != nil {
 		// Redis 不可用时回退到数据库查询（有竞态风险，但可接受降级）。
 		// 数据库也查不到时必须让调用方知道 —— 用臆测的起始值发号，
 		// 撞上唯一索引只会变成一条难以理解的 500。
@@ -368,13 +451,7 @@ func (s *memberService) generateMemberNo(digits int) (string, error) {
 		return fmt.Sprintf(format, startNum), nil
 	}
 
-	// 首次初始化：如果序列为1，把计数器对齐到「刚发出的编号」。
-	//
-	// 对齐值必须是 startNum 而不是 startNum+1：计数器在 INCR 语义下表示
-	// 「上一次发出的编号」，所以下一次 INCR 恰好得到 startNum+1。
-	// 写成 startNum+1 会让编号凭空跳一位（100001 之后直接发 100003），
-	// 用户看到跳号会以为有会员数据丢失。
-	if seq == 1 {
+	if !initialized {
 		startNum, dbErr := s.memberNoFromDB(digits)
 		if dbErr != nil {
 			// 无法确认库内最大值时不能发号：可能与已有编号冲突
@@ -382,16 +459,41 @@ func (s *memberService) generateMemberNo(digits int) (string, error) {
 			return "", fmt.Errorf("生成会员编号失败: %w", dbErr)
 		}
 
-		if setErr := cache.Set(ctx, key, strconv.Itoa(startNum), 0); setErr != nil {
-			// 这个错误**不能吞**：对齐失败时 key 会停在 1，下一次 Incr 返回 2，
-			// 于是把 000002 这种与历史编号冲突的值发出去。
+		// SETNX 让「谁来初始化」有唯一赢家：
+		//   - 赢家把 startNum 直接发出去。计数器此时等于 startNum
+		//     （INCR 语义下表示「上一次发出的编号」），下次 INCR 恰好得 startNum+1。
+		//     对齐值写成 startNum+1 会让编号凭空跳一位（100001 之后直接发 100003），
+		//     用户看到跳号会以为有会员数据丢失。
+		//   - 输家说明已有并发调用者完成了初始化，落到下面走正常 INCR，
+		//     因此不会有两个请求发出同一个号。
+		won, setErr := cache.SetNX(ctx, key, strconv.Itoa(startNum), 0)
+		if setErr != nil {
+			// 这个错误**不能吞**：初始化失败时键状态未知，
+			// 下一次 INCR 可能从 1 开始，于是把 000002 这种与历史编号冲突的值发出去。
 			// 处理方式是删掉计数器，让下次调用重新走初始化分支；
 			// 本次返回的 startNum 本身是按库内最大值推导的，是正确的。
-			logger.Log.Errorf("[member] 会员编号计数器对齐失败: err=%v", setErr)
+			logger.Log.Errorf("[member] 会员编号计数器初始化失败: err=%v", setErr)
 			if delErr := cache.Del(ctx, key); delErr != nil {
 				logger.Log.Errorf("[member] 清理失效的编号计数器也失败，下次发号可能冲突: err=%v", delErr)
 			}
+			return fmt.Sprintf(format, startNum), nil
 		}
+		if won {
+			return fmt.Sprintf(format, startNum), nil
+		}
+	}
+
+	// 使用 Redis INCR 原子递增，避免并发重复
+	seq, err := cache.Incr(ctx, key)
+	if err != nil {
+		// 走到这里说明 EXISTS 时 Redis 还是好的，取号时却失败了。
+		// 与上面的降级同理：按库内最大值推导，宁可可能重复也不能不发号。
+		startNum, dbErr := s.memberNoFromDB(digits)
+		if dbErr != nil {
+			logger.Log.Errorf("[member] 取号失败且无法从数据库推导，放弃发号: err=%v", dbErr)
+			return "", fmt.Errorf("生成会员编号失败: %w", dbErr)
+		}
+		logger.Log.Warnf("[member] 会员编号计数器取号失败，降级为按库内最大值推导: err=%v", err)
 		return fmt.Sprintf(format, startNum), nil
 	}
 
@@ -422,7 +524,7 @@ func (s *memberService) memberNoFromDB(digits int) (int, error) {
 func (s *memberService) UpdateTags(tenantID uint, req *dto.UpdateMemberTagsRequest) error {
 	_, err := s.memberRepo.FindByID(tenantID, req.ID)
 	if err != nil {
-		return common.NewNotFoundError("会员不存在")
+		return common.NotFoundOrErr(err, "会员不存在")
 	}
 
 	// 与 Create/Update 一致：先校验标签归属再写关联表
@@ -437,7 +539,7 @@ func (s *memberService) UpdateTags(tenantID uint, req *dto.UpdateMemberTagsReque
 func (s *memberService) UpdateLastVisit(tenantID, id uint) error {
 	member, err := s.memberRepo.FindByID(tenantID, id)
 	if err != nil {
-		return common.NewNotFoundError("会员不存在")
+		return common.NotFoundOrErr(err, "会员不存在")
 	}
 	now := time.Now()
 	member.LastVisitTime = &now

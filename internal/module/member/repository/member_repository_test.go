@@ -1,7 +1,10 @@
 package repository
 
 import (
+	"errors"
 	"testing"
+
+	"gorm.io/gorm"
 
 	"go-admin/internal/common"
 	"go-admin/internal/module/member/model"
@@ -18,11 +21,22 @@ const (
 func newMemberRepoWithDB(t *testing.T) MemberRepository {
 	t.Helper()
 	// 先建库（会注入 database.DB），再构造仓储 —— 仓储在构造时捕获 database.DB
-	testsupport.NewDB(t, &model.Member{}, &model.MemberTagRel{}, &model.MemberTag{})
+	db := testsupport.NewDB(t, &model.Member{}, &model.MemberTagRel{}, &model.MemberTag{})
+
+	// 手机号是 (tenant_id, phone) 复合唯一，模型标签表达不出来（TenantID 在
+	// 嵌入结构体里），AutoMigrate 建不出它。测试里显式补上，让测试 schema 与
+	// sql/init.sql 一致 —— 否则「跨租户可用同一手机号」这条断言测的是空气。
+	if err := db.Exec(
+		"CREATE UNIQUE INDEX IF NOT EXISTS uk_tenant_phone ON pay_member (tenant_id, phone)",
+	).Error; err != nil {
+		t.Fatalf("补建手机号唯一索引失败: %v", err)
+	}
 	return NewMemberRepository()
 }
 
-// seedMemberForTest 建一个会员。phone/memberNo 的唯一索引是全局的，两租户用不同值。
+// seedMemberForTest 建一个会员。
+// 注意 phone 是**租户内**唯一（uk_tenant_phone）、member_no 是**全平台**唯一
+// （uk_member_no），两者范围不同，改测试数据时要分别考虑。
 func seedMemberForTest(t *testing.T, tenantID uint, phone, memberNo, nickname string) *model.Member {
 	t.Helper()
 	m := &model.Member{
@@ -36,6 +50,44 @@ func seedMemberForTest(t *testing.T, tenantID uint, phone, memberNo, nickname st
 		t.Fatalf("创建会员失败: %v", err)
 	}
 	return m
+}
+
+// TestMemberPhoneUniqueIsTenantScoped 手机号的唯一约束范围必须是「租户内」。
+//
+// 回归的是 H13：索引曾是全局的 `uk_phone(phone)`，而应用层查重
+// （FindByPhone(tenantID, ...)）按租户过滤 —— 两边范围不一致，表现为
+// 「租户 B 用租户 A 已注册的手机号建会员」时查重通过、INSERT 报 1062，
+// 对外是 500。
+//
+// 这条断言必须落在**仓储层 + 真实建表约束**上：Service 层的查重早就按租户做了，
+// 只有索引真的改了才能证明两者范围一致。若只在 Service 层断言，
+// 用桩仓储（或索引仍是全局的）时同样会通过。
+func TestMemberPhoneUniqueIsTenantScoped(t *testing.T) {
+	repo := newMemberRepoWithDB(t)
+	const shared = "13800009999"
+
+	seedMemberForTest(t, memberTenantA, shared, "000001", "甲租户")
+
+	if err := repo.Create(&model.Member{
+		TenantBaseModel: common.TenantBaseModel{TenantID: memberTenantB},
+		MemberNo:        "000002",
+		Phone:           shared,
+		Status:          1,
+	}); err != nil {
+		t.Fatalf("不同租户使用同一手机号应当允许，实际失败: %v", err)
+	}
+
+	// 反向对照：同一租户内重复必须被索引拦下。
+	// 没有这一条，上面那句断言在「唯一索引压根没建」时也会通过。
+	err := repo.Create(&model.Member{
+		TenantBaseModel: common.TenantBaseModel{TenantID: memberTenantA},
+		MemberNo:        "000003",
+		Phone:           shared,
+		Status:          1,
+	})
+	if err == nil {
+		t.Fatal("同一租户内手机号重复必须被唯一索引拒绝")
+	}
 }
 
 // TestMemberRepositoryTenantIsolation 会员数据的租户隔离。
@@ -71,7 +123,8 @@ func TestMemberRepositoryTenantIsolation(t *testing.T) {
 	})
 
 	t.Run("按手机号查询受租户过滤", func(t *testing.T) {
-		// 手机号唯一索引是全局的，但业务上查询入口都在租户上下文里
+		// 手机号是租户内唯一（uk_tenant_phone），但跨租户按手机号仍然查不到 ——
+		// 过滤来自 TenantScope，与索引范围无关，两者都得对
 		if _, err := repo.FindByPhone(memberTenantA, "13800000022"); err == nil {
 			t.Error("跨租户按手机号应查不到")
 		}
@@ -82,10 +135,18 @@ func TestMemberRepositoryTenantIsolation(t *testing.T) {
 
 	t.Run("跨租户 UpdateStatus 落不到数据", func(t *testing.T) {
 		others, _, _ := repo.FindList(memberTenantB, "", "", 0, -1, 1, 100)
-		if err := repo.UpdateStatus(memberTenantA, others[0].ID, 0); err != nil {
-			t.Fatalf("更新失败: %v", err)
+		// 跨租户必须**明确失败**（ErrRecordNotFound），而不是「0 行受影响即成功」。
+		//
+		// 后者会给出一个虚假的成功回执：调用方以为改掉了，实际什么都没发生；
+		// 而真正不存在的 ID 也会得到同样的回执，于是「ID 打错」和「越权未遂」
+		// 在调用方看来完全一样。与 userRepository.UpdateStatus 保持同一口径。
+		//
+		// 这不构成信息泄漏：ID 真的不存在时返回的也是同一个错误，
+		// 攻击者无法据此区分「存在于别的租户」与「根本不存在」。
+		if err := repo.UpdateStatus(memberTenantA, others[0].ID, 0); !errors.Is(err, gorm.ErrRecordNotFound) {
+			t.Fatalf("跨租户 UpdateStatus 应被拒（ErrRecordNotFound），实际 %v", err)
 		}
-		// GORM 的 Update 不返回影响行数，回读确认对方数据未被动过
+		// 回读确认对方数据未被动过
 		got, err := repo.FindByID(memberTenantB, others[0].ID)
 		if err != nil {
 			t.Fatalf("回读失败: %v", err)

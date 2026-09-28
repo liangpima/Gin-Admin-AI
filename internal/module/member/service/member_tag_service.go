@@ -46,7 +46,8 @@ func (s *memberTagService) Create(req *dto.CreateMemberTagRequest, operatorID, t
 func (s *memberTagService) Update(req *dto.UpdateMemberTagRequest, operatorID, tenantID uint) error {
 	tag, err := s.tagRepo.FindByID(tenantID, req.ID)
 	if err != nil {
-		return common.NewNotFoundError("标签不存在")
+		// 只把「记录不存在」转成 404，DB 故障仍走 500
+		return common.NotFoundOrErr(err, "标签不存在")
 	}
 	if req.Name != "" {
 		tag.Name = req.Name
@@ -65,7 +66,9 @@ func (s *memberTagService) Update(req *dto.UpdateMemberTagRequest, operatorID, t
 }
 
 func (s *memberTagService) Delete(tenantID, id uint) error {
-	return s.tagRepo.Delete(tenantID, id)
+	// 仓储会在标签不属于本租户时返回 gorm.ErrRecordNotFound，
+	// 这里转成 404 语义；其余错误（DB 故障）原样上抛为 500。
+	return common.NotFoundOrErr(s.tagRepo.Delete(tenantID, id), "标签不存在")
 }
 
 func (s *memberTagService) FindList(tenantID uint, req *dto.MemberTagListRequest) ([]model.MemberTag, int64, error) {

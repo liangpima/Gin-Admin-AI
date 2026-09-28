@@ -18,6 +18,10 @@ type mockOrderRepo struct {
 	// findHook 在 FindByOrderNo 内执行，用于把「并发写入恰好落在读与写之间」
 	// 这一时序窗口变成可确定性复现的场景。
 	findHook func()
+	// markPaidHook 在 MarkPaidIfPending 入口执行，代表「另一个并发回调抢先完成了
+	// 状态流转」。用于复现「条件更新返回 0 行，但订单其实已是已支付」这一分支 ——
+	// 它与「订单已被关闭」共用同一个 !affected 出口，处置方式却相反。
+	markPaidHook func(orderNo string)
 	// claimMu 保护状态流转，模拟数据库条件更新的原子性。
 	// 没有它，并发测试就失去意义（mock 的读改写不是原子的）。
 	claimMu sync.Mutex
@@ -118,6 +122,9 @@ func (m *mockOrderRepo) FindList(tenantID uint, subject string, status int8, cha
 // MarkPaidIfPending 模拟数据库条件更新：仅当订单仍为待支付（status=0）时才更新，
 // 返回是否由本次调用完成状态流转
 func (m *mockOrderRepo) MarkPaidIfPending(orderNo, tradeNo string, paidAt *time.Time, rawNotify string) (bool, error) {
+	if m.markPaidHook != nil {
+		m.markPaidHook(orderNo)
+	}
 	o, ok := m.orders[orderNo]
 	if !ok {
 		return false, nil
@@ -555,6 +562,72 @@ func TestHandleNotify(t *testing.T) {
 			t.Fatal("expected error for amount mismatch")
 		}
 	})
+
+	t.Run("订单已关闭却收到支付成功必须报错而不是静默成功", func(t *testing.T) {
+		// 回归 M7。旧实现在条件更新 0 行时只记一条 Info 日志就 return nil，
+		// 控制器据此回 `{"code":"SUCCESS"}`，渠道认为通知已送达、**停止重试**。
+		//
+		// 若订单已被超时关单（或用户主动关闭）而用户在此之后完成支付，
+		// 这笔钱就彻底失去了自动化的追索线索：订单停在「已关闭」，
+		// 用户付了钱没拿到东西，只有人工对账才能发现 —— 全程没有任何报错。
+		//
+		// 所以断言必须落在「返回 error」上（控制器据此回 FAIL，渠道继续重试），
+		// 而不是「状态没被改写」—— 后者旧实现也满足，测不出缺陷。
+		repo := newMockRepo()
+		svc := newTestService(repo)
+		if _, err := svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", ""); err != nil {
+			t.Fatalf("准备订单失败: %v", err)
+		}
+		// 模拟「下单后超时关单，随后才完成支付」
+		repo.orders["ORDER001"].Status = model.StatusClosed
+
+		err := svc.HandleNotify("wechat", &PayNotifyResult{
+			OrderNo: "ORDER001",
+			TradeNo: "WX_TRADE_001",
+			Status:  "success",
+			Amount:  100,
+		})
+		if err == nil {
+			t.Fatal("订单不在待支付态时必须返回错误，让渠道继续重试；静默回 SUCCESS 会让这笔钱失去追索线索")
+		}
+		if got := repo.orders["ORDER001"].Status; got != model.StatusClosed {
+			t.Errorf("已关闭的订单不应被回调改写：got status %d", got)
+		}
+	})
+
+	t.Run("并发重复回调仍须 ACK，不能把幂等通知变成错误", func(t *testing.T) {
+		// 反向对照：条件更新 0 行的另一半成因是「另一个并发回调刚把订单置为已支付」。
+		// 那种情况必须继续回 SUCCESS —— 否则渠道会把每个重复通知都当作失败
+		// 反复投递，而我们永远处理不掉它（必然堆积成告警噪音）。
+		//
+		// 没有这条用例，「!affected 一律报错」这个更省事的写法也能全绿。
+		repo := newMockRepo()
+		svc := newTestService(repo)
+		if _, err := svc.CreateOrder(testTenantID, "ORDER001", "商品", "", 100, "wechat", "", "", ""); err != nil {
+			t.Fatalf("准备订单失败: %v", err)
+		}
+		// 制造时序：条件更新执行前，另一个并发回调已把订单置为已支付
+		repo.markPaidHook = func(orderNo string) {
+			if o, ok := repo.orders[orderNo]; ok {
+				o.Status = model.StatusPaid
+				o.TradeNo = "WX_TRADE_FIRST"
+			}
+			repo.markPaidHook = nil
+		}
+
+		err := svc.HandleNotify("wechat", &PayNotifyResult{
+			OrderNo: "ORDER001",
+			TradeNo: "WX_TRADE_SECOND",
+			Status:  "success",
+			Amount:  100,
+		})
+		if err != nil {
+			t.Fatalf("重复回调必须 ACK，实际返回错误: %v", err)
+		}
+		if got := repo.orders["ORDER001"].Status; got != model.StatusPaid {
+			t.Errorf("订单应保持已支付：got status %d", got)
+		}
+	})
 }
 
 // TestValidateRefund 覆盖退款前的全部纯校验分支。
@@ -829,6 +902,79 @@ func TestConcurrentCreateOrder(t *testing.T) {
 	if order == nil {
 		t.Fatal("order not found")
 	}
+}
+
+// TestCreateOrderDifferentOrderNumbersDoNotBlockEachOther 不同订单号的下单请求不应互相阻塞。
+//
+// 这是「下单锁按订单号分片」的守门用例。此前用的是一把全局 sync.Mutex，
+// 而临界区里包含「按订单号查重 + 插入」两次 DB 往返 —— DB 一慢，
+// 所有租户、所有订单号的下单请求都被排成一队，吞吐退化成 1/单次往返耗时。
+//
+// 判定方式是「一个订单卡住时，另一个必须能返回」，而不是测耗时：
+// 前者是确定性的（不依赖机器快慢与 CI 负载），后者必然抖动。
+func TestCreateOrderDifferentOrderNumbersDoNotBlockEachOther(t *testing.T) {
+	repo := newMockRepo()
+	svc := newTestService(repo)
+
+	// 必须让两个订单号落在**不同分片**，否则用例会因为哈希碰撞而偶发失败。
+	// 这里用 lockForOrder 探测而不是假设某个字符串落在哪个分片 ——
+	// 顺带也把「分片函数退化成永远返回同一把锁」变成可检测的：
+	// 那种情况下下面的循环会找不到候选，用例直接转红。
+	slowNo := "ORDER_SLOW"
+	slowLock := svc.lockForOrder(slowNo)
+
+	fastNo := ""
+	for i := 0; i < 1000; i++ {
+		candidate := fmt.Sprintf("ORDER_FAST_%d", i)
+		if svc.lockForOrder(candidate) != slowLock {
+			fastNo = candidate
+			break
+		}
+	}
+	if fastNo == "" {
+		t.Fatal("找不到落在不同分片的订单号 —— lockForOrder 可能退化成了全局锁")
+	}
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+
+	// 刻意不写 repo.orders：本用例只关心「是否阻塞」，
+	// 让另一个 goroutine 同时写 map 会引入与主题无关的数据竞争。
+	repo.createFn = func(order *model.PayOrder) error {
+		if order.OrderNo == slowNo {
+			close(entered)
+			<-release
+		}
+		return nil
+	}
+
+	go func() {
+		_, _ = svc.CreateOrder(testTenantID, slowNo, "商品", "", 100, "wechat", "", "", "")
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("下单流程未进入临界区，用例前置条件不成立")
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.CreateOrder(testTenantID, fastNo, "商品", "", 100, "wechat", "", "", "")
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("不同订单号的下单不应失败: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("不同订单号的下单被互相阻塞 —— 下单锁退化成了全局锁")
+	}
+
+	close(release)
 }
 
 // TestRefundConcurrentOnlyOneReachesGateway 并发退款只能有一次真正打到支付渠道。

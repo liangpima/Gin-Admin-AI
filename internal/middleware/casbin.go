@@ -104,6 +104,18 @@ func SyncPoliciesFromRoleMenus() error {
 		if r.RoleCode == "" || r.Permission == "" {
 			continue
 		}
+		// 纵深防御：菜单的 permission 绝不允许编译成通配符。
+		//
+		// 写入侧（menuService.validatePermissionCode）已经拒绝 `*`，但库里可能
+		// 存在历史脏数据（手工 SQL、旧版本写入、迁移遗漏）。而 matcher 里
+		// `p.obj == "*"` 会让这一条策略变成「持有该角色即可访问全部接口」，
+		// 属于可直接利用的提权。这里做第二道拦截：宁可该菜单权限静默失效，
+		// 也不能让它变成全站通行证。
+		if r.Permission == "*" {
+			logger.Log.Errorf("[casbin] 菜单权限为通配符 *，已跳过（角色 %q）—— "+
+				"请修正 sys_menu.permission，通配符只应由 admin 角色隐式持有", r.RoleCode)
+			continue
+		}
 		for _, v := range []string{r.RoleCode, rbacDomain, r.Permission, "*"} {
 			if len([]rune(v)) > maxRuleValueLen {
 				return fmt.Errorf("权限策略超长（列上限 %d 字符）：角色 %q 权限 %q",

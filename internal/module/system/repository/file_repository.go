@@ -61,6 +61,18 @@ func (r *fileRepository) FindList(tenantID uint, name, mimeType, sortOrder strin
 	return files, total, err
 }
 
+// Delete 软删除文件记录。
+//
+// 必须检查影响行数：GORM 删除不存在的记录不报错、RowsAffected 为 0，
+// 不检查就会「删除成功」而什么都没删。同仓的 agreement / dept 都已检查，
+// 这里此前漏了。
 func (r *fileRepository) Delete(tenantID, id uint) error {
-	return common.TenantScope(r.db, tenantID).Delete(&model.SysFile{}, id).Error
+	res := common.TenantScope(r.db, tenantID).Delete(&model.SysFile{}, id)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }

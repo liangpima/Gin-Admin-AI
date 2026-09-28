@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"hash/fnv"
 	"sync"
 	"time"
 
@@ -13,6 +15,17 @@ import (
 	systemModel "go-admin/internal/module/system/model"
 	systemService "go-admin/internal/module/system/service"
 )
+
+// ErrRefundPending 表示渠道**已受理**退款，但最终结果尚未确定
+// （微信 V3 退款返回 PROCESSING）。
+//
+// 调用方看到这个错误时**绝不能回滚退款权**：回滚会让订单退回「已支付」、
+// 用户可以再次发起退款，而渠道侧那一笔仍可能成功 —— 那就是重复退款，
+// 属于真实的资金损失。正确处置是保留「退款中」状态，等待对账或人工核实。
+//
+// 与之相对，ABNORMAL / CLOSED 这类「确定失败」返回的是普通错误，
+// 此时回滚退款权是安全的（钱没退出去，允许用户重试）。
+var ErrRefundPending = errors.New("退款已受理，结果待渠道确认")
 
 // payGatewayTimeout 单次支付网关调用的时间上限。
 //
@@ -38,9 +51,29 @@ type PayNotifyResult struct {
 	RawData  string
 }
 
+// orderLockShards 下单锁的分片数。
+//
+// 取 64 是因为冲突概率已经足够低（只有订单号哈希到同一分片才会互相等待），
+// 而每个分片只是一个 sync.Mutex，内存代价可忽略。
+const orderLockShards = 64
+
 type PaymentService struct {
 	orderRepo paymentRepo.PayOrderRepository
-	mu        sync.Mutex
+
+	// orderLocks 按订单号分片的下单锁。
+	//
+	// 下单是「先按订单号查重、再插入」的 check-then-act：同一订单号的并发请求
+	// 必须串行，否则两个请求会同时通过查重、随后一个撞 uk_order_no 唯一索引。
+	//
+	// 为什么不是一把全局 sync.Mutex：那会把**所有租户、所有订单号**的下单请求
+	// 排成一队，而临界区里包含两次 DB 往返 —— DB 一慢，整个下单接口的吞吐就退化
+	// 成「1 / 单次往返耗时」，与订单号无关的请求也在互相拖累。
+	// 分片后只有订单号相同的请求才互相等待，而那正是唯一需要串行的情形。
+	//
+	// ⚠️ 这是**进程内**保护，多副本部署下挡不住另一个实例。唯一性的最终裁决者
+	// 始终是 pay_order 的 uk_order_no 唯一索引 —— 这把锁只是让常见情形不必
+	// 依赖「撞了唯一键再回查」那条更绕的路径。
+	orderLocks [orderLockShards]sync.Mutex
 
 	// gatewayRefund 实际调用支付渠道退款的函数，默认为 refundVia。
 	// 留出这个接缝是因为真实渠道调用依赖线上配置与网络，无法在单测中执行，
@@ -83,9 +116,24 @@ func (s *PaymentService) refundVia(order *model.PayOrder, refundNo string, refun
 	}
 }
 
+// lockForOrder 返回订单号对应的分片锁。
+//
+// 用哈希而不是「订单号取模」：订单号通常是带前缀的字符串
+// （如 ORDER20260926001），没有可直接取模的数值语义。
+// FNV-1a 足够快且分布均匀，且同一订单号必然落到同一分片（这是正确性的前提）。
+func (s *PaymentService) lockForOrder(orderNo string) *sync.Mutex {
+	h := fnv.New32a()
+	// hash.Hash 的 Write 永不返回错误，显式丢弃以便 linters 看出是有意的
+	_, _ = h.Write([]byte(orderNo))
+	return &s.orderLocks[h.Sum32()%orderLockShards]
+}
+
 func (s *PaymentService) CreateOrder(tenantID uint, orderNo, subject, body string, amount int64, channel, openID, notifyURL, extra string) (*model.PayOrder, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// 只锁「同一订单号」，不锁全局：临界区里有两次 DB 往返，
+	// 用全局锁会让所有订单的下单请求排队（详见 orderLocks 的注释）。
+	lock := s.lockForOrder(orderNo)
+	lock.Lock()
+	defer lock.Unlock()
 
 	// 订单号重复时，只有「标题 + 金额 + 渠道」全部一致才视为幂等重放并复用原单；
 	// 否则说明订单号被复用（撞号或调用方传了重复单号），
@@ -225,8 +273,33 @@ func (s *PaymentService) HandleNotify(channel string, result *PayNotifyResult) e
 			return err
 		}
 		if !affected {
-			logger.Log.Infof("[payment] 订单 %s 已被并发回调处理，跳过", result.OrderNo)
-			return nil
+			// 「0 行受影响」有两种成因，**必须区分**，不能一律当成幂等重复：
+			//
+			//   · 另一个并发回调刚把订单置为已支付 —— ACK 成功是对的（重复通知）；
+			//   · 订单已被关闭（超时关单 / 用户主动关闭）或正处于退款中 ——
+			//     这才是危险的一类：**钱收了、单没成**。
+			//
+			// 危险在哪：若这里 ACK 成功，渠道会认为通知已送达而**停止重试**，
+			// 于是渠道侧不会再有信号，订单却停在「已关闭」上 —— 用户付了钱
+			// 没拿到东西，只有人工对账才能发现。这类缺陷不会有任何报错。
+			//
+			// 因此回读订单确认真实状态；不是「已支付」就返回错误，
+			// 让渠道按自己的重试策略继续投递，同时落 Error 级日志供告警。
+			// 返回错误**不是**「把问题藏起来」：渠道重试期间订单始终可查，
+			// 而 ACK 成功会让这笔钱彻底失去任何自动化的追索线索。
+			latest, readErr := s.orderRepo.FindByOrderNoForNotify(result.OrderNo)
+			if readErr != nil {
+				// 回读失败时不能当成功 —— 我们无法确认这笔钱有没有落单
+				return fmt.Errorf("回读订单失败（无法确认回调是否已入账）: %w", readErr)
+			}
+			if latest.Status == model.StatusPaid {
+				logger.Log.Infof("[payment] 订单 %s 已被并发回调处理，跳过", result.OrderNo)
+				return nil
+			}
+			logger.Log.Errorf("[payment] 收到支付成功回调但订单不在待支付态, 订单=%s 当前状态=%d "+
+				"回调金额=%d 交易号=%s（渠道已收款，需人工核对：补单或原路退款）",
+				result.OrderNo, latest.Status, result.Amount, result.TradeNo)
+			return fmt.Errorf("订单 %s 当前状态为 %d，无法标记为已支付", result.OrderNo, latest.Status)
 		}
 
 		logger.Log.Infof("[payment] 订单 %s 支付成功, trade_no: %s", result.OrderNo, result.TradeNo)
@@ -371,7 +444,18 @@ func (s *PaymentService) RefundOrderWithPayInfo(tenantID uint, orderNo string, r
 	}
 
 	if err := s.refund(order, refundNo, refundAmt); err != nil {
-		// 渠道侧失败：回滚状态，让用户可以重新发起退款
+		if errors.Is(err, ErrRefundPending) {
+			// 渠道已受理但结果未定（微信 PROCESSING）：**保留退款权**，
+			// 订单停在「退款中」。回滚会让用户重新发起，而这一笔仍可能成功，
+			// 造成重复退款 —— 资金损失远比「订单需要人工核对」严重。
+			// 用 Error 级日志触发告警，提示按渠道退款单号对账。
+			logger.Log.Errorf("[payment] 退款已受理但结果未定, 订单=%s 退款单=%s: %v"+
+				"（订单保持退款中，请按退款单号对账确认，勿直接回滚状态）",
+				orderNo, refundNo, err)
+			result.Error = err
+			return result, nil
+		}
+		// 渠道侧确定失败：回滚状态，让用户可以重新发起退款
 		if releaseErr := s.orderRepo.ReleaseRefundClaim(orderNo); releaseErr != nil {
 			// 订单会卡在「退款中」且用户无法重试，需要人工介入 —— 必须是 Error 级
 			logger.Log.Errorf("[payment] 退款失败后回滚状态也失败, 订单=%s: %v（订单可能卡在退款中，需人工核对）",

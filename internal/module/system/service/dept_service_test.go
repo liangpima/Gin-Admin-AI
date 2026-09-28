@@ -14,6 +14,9 @@ type mockDeptRepo struct {
 	countByParentFn func(parentID uint) (int64, error)
 	findParentFn    func(id uint) (uint, bool, error)
 	findByIDFn      func(id uint) (*model.SysDept, error)
+	// deleteFn 让用例控制 Delete 的返回值，用于验证
+	// 「记录不存在 → 404」与「数据库故障 → 500」两条路径被区分开
+	deleteFn func(id uint) error
 
 	deletedIDs []uint
 	updated    []*model.SysDept
@@ -52,6 +55,9 @@ func (m *mockDeptRepo) Update(tenantID uint, dept *model.SysDept) error {
 func (m *mockDeptRepo) Delete(tenantID, id uint) error {
 	m.record(tenantID)
 	m.deletedIDs = append(m.deletedIDs, id)
+	if m.deleteFn != nil {
+		return m.deleteFn(id)
+	}
 	return nil
 }
 

@@ -13,6 +13,7 @@ import (
 	systemService "go-admin/internal/module/system/service"
 	"go-admin/internal/testsupport"
 
+	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -37,9 +38,21 @@ func newMemberDB(t *testing.T) *gorm.DB {
 
 	// 先建库（会注入 database.DB），再构造仓储 —— 仓储在构造时捕获 database.DB
 	// SysConfig 也要建：Create 会读取「会员编号位数」配置
-	return testsupport.NewDB(t,
+	db := testsupport.NewDB(t,
 		&model.Member{}, &model.MemberLevel{}, &model.MemberTag{}, &model.MemberTagRel{},
 		&model.PointsLog{}, &systemModel.SysConfig{})
+
+	// 手机号的唯一约束是 (tenant_id, phone) 复合索引，而模型无法用标签表达它
+	// （TenantID 定义在嵌入的 common.TenantBaseModel 里），AutoMigrate 建不出来。
+	// 测试里显式补上，让测试 schema 与 sql/init.sql 一致 ——
+	// 否则「不同租户可各自使用同一手机号」这条路径根本没被约束到，
+	// 用例会绿得毫无意义（与 system/repository 里 sys_post 的处理同一套路）。
+	if err := db.Exec(
+		"CREATE UNIQUE INDEX IF NOT EXISTS uk_tenant_phone ON pay_member (tenant_id, phone)",
+	).Error; err != nil {
+		t.Fatalf("补建手机号唯一索引失败: %v", err)
+	}
+	return db
 }
 
 func newTestMemberService(t *testing.T) *memberService {
@@ -87,37 +100,9 @@ func baseCreateReq(phone string) *dto.CreateMemberRequest {
 	}
 }
 
-// TestDedupeNonZeroIDs 去重并剔除 0。
-//
-// 0 不是合法主键，前端下拉框未选择时常传 0；写进关联表会造出一条
-// 指向不存在标签的脏记录。
-func TestDedupeNonZeroIDs(t *testing.T) {
-	cases := []struct {
-		name string
-		in   []uint
-		want []uint
-	}{
-		{"空输入", nil, nil},
-		{"全为 0", []uint{0, 0}, nil},
-		{"去重", []uint{3, 1, 3, 2, 1}, []uint{3, 1, 2}},
-		{"剔除 0 并去重", []uint{0, 5, 0, 5, 7}, []uint{5, 7}},
-		{"保持首次出现顺序", []uint{9, 4, 9}, []uint{9, 4}},
-	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := dedupeNonZeroIDs(c.in)
-			if len(got) != len(c.want) {
-				t.Fatalf("长度不符: got %v, want %v", got, c.want)
-			}
-			for i := range c.want {
-				if got[i] != c.want[i] {
-					t.Fatalf("顺序/内容不符: got %v, want %v", got, c.want)
-				}
-			}
-		})
-	}
-}
+// TestDedupeNonZeroIDs 已随实现上移到 internal/common/collection_test.go。
+// 这里不再保留一份 —— 同一个纯函数在两个包里各测一遍，只会让
+// 「两处实现已经悄悄不同」这件事更难发现。
 
 // TestNormalizeTagIDsRejectsOtherTenant 跨租户标签必须被拒绝。
 //
@@ -486,6 +471,214 @@ func TestCreatePhoneDuplicateCheck(t *testing.T) {
 	})
 }
 
+// TestCreateMemberSamePhoneAcrossTenants 手机号是**租户内**唯一，不是全平台唯一。
+//
+// 回归的是 H13。原索引是全局的 `uk_phone(phone)`，而查重
+// （`FindByPhone(tenantID, ...)`）按租户过滤 —— 两边范围不一致，现象是：
+// 租户 B 用租户 A 已注册的手机号建会员 → 查重查不到（放行）→ INSERT 撞唯一索引
+// → 1062 → 对外 500「服务器内部错误」，提示与真实原因毫无关系。
+//
+// 断言落在「两边都能建成」上，而不是只对着索引名断言 —— 索引范围是否与
+// 应用层语义一致，实际发生地就是这里。
+func TestCreateMemberSamePhoneAcrossTenants(t *testing.T) {
+	svc := newTestMemberService(t)
+	const shared = "13800008888"
+
+	if err := svc.Create(&dto.CreateMemberRequest{Phone: shared}, 1, tenantA); err != nil {
+		t.Fatalf("甲租户创建失败: %v", err)
+	}
+	if err := svc.Create(&dto.CreateMemberRequest{Phone: shared}, 1, tenantB); err != nil {
+		t.Fatalf("乙租户使用同一手机号必须成功，实际: %v", err)
+	}
+
+	// 反向对照：同一租户内仍然必须被拒。
+	// 没有这一条，上面两条断言在「唯一索引根本没建」时照样会通过。
+	if err := svc.Create(&dto.CreateMemberRequest{Phone: shared}, 1, tenantA); err == nil ||
+		!common.IsBizError(err) {
+		t.Fatalf("同租户内重复手机号必须返回业务错误，实际 %T: %v", err, err)
+	}
+
+	// 两个租户各自都能按手机号查到自己的那一条（而不是互相查到对方）
+	a, err := svc.memberRepo.FindByPhone(tenantA, shared)
+	if err != nil || a.TenantID != tenantA {
+		t.Fatalf("甲租户按手机号查询异常: %v (tenant=%d)", err, a.TenantID)
+	}
+	b, err := svc.memberRepo.FindByPhone(tenantB, shared)
+	if err != nil || b.TenantID != tenantB {
+		t.Fatalf("乙租户按手机号查询异常: %v (tenant=%d)", err, b.TenantID)
+	}
+	if a.ID == b.ID {
+		t.Error("两个租户查到了同一条会员记录")
+	}
+}
+
+// TestUpdateMemberPhoneDuplicateCheck 改手机号必须查重，且范围是**租户内**。
+//
+// 原先 `Update` 直接赋值 `member.Phone` 就落库：改成本租户内另一个会员已占用的号
+// 会一路撞到唯一索引 → 1062 → `common.FailWith` 归一成 500「服务器内部错误」。
+// 用户看到的提示与真实原因（手机号冲突）毫无关系，只会以为系统坏了。
+func TestUpdateMemberPhoneDuplicateCheck(t *testing.T) {
+	t.Run("改成同租户已占用的手机号 → 业务错误，且不落库", func(t *testing.T) {
+		svc := newTestMemberService(t)
+		if err := svc.Create(&dto.CreateMemberRequest{Phone: "13800000001"}, 1, tenantA); err != nil {
+			t.Fatalf("准备：建甲失败: %v", err)
+		}
+		if err := svc.Create(&dto.CreateMemberRequest{Phone: "13800000002"}, 1, tenantA); err != nil {
+			t.Fatalf("准备：建乙失败: %v", err)
+		}
+		target, _ := svc.memberRepo.FindByPhone(tenantA, "13800000002")
+
+		err := svc.Update(&dto.UpdateMemberRequest{ID: target.ID, Phone: "13800000001"}, 1, tenantA)
+
+		if err == nil {
+			t.Fatal("改成同租户已占用的手机号必须被拒")
+		}
+		if !common.IsBizError(err) {
+			t.Errorf("手机号冲突属业务错误（400），实际 %T: %v", err, err)
+		}
+		if !strings.Contains(err.Error(), "手机号") {
+			t.Errorf("提示应点明是手机号冲突，实际: %v", err)
+		}
+		// 被拒的写操作必须**真的没落库**，否则「报错了但改了」更难查
+		got, _ := svc.memberRepo.FindByID(tenantA, target.ID)
+		if got.Phone != "13800000002" {
+			t.Errorf("被拒的改号竟然生效了，当前手机号 %s", got.Phone)
+		}
+	})
+
+	t.Run("改成跨租户占用的手机号 → 允许（租户内唯一的既定语义）", func(t *testing.T) {
+		// 反向对照：查重**不能**改成全平台唯一。手机号是租户内的业务标识，
+		// 两个租户各自拥有同一手机号是允许的（见 model.Member 的说明）。
+		svc := newTestMemberService(t)
+		if err := svc.Create(&dto.CreateMemberRequest{Phone: "13800000001"}, 1, tenantA); err != nil {
+			t.Fatalf("准备：建甲租户会员失败: %v", err)
+		}
+		if err := svc.Create(&dto.CreateMemberRequest{Phone: "13800000002"}, 1, tenantB); err != nil {
+			t.Fatalf("准备：建乙租户会员失败: %v", err)
+		}
+		target, _ := svc.memberRepo.FindByPhone(tenantB, "13800000002")
+
+		if err := svc.Update(&dto.UpdateMemberRequest{ID: target.ID, Phone: "13800000001"}, 1, tenantB); err != nil {
+			t.Fatalf("跨租户同号应当允许，实际被拒: %v", err)
+		}
+	})
+
+	t.Run("提交自己原来的手机号 → 不报错", func(t *testing.T) {
+		// 「未变化」不该被查重拦下：编辑弹窗会把整行回填后原样提交，
+		// 若查重不排除自己，任何一次「只改昵称」都会报「手机号已注册」。
+		svc := newTestMemberService(t)
+		if err := svc.Create(&dto.CreateMemberRequest{Phone: "13800000001"}, 1, tenantA); err != nil {
+			t.Fatalf("准备失败: %v", err)
+		}
+		target, _ := svc.memberRepo.FindByPhone(tenantA, "13800000001")
+
+		if err := svc.Update(&dto.UpdateMemberRequest{ID: target.ID, Phone: "13800000001"}, 1, tenantA); err != nil {
+			t.Fatalf("提交未变化的手机号不应报错: %v", err)
+		}
+	})
+
+	t.Run("同租户冲突在**预检查**阶段就拦下（不进入写操作）", func(t *testing.T) {
+		// 为什么必须单独钉这一条：只加「唯一键冲突兜底」也能让上面那条用例通过
+		// （索引会把写入拒掉，错误一样被翻译成业务错误），但那样每次冲突都真的
+		// 写了一次库、且 `pay_member` 上另一个唯一索引（uk_member_no）的冲突
+		// 也会被说成「手机号已注册」—— 提示指错方向。
+		// 这里断言的是「预检查命中时 Update 根本没被调用」。
+		svc := newTestMemberService(t)
+		stub := &stubMemberRepo{
+			// 查重命中另一个会员
+			existingMember: &model.Member{
+				TenantBaseModel: common.TenantBaseModel{BaseModel: common.BaseModel{ID: 99}},
+				Phone:           "13800000001",
+			},
+			member: &model.Member{
+				TenantBaseModel: common.TenantBaseModel{BaseModel: common.BaseModel{ID: 7}},
+				Phone:           "13800000000",
+			},
+		}
+		svc.memberRepo = stub
+
+		err := svc.Update(&dto.UpdateMemberRequest{ID: 7, Phone: "13800000001"}, 1, tenantA)
+
+		if !common.IsBizError(err) {
+			t.Fatalf("应返回业务错误，实际 %T: %v", err, err)
+		}
+		if stub.updated != 0 {
+			t.Errorf("预检查命中时不应再调用 Update（实际调用 %d 次）", stub.updated)
+		}
+	})
+}
+
+// TestDuplicateKeyTranslatedToBizError 并发下预检查会漏，唯一索引才是最终裁判。
+//
+// 「先查再写」两步之间并发请求可以插进来，所以除了预检查还必须有一层兜底：
+// 仓储返回的唯一键冲突要翻译成业务错误；而**其它**仓储错误必须原样上抛，
+// 否则数据库故障会被说成「手机号已注册」，监控按 5xx 告警的能力随之失效。
+//
+// 用真实 MySQL 错误码（1062）构造，匹配 `database.IsDuplicateKey` 的判定路径。
+func TestDuplicateKeyTranslatedToBizError(t *testing.T) {
+	dupErr := &mysql.MySQLError{
+		Number:  1062,
+		Message: "Duplicate entry '1-13800000001' for key 'uk_tenant_phone'",
+	}
+
+	// 预检查放行的桩：FindByPhone 报「未找到」，把冲突留给写操作
+	newStubService := func(updateErr error) (*memberService, *stubMemberRepo) {
+		svc := newTestMemberService(t)
+		stub := &stubMemberRepo{
+			findByPhoneErr: gorm.ErrRecordNotFound,
+			updateErr:      updateErr,
+			member: &model.Member{
+				TenantBaseModel: common.TenantBaseModel{BaseModel: common.BaseModel{ID: 7}},
+				Phone:           "13800000000",
+				Status:          1,
+			},
+		}
+		svc.memberRepo = stub
+		return svc, stub
+	}
+
+	t.Run("改号撞唯一索引 → 业务错误", func(t *testing.T) {
+		svc, _ := newStubService(dupErr)
+
+		err := svc.Update(&dto.UpdateMemberRequest{ID: 7, Phone: "13800000001"}, 1, tenantA)
+
+		if err == nil {
+			t.Fatal("唯一键冲突必须被翻译，不能原样透出")
+		}
+		if !common.IsBizError(err) {
+			t.Errorf("唯一键冲突属业务错误（400），实际 %T: %v", err, err)
+		}
+	})
+
+	t.Run("创建撞唯一索引 → 业务错误（同一个坑的另一条入口）", func(t *testing.T) {
+		svc := newTestMemberService(t)
+		svc.memberRepo = &stubMemberRepo{
+			findByPhoneErr: gorm.ErrRecordNotFound,
+			maxMemberNo:    "100001",
+			createErr:      dupErr,
+		}
+
+		err := svc.Create(&dto.CreateMemberRequest{Phone: "13800000001"}, 1, tenantA)
+
+		if err == nil || !common.IsBizError(err) {
+			t.Fatalf("创建时的唯一键冲突也必须翻译成业务错误，实际 %T: %v", err, err)
+		}
+	})
+
+	t.Run("非唯一键的仓储错误必须原样上抛", func(t *testing.T) {
+		svc, _ := newStubService(errors.New("db down"))
+
+		err := svc.Update(&dto.UpdateMemberRequest{ID: 7, Phone: "13800000001"}, 1, tenantA)
+
+		if err == nil {
+			t.Fatal("数据库故障必须上抛")
+		}
+		if common.IsBizError(err) {
+			t.Errorf("数据库故障是系统错误（500），不该说成「手机号已注册」: %v", err)
+		}
+	})
+}
+
 // stubMemberRepo 只实现查重 / 编号推导路径用到的三个方法。
 // 内嵌 repository.MemberRepository 接口来满足类型要求：
 // 未实现的方法一旦被调用会 panic，这正好能暴露「测试路径与预期不符」。
@@ -495,9 +688,21 @@ type stubMemberRepo struct {
 	findMaxNoErr   error
 	maxMemberNo    string
 	created        int
+	// existingMember 非 nil 时由 FindByPhone 返回它（模拟「查到了一条记录」）
+	existingMember *model.Member
+	// member 是 FindByID 的返回值；为 nil 表示记录不存在
+	member *model.Member
+	// createErr / updateErr 让用例直接制造「仓储写失败」，例如唯一键冲突
+	createErr error
+	updateErr error
+	// updated 记录 Update 被调用的次数：用来区分「预检查拦下」与「写下去才失败」
+	updated int
 }
 
 func (s *stubMemberRepo) FindByPhone(tenantID uint, phone string) (*model.Member, error) {
+	if s.existingMember != nil {
+		return s.existingMember, s.findByPhoneErr
+	}
 	return &model.Member{}, s.findByPhoneErr
 }
 
@@ -505,7 +710,19 @@ func (s *stubMemberRepo) FindMaxMemberNo() (string, error) {
 	return s.maxMemberNo, s.findMaxNoErr
 }
 
+func (s *stubMemberRepo) FindByID(tenantID, id uint) (*model.Member, error) {
+	if s.member == nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return s.member, nil
+}
+
 func (s *stubMemberRepo) Create(*model.Member) error {
 	s.created++
-	return nil
+	return s.createErr
+}
+
+func (s *stubMemberRepo) Update(*model.Member) error {
+	s.updated++
+	return s.updateErr
 }

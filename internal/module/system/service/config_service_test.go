@@ -5,6 +5,7 @@ import (
 
 	"go-admin/internal/common"
 	"go-admin/internal/module/system/model"
+	"go-admin/internal/module/system/repository"
 
 	"gorm.io/gorm"
 )
@@ -13,6 +14,8 @@ import (
 type mockConfigRepo struct {
 	configs map[uint]*model.SysConfig
 	nextID  uint
+	// deleteFn 让用例控制 Delete 的返回值（区分 404 与 500 两条路径）
+	deleteFn func(id uint) error
 }
 
 func newMockConfigRepo(seed ...*model.SysConfig) *mockConfigRepo {
@@ -65,6 +68,9 @@ func (m *mockConfigRepo) Update(config *model.SysConfig) error {
 }
 
 func (m *mockConfigRepo) Delete(id uint) error {
+	if m.deleteFn != nil {
+		return m.deleteFn(id)
+	}
 	delete(m.configs, id)
 	return nil
 }
@@ -87,6 +93,12 @@ func (m *mockConfigRepo) UpsertByKey(config *model.SysConfig) error {
 		}
 	}
 	return m.Create(config)
+}
+
+// Transaction 桩没有数据库，直接把自身交给回调（语义同 mockUserRepo.Transaction）。
+// 真实的回滚语义由本文件下方「真实仓储 + 内存库」的用例覆盖。
+func (m *mockConfigRepo) Transaction(fn func(repository.ConfigRepository) error) error {
+	return fn(m)
 }
 
 // TestConfigUpdateKeepsMaskedSecret 回归保护：敏感配置的原值不能被打码占位符覆盖。

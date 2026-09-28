@@ -11,6 +11,7 @@ import (
 	"go-admin/internal/module/system/dto"
 	"go-admin/internal/module/system/model"
 	"go-admin/internal/module/system/repository"
+	"go-admin/internal/module/system/vo"
 
 	"gorm.io/gorm"
 )
@@ -18,11 +19,13 @@ import (
 type RoleService interface {
 	Create(req *dto.CreateRoleRequest, operatorID, tenantID uint) error
 	Update(req *dto.UpdateRoleRequest, operatorID, tenantID uint) error
-	Delete(tenantID, id uint) error
+	// Delete 删除角色。operatorID 用于 admin 保留编码校验（见 checkReservedCode）。
+	Delete(tenantID, operatorID, id uint) error
 	FindByID(tenantID, id uint) (interface{}, error)
 	FindByIDs(tenantID uint, ids []uint) ([]model.SysRole, error)
 	FindList(tenantID uint, req *dto.RoleListRequest) ([]interface{}, int64, error)
-	UpdateStatus(tenantID uint, req *dto.StatusRequest) error
+	// UpdateStatus 启用/停用角色。operatorID 用于 admin 保留编码校验。
+	UpdateStatus(tenantID, operatorID uint, req *dto.StatusRequest) error
 	FindAll(tenantID uint) ([]model.SysRole, error)
 	// EnsureRolesGrantable 校验操作者是否有权把这些角色授予他人。
 	//
@@ -177,18 +180,33 @@ func (s *roleService) Create(req *dto.CreateRoleRequest, operatorID, tenantID ui
 	}
 	role.Remark = req.Remark
 
-	if err := s.roleRepo.Create(role); err != nil {
-		// 上面 Count 校验有时间窗口，并发下靠唯一索引兜底
-		if errors.Is(err, common.ErrDuplicateKey) {
-			return common.NewBizError("角色编码已存在")
+	// 角色本体与授权必须一次提交：先前的写法里 ReplaceMenus 失败会
+	// 直接 return，连 syncPolicies() 都被跳过 —— 于是库里留下一个
+	// 「已创建、无授权」，而 Casbin 策略仍是旧快照的角色，用户看到 500
+	// 却在角色列表里找得到它，且它的权限状态无人同步。
+	//
+	// 注意 syncPolicies() 必须在**提交之后**调用：它读的是已提交的数据，
+	// 放在事务内会读到未提交的快照并据此重建策略。
+	if err := s.roleRepo.Transaction(func(txRepo repository.RoleRepository) error {
+		if err := txRepo.Create(role); err != nil {
+			// 上面 Count 校验有时间窗口，并发下靠唯一索引兜底
+			if errors.Is(err, common.ErrDuplicateKey) {
+				return common.NewBizError("角色编码已存在")
+			}
+			return err
 		}
+
+		if len(req.MenuIds) > 0 {
+			if err := txRepo.ReplaceMenus(tenantID, role.ID, req.MenuIds); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 
 	if len(req.MenuIds) > 0 {
-		if err := s.roleRepo.ReplaceMenus(tenantID, role.ID, req.MenuIds); err != nil {
-			return err
-		}
 		s.syncPolicies()
 	}
 
@@ -251,28 +269,52 @@ func (s *roleService) Update(req *dto.UpdateRoleRequest, operatorID, tenantID ui
 	}
 	role.UpdateBy = operatorID
 
-	if err := s.roleRepo.Update(tenantID, role); err != nil {
-		if errors.Is(err, common.ErrDuplicateKey) {
-			return common.NewBizError("角色编码已存在")
+	if err := s.roleRepo.Transaction(func(txRepo repository.RoleRepository) error {
+		if err := txRepo.Update(tenantID, role); err != nil {
+			if errors.Is(err, common.ErrDuplicateKey) {
+				return common.NewBizError("角色编码已存在")
+			}
+			return err
 		}
+
+		if req.MenuIds != nil {
+			if err := txRepo.ReplaceMenus(tenantID, role.ID, req.MenuIds); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 
-	if req.MenuIds != nil {
-		if err := s.roleRepo.ReplaceMenus(tenantID, role.ID, req.MenuIds); err != nil {
-			return err
-		}
-	}
-
-	// 角色编码/状态/授权变化都会影响策略，必须同步（不能只在菜单变更时同步）
+	// 角色编码/状态/授权变化都会影响策略，必须同步（不能只在菜单变更时同步）。
+	// 放在提交之后：syncPolicies 读取的是已提交的授权数据。
 	s.syncPolicies()
 
 	return nil
 }
 
-func (s *roleService) Delete(tenantID, id uint) error {
-	if err := s.roleRepo.Delete(tenantID, id); err != nil {
+// Delete 删除角色。
+//
+// admin 保留编码必须在删除前拦下：`SyncPoliciesFromRoleMenus` 会**无条件**写入
+// `{admin, default, *, *}`，与 admin 角色绑定了哪些菜单无关。删掉 admin 角色后
+// 这条通配策略仍在，但已无人持有 `admin` 编码 —— 策略成孤儿，
+// 所有超级管理员**瞬间失去全部权限**，且没有任何界面能恢复（进不去系统了）。
+//
+// 与 Create/Update/EnsureRolesGrantable 用同一套判定（checkReservedCode）：
+// 只挡非 admin 操作者，admin 自己仍可操作（与既有口径一致）。
+func (s *roleService) Delete(tenantID, operatorID, id uint) error {
+	// 先取角色拿 code：删除后就查不到编码了，校验必须在此之前
+	role, err := s.roleRepo.FindByID(tenantID, id)
+	if err != nil {
+		return common.NotFoundOrErr(err, "角色不存在")
+	}
+	if err := s.checkReservedCode(tenantID, operatorID, role.Code); err != nil {
 		return err
+	}
+
+	if err := s.roleRepo.Delete(tenantID, id); err != nil {
+		return common.NotFoundOrErr(err, "角色不存在")
 	}
 	s.syncPolicies()
 	return nil
@@ -295,7 +337,15 @@ func (s *roleService) FindByID(tenantID, id uint) (interface{}, error) {
 	if err != nil {
 		return nil, common.NotFoundOrErr(err, "角色不存在")
 	}
-	return role, nil
+
+	// 一并带出已授权的菜单 ID：前端「权限分配」对话框必须靠它回显菜单树。
+	// 不带的话前端只能拿到空数组，用户点「确定」就会把已有授权整体清空。
+	menuIDs, err := s.roleRepo.FindMenuIDsByRoleID(tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+
+	return &vo.RoleDetailVO{SysRole: *role, MenuIds: menuIDs}, nil
 }
 
 func (s *roleService) FindByIDs(tenantID uint, ids []uint) ([]model.SysRole, error) {
@@ -320,8 +370,27 @@ func (s *roleService) FindList(tenantID uint, req *dto.RoleListRequest) ([]inter
 	return result, total, nil
 }
 
-func (s *roleService) UpdateStatus(tenantID uint, req *dto.StatusRequest) error {
-	return s.roleRepo.UpdateStatus(tenantID, req.ID, req.Status)
+// UpdateStatus 启用/停用角色。
+//
+// 两处此前缺失、都会造成「权限撤销不生效或平台锁死」的问题：
+//  1. **缺 admin 保留编码校验**：停用 admin 角色同样会让通配策略失去持有者。
+//  2. **缺 syncPolicies()**：角色状态参与策略生成（见 SyncPoliciesFromRoleMenus），
+//     不同步的话「停用角色」这一撤销动作在 `rbac:roles:` 缓存 TTL（60s）内无效 ——
+//     被停用的角色在最长一分钟里仍能正常鉴权。
+func (s *roleService) UpdateStatus(tenantID, operatorID uint, req *dto.StatusRequest) error {
+	role, err := s.roleRepo.FindByID(tenantID, req.ID)
+	if err != nil {
+		return common.NotFoundOrErr(err, "角色不存在")
+	}
+	if err := s.checkReservedCode(tenantID, operatorID, role.Code); err != nil {
+		return err
+	}
+
+	if err := s.roleRepo.UpdateStatus(tenantID, req.ID, req.Status); err != nil {
+		return err
+	}
+	s.syncPolicies()
+	return nil
 }
 
 func (s *roleService) FindAll(tenantID uint) ([]model.SysRole, error) {

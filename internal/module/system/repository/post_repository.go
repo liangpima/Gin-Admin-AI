@@ -23,7 +23,7 @@ type PostRepository interface {
 	FindByIDs(tenantID uint, ids []uint) ([]model.SysPost, error)
 	FindAll(tenantID uint) ([]model.SysPost, error)
 	FindList(tenantID uint, name string, status *int8, page, pageSize int) ([]model.SysPost, int64, error)
-	Update(post *model.SysPost) error
+	Update(tenantID uint, post *model.SysPost) error
 	Delete(tenantID, id uint) error
 	CountByCode(tenantID uint, code string, excludeID uint) (int64, error)
 }
@@ -93,8 +93,17 @@ func (r *postRepository) FindList(tenantID uint, name string, status *int8, page
 
 // Update 更新岗位。Select 列表刻意不含 TenantID，
 // 避免把调用方对象里可能为 0 的 tenant_id 写回，导致岗位"漂移"到平台租户。
-func (r *postRepository) Update(post *model.SysPost) error {
-	return r.db.Model(post).Select("Code", "Name", "Sort", "Status", "Remark", "UpdateBy").Updates(post).Error
+//
+// 同时必须带租户条件：这是租户内表，且**唯一一个** Update 曾经完全不带
+// 租户维度的仓储（同模块的 role/dept/agreement 早已带上）。两个调用方
+// 目前都先 FindByID(tenantID, ...)，但仓储层不该依赖调用方的自觉 ——
+// 那层校验被删掉时，这里就是跨租户改数据的唯一防线。
+func (r *postRepository) Update(tenantID uint, post *model.SysPost) error {
+	return common.TenantScope(r.db, tenantID).
+		Model(&model.SysPost{}).
+		Where("id = ?", post.ID).
+		Select("Code", "Name", "Sort", "Status", "Remark", "UpdateBy").
+		Updates(post).Error
 }
 
 // Delete 软删除岗位，并清理用户-岗位关联。

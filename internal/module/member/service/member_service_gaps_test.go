@@ -489,10 +489,11 @@ func TestMemberServiceUpdateStatus(t *testing.T) {
 		t.Errorf("停用未生效: %d", got.Status)
 	}
 
-	// 跨租户：GORM 的 0 行受影响不报错，所以只能靠「值有没有变」来判定
-	if err := s.UpdateStatus(tenantB, &dto.UpdateMemberStatusRequest{ID: m.ID, Status: 1}); err != nil {
-		t.Fatalf("跨租户更新不应返回错误（0 行受影响即 nil）: %v", err)
-	}
+	// 跨租户：必须明确失败（404），而不是「0 行受影响即成功」。
+	// 返回 nil 会给出虚假成功回执，且无法与「ID 打错」区分 ——
+	// 后者返回的是同一个错误，因此不构成信息泄漏。
+	err := s.UpdateStatus(tenantB, &dto.UpdateMemberStatusRequest{ID: m.ID, Status: 1})
+	assertBizCode(t, err, common.CodeNotFound)
 	if got, _ := s.FindByID(tenantA, m.ID); got.Status != 0 {
 		t.Error("跨租户改状态竟然生效了")
 	}

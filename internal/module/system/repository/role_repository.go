@@ -29,6 +29,12 @@ type RoleRepository interface {
 	// CountByCode 按角色编码统计，**不做租户过滤**（详见实现处注释）
 	CountByCode(code string, excludeID uint) (int64, error)
 	FindByIDs(tenantID uint, ids []uint) ([]model.SysRole, error)
+	// Transaction 在**单个**数据库事务内执行 fn，fn 收到的是绑定到该事务的仓储副本。
+	//
+	// 与 UserRepository.Transaction 同理：建/改角色要同时写 sys_role 与
+	// sys_role_menu，分两次提交会在 sys_role_menu 失败时留下一个
+	// 「角色已存在但没有任何授权」的半成品。
+	Transaction(fn func(tx RoleRepository) error) error
 }
 
 type roleRepository struct {
@@ -48,6 +54,13 @@ func (r *roleRepository) Create(role *model.SysRole) error {
 		return err
 	}
 	return nil
+}
+
+// Transaction 见接口注释。
+func (r *roleRepository) Transaction(fn func(tx RoleRepository) error) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		return fn(&roleRepository{db: tx})
+	})
 }
 
 func (r *roleRepository) FindByID(tenantID, id uint) (*model.SysRole, error) {
@@ -157,7 +170,14 @@ func (r *roleRepository) ReplaceMenus(tenantID, roleID uint, menuIDs []uint) err
 		if err := tx.Where("role_id = ?", roleID).Delete(&model.SysRoleMenu{}).Error; err != nil {
 			return err
 		}
-		for _, menuID := range menuIDs {
+		// 必须去重：sys_role_menu 是 (role_id, menu_id) 复合主键，
+		// `{"menuIds":[5,5]}` 逐条 Create 会撞主键 → 500。
+		// 而重复 ID 在请求里完全合法（前端多选、手写 curl、重试都可能产生），
+		// 把一次本该幂等的「保存权限」变成服务端故障，纯属自找。
+		//
+		// 去重放在**仓储层**而不是 Service：写关联表的地方就是这里，
+		// 任何绕过 Service 的调用方（如 seed、迁移脚本）都会自动受保护。
+		for _, menuID := range common.UniqueNonZeroIDs(menuIDs) {
 			rm := model.SysRoleMenu{RoleID: roleID, MenuID: menuID}
 			if err := tx.Create(&rm).Error; err != nil {
 				return err

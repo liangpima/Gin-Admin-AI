@@ -167,6 +167,18 @@ func RefreshTokenSetKey(userID uint) string {
 	return fmt.Sprintf("refresh_token:user:%d", userID)
 }
 
+// UserTokenRevokedKey 用户级 token 吊销标记的 key。
+//
+// 语义：该 key 存在 ⇒ 该用户**在此刻之前**签发的 access / refresh token
+// 全部失效（改密、停用、删除时写入）。
+//
+// 关键：它不区分具体 token，因此**登录成功、签发新 token 之前必须删除它**。
+// 否则改密后重新登录拿到的新 token 也会被 Auth 拒绝，表现为
+// 「密码改完就登不进去了」，要等标记自然过期才恢复。
+func UserTokenRevokedKey(userID uint) string {
+	return fmt.Sprintf("user:token_revoked:%d", userID)
+}
+
 func SAdd(ctx context.Context, key string, members ...interface{}) error {
 	c, err := client()
 	if err != nil {
@@ -222,7 +234,28 @@ func IsTokenRevoked(ctx context.Context, token string) (bool, error) {
 }
 
 // DelByPrefix 按前缀批量删除键。
+//
 // 使用 SCAN 分批遍历，避免 KEYS 命令在大 key 空间下阻塞 Redis。
+//
+// ⚠️ 「边扫边删会破坏 SCAN 的全量保证、导致漏删」是一个**看起来很有道理、
+// 但实际不成立**的结论。它曾被写进评审报告（M1）并差点被改成「先收集再删」，
+// 这里把核查结论记下来，避免以后有人再改一遍：
+//
+//  1. Redis 对 SCAN 的官方保证是「完整迭代一定会返回**在迭代起止之间始终
+//     存在于集合中**的所有元素」（https://redis.io/docs/latest/commands/scan/）。
+//     我们自己删掉的键不在这个前提下，而**没有被删**的键始终满足它 ——
+//     因此它们不会被跳过。
+//  2. 该保证的实现基础是「反向二进制游标」，其设计目标**正是**「表在迭代期间
+//     被 resize（扩容**或缩容**）也不漏元素」。dict.c 里 dictScan 的注释原文：
+//     "The function guarantees all elements present in the dictionary get
+//     returned between the start and end of the iteration."，
+//     并在 "WHAT HAPPENS IF THE TABLE CHANGES IN SIZE?" 一节中分别论证了扩容
+//     与缩容两种情形（缩容：低位比特组合已完整探索过，故不会重复访问，
+//     但仍保证元素全部返回）。批量删除触发的正是缩容，落在这段论证范围内。
+//
+// 所以这里保持「边扫边删」—— 它还有一个实际优势：单条 DEL 的键数天然被 SCAN
+// 的 COUNT 限制住（≤100），而「先收集再删」需要把所有键读进内存，
+// 且单次 DEL 的键数更大（会阻塞 Redis 主线程更久）。
 func DelByPrefix(ctx context.Context, prefix string) error {
 	c, err := client()
 	if err != nil {

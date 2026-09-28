@@ -82,6 +82,25 @@ func TestDictRepositoryTypeCRUD(t *testing.T) {
 			t.Errorf("更新未落库: %+v", got)
 		}
 	})
+
+	t.Run("UpdateType 改不动归属类型编码", func(t *testing.T) {
+		// 与姊妹方法 UpdateData 排除 DictType 是同一条约定：归属类型不可变。
+		// 此前 UpdateType 的 Select 里带着 Type —— 契约说不可变、实现却允许改，
+		// 改完该类型下的字典数据会整体失联（数据还在，但页面再也取不到）。
+		// 同文件下方已有「UpdateData 改不动归属类型」的用例，这里补上对称的一条。
+		created.Type = "sys_user_gender"
+		if err := repo.UpdateType(created); err != nil {
+			t.Fatalf("更新失败: %v", err)
+		}
+
+		got, err := repo.FindTypeByID(created.ID)
+		if err != nil {
+			t.Fatalf("回读失败: %v", err)
+		}
+		if got.Type != "sys_user_status" {
+			t.Errorf("归属类型被改掉了: %q", got.Type)
+		}
+	})
 }
 
 // TestDictRepositoryCreateTypeDuplicate 类型编码重复必须被识别成业务错误

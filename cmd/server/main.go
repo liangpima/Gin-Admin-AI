@@ -115,6 +115,11 @@ func main() {
 
 	// 扩展名白名单来自配置（未配置则沿用内置默认值）
 	upload.SetAllowedExts(config.Cfg.Upload.AllowExts)
+
+	// 把上传模块的日志接到项目日志上（pkg/upload 不依赖 internal，故由这里注入）。
+	// 必须在 Init 之前注入：OSS/COS/MinIO 初始化失败会静默回退到本地存储，
+	// 那条日志是唯一能说明「文件为什么全在本地磁盘上」的线索。
+	upload.SetLogger(logger.Log.Infof)
 	upload.Init(service.LoadOSSConfig())
 
 	r := router.Setup(config.Cfg.Server.Mode)

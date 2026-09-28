@@ -108,7 +108,7 @@ func (ctl *AuthController) RefreshToken(c *gin.Context) {
 // @Summary 退出登录
 // @Tags 认证
 // @Produce json
-// @Security ApiKeyAuth
+// @Security BearerAuth
 // @Success 200 {object} common.Response
 // @Router /auth/logout [post]
 func (ctl *AuthController) Logout(c *gin.Context) {
@@ -142,7 +142,7 @@ func (ctl *AuthController) Logout(c *gin.Context) {
 // @Summary 获取用户信息
 // @Tags 认证
 // @Produce json
-// @Security ApiKeyAuth
+// @Security BearerAuth
 // @Success 200 {object} common.Response{data=vo.UserInfoResponse}
 // @Router /auth/userInfo [get]
 func (ctl *AuthController) GetUserInfo(c *gin.Context) {

@@ -351,7 +351,7 @@ CREATE TABLE IF NOT EXISTS `pay_order` (
   `amount` bigint NOT NULL COMMENT '金额(分)',
   `currency` varchar(10) DEFAULT 'CNY' COMMENT '币种',
   `channel` varchar(20) NOT NULL COMMENT '支付渠道 wechat/alipay',
-  `status` tinyint DEFAULT 0 COMMENT '0待支付 1已支付 2已关闭 3已退款',
+  `status` tinyint DEFAULT 0 COMMENT '0待支付 1已支付 2已关闭 3已退款 4退款中',
   `paid_at` datetime DEFAULT NULL COMMENT '支付时间',
   `refund_at` datetime DEFAULT NULL COMMENT '退款时间',
   `refund_amt` bigint DEFAULT 0 COMMENT '退款金额(分)',
@@ -398,7 +398,14 @@ CREATE TABLE IF NOT EXISTS `pay_member` (
   `deleted_at` datetime DEFAULT NULL COMMENT '删除时间',
   `remark` varchar(500) DEFAULT '' COMMENT '备注',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_phone` (`phone`),
+  -- 两个唯一索引的**范围刻意不同**，不是笔误：
+  --   · 手机号是「租户内唯一」—— 会员不是平台级实体，两个租户可以各自拥有
+  --     同一手机号的会员。应用层的查重（FindByPhone）也按租户过滤，
+  --     索引范围必须与它一致，否则会出现「校验通过却插入报 1062」。
+  --   · 会员编号是「全平台唯一」—— 编号由全平台共用的序列发出
+  --     （见 memberRepository.FindMaxMemberNo 的说明）。改编号范围需要
+  --     连同发号逻辑一起改，属于产品决策，不在这里单方面调整。
+  UNIQUE KEY `uk_tenant_phone` (`tenant_id`, `phone`),
   UNIQUE KEY `uk_member_no` (`member_no`),
   KEY `idx_tenant_id` (`tenant_id`),
   KEY `idx_level_id` (`level_id`),

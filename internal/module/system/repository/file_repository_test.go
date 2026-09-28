@@ -1,7 +1,10 @@
 package repository
 
 import (
+	"errors"
 	"testing"
+
+	"gorm.io/gorm"
 
 	"go-admin/internal/common"
 	"go-admin/internal/module/system/model"
@@ -79,8 +82,11 @@ func TestFileRepositoryTenantIsolation(t *testing.T) {
 	})
 
 	t.Run("跨租户 Delete 删不掉", func(t *testing.T) {
-		if err := repo.Delete(fileTenantA, theirs.ID); err != nil {
-			t.Fatalf("删除调用本身不应报错: %v", err)
+		// 跨租户写入必须明确失败（与 agreement / dept 的 Delete 同一口径）。
+		// 返回 nil 等于给出虚假成功回执：调用方以为删掉了，实际记录还在。
+		// 不构成信息泄漏 —— ID 真的不存在时返回的也是同一个错误。
+		if err := repo.Delete(fileTenantA, theirs.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+			t.Fatalf("跨租户 Delete 应被拒（ErrRecordNotFound），实际 %v", err)
 		}
 		if _, err := repo.FindByID(fileTenantB, theirs.ID); err != nil {
 			t.Error("跨租户删除竟然生效了")

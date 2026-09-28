@@ -2,13 +2,18 @@ package upload
 
 import (
 	"bytes"
+	"context"
 	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"go-admin/config"
+
+	"github.com/gin-gonic/gin"
 )
 
 // 本地存储与上传调度器的测试（P2-1）。
@@ -78,7 +83,7 @@ func TestLocalUploadWritesFileAndReturnsRelativePath(t *testing.T) {
 	content := []byte("fake-png-bytes-for-test")
 
 	fh := multipartHeader(t, "我的照片.png", content)
-	rel, err := (&localUploader{}).Upload(fh)
+	rel, err := (&localUploader{}).Upload(context.Background(), fh)
 	if err != nil {
 		t.Fatalf("上传失败: %v", err)
 	}
@@ -115,7 +120,7 @@ func TestLocalUploadGeneratesUniqueNames(t *testing.T) {
 
 	seen := make(map[string]struct{})
 	for i := 0; i < 20; i++ {
-		rel, err := (&localUploader{}).Upload(multipartHeader(t, "same.png", []byte("x")))
+		rel, err := (&localUploader{}).Upload(context.Background(), multipartHeader(t, "same.png", []byte("x")))
 		if err != nil {
 			t.Fatalf("第 %d 次上传失败: %v", i, err)
 		}
@@ -133,7 +138,7 @@ func TestLocalUploadGeneratesUniqueNames(t *testing.T) {
 func TestLocalUploadCreatesMissingDirectories(t *testing.T) {
 	root := withSavePath(t)
 
-	rel, err := (&localUploader{}).Upload(multipartHeader(t, "a.jpg", []byte("x")))
+	rel, err := (&localUploader{}).Upload(context.Background(), multipartHeader(t, "a.jpg", []byte("x")))
 	if err != nil {
 		t.Fatalf("上传失败: %v", err)
 	}
@@ -148,7 +153,7 @@ func TestLocalUploadCreatesMissingDirectories(t *testing.T) {
 func TestLocalUploadNoExtKeepsWorking(t *testing.T) {
 	withSavePath(t)
 
-	rel, err := (&localUploader{}).Upload(multipartHeader(t, "noext", []byte("x")))
+	rel, err := (&localUploader{}).Upload(context.Background(), multipartHeader(t, "noext", []byte("x")))
 	if err != nil {
 		t.Fatalf("上传失败: %v", err)
 	}
@@ -205,9 +210,11 @@ func TestInitFallsBackToLocalWhenCloudConfigInvalid(t *testing.T) {
 // 用指针相等判断「是否被替换」会永远失败。这是个容易踩的坑，记在这里。
 type markerUploader struct{ name string }
 
-func (m *markerUploader) Upload(*multipart.FileHeader) (string, error) { return m.name, nil }
-func (m *markerUploader) Delete(string) error                         { return nil }
-func (m *markerUploader) GetURL(string) string                        { return m.name }
+func (m *markerUploader) Upload(context.Context, *multipart.FileHeader) (string, error) {
+	return m.name, nil
+}
+func (m *markerUploader) Delete(context.Context, string) error { return nil }
+func (m *markerUploader) GetURL(string) string                 { return m.name }
 
 // TestSetAndGetUploaderAreWired setUploader / getUploader 的读写配对。
 func TestSetAndGetUploaderAreWired(t *testing.T) {
@@ -318,11 +325,88 @@ func TestDispatcherUploadThroughLocal(t *testing.T) {
 	}
 }
 
-// TestUploadWithContextMatchesUpload 带 gin 上下文的入口目前与普通入口等价。
+// ctxCaptureUploader 记录收到的上下文，用于验证「ctx 是否真的透传到存储实现」。
+type ctxCaptureUploader struct {
+	uploadCtx context.Context
+	deleteCtx context.Context
+}
+
+func (c *ctxCaptureUploader) Upload(ctx context.Context, _ *multipart.FileHeader) (string, error) {
+	c.uploadCtx = ctx
+	return "captured", nil
+}
+
+func (c *ctxCaptureUploader) Delete(ctx context.Context, _ string) error {
+	c.deleteCtx = ctx
+	return nil
+}
+
+func (c *ctxCaptureUploader) GetURL(string) string { return "captured" }
+
+// ctxMarkerKey 用一个私有类型做 key，避免与其它 ctx value 冲突。
+type ctxMarkerKey struct{}
+
+// TestUploadWithContextPropagatesRequestContext 请求上下文必须真的透传到存储实现。
 //
-// 保留这个断言是为了将来真按上下文区分存储/权限时，
-// 改动会被这条用例提醒（当前签名收下 c 却未使用）。
-func TestUploadWithContextMatchesUpload(t *testing.T) {
+// 此前 UploadWithContext 的实现是 `return Upload(file)`：签名承诺透传 ctx、
+// 实现却把它丢掉了，于是「客户端断开就取消上传」这条能力形同虚设 ——
+// 用户关掉页面后，服务端仍会把整个文件传完对象存储才释放连接。
+//
+// 只断言「上传成功」是区分不出透传与否的（旧实现同样成功），
+// 因此这里用一个记录 ctx 的假后端，直接比较收到的 ctx 是不是请求的 ctx。
+func TestUploadWithContextPropagatesRequestContext(t *testing.T) {
+	prev := getUploader()
+	t.Cleanup(func() { setUploader(prev) })
+
+	cap := &ctxCaptureUploader{}
+	setUploader(cap)
+
+	req := httptest.NewRequest(http.MethodPost, "/upload", nil)
+	req = req.WithContext(context.WithValue(req.Context(), ctxMarkerKey{}, "marker"))
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = req
+
+	if _, err := UploadWithContext(c, multipartHeader(t, "a.png", []byte("x"))); err != nil {
+		t.Fatalf("上传失败: %v", err)
+	}
+
+	if cap.uploadCtx == nil {
+		t.Fatal("存储实现没有收到上下文")
+	}
+	if got := cap.uploadCtx.Value(ctxMarkerKey{}); got != "marker" {
+		t.Errorf("透传的不是请求上下文（值 %v）—— UploadWithContext 可能又退回了 Upload", got)
+	}
+}
+
+// TestUploadProvidesDeadlineWithoutRequestContext 没有请求上下文时也必须自带超时。
+//
+// 否则对象存储卡住（网络分区 / 被限流 / 传到一半对端无响应）时，
+// 这个 goroutine 会永久挂住，对应的 HTTP 请求也永远不结束。
+func TestUploadProvidesDeadlineWithoutRequestContext(t *testing.T) {
+	prev := getUploader()
+	t.Cleanup(func() { setUploader(prev) })
+
+	cap := &ctxCaptureUploader{}
+	setUploader(cap)
+
+	if _, err := Upload(multipartHeader(t, "a.png", []byte("x"))); err != nil {
+		t.Fatalf("上传失败: %v", err)
+	}
+	if cap.uploadCtx == nil {
+		t.Fatal("存储实现没有收到上下文")
+	}
+	if _, ok := cap.uploadCtx.Deadline(); !ok {
+		t.Error("Upload 应自带超时上下文，否则远端存储卡住会永久挂住")
+	}
+}
+
+// TestUploadWithContextNilFallsBackToUpload gin 上下文缺失时退回普通入口。
+//
+// 测试代码与非 HTTP 调用路径会传 nil，此时不能 panic。
+func TestUploadWithContextNilFallsBackToUpload(t *testing.T) {
 	withSavePath(t)
 	prev := getUploader()
 	t.Cleanup(func() { setUploader(prev) })
@@ -334,5 +418,37 @@ func TestUploadWithContextMatchesUpload(t *testing.T) {
 	}
 	if rel == "" {
 		t.Error("应返回存储路径")
+	}
+}
+
+// TestDeletePropagatesContext 删除同样要透传上下文（远端 RemoveObject 可被取消）。
+func TestDeletePropagatesContext(t *testing.T) {
+	prev := getUploader()
+	t.Cleanup(func() { setUploader(prev) })
+
+	cap := &ctxCaptureUploader{}
+	setUploader(cap)
+
+	ctx := context.WithValue(context.Background(), ctxMarkerKey{}, "del")
+	if err := DeleteContext(ctx, "2026/01/02/a.png"); err != nil {
+		t.Fatalf("删除失败: %v", err)
+	}
+	if cap.deleteCtx == nil {
+		t.Fatal("存储实现没有收到上下文")
+	}
+	if got := cap.deleteCtx.Value(ctxMarkerKey{}); got != "del" {
+		t.Errorf("DeleteContext 未透传上下文（值 %v）", got)
+	}
+
+	// Delete 入口应自带超时
+	cap.deleteCtx = nil
+	if err := Delete("2026/01/02/a.png"); err != nil {
+		t.Fatalf("删除失败: %v", err)
+	}
+	if cap.deleteCtx == nil {
+		t.Fatal("存储实现没有收到上下文")
+	}
+	if _, ok := cap.deleteCtx.Deadline(); !ok {
+		t.Error("Delete 应自带超时上下文")
 	}
 }

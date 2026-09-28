@@ -40,7 +40,11 @@ func newMinIO(cfg OSSConfig) (*minioUploader, error) {
 		return nil, fmt.Errorf("初始化MinIO客户端失败: %w", err)
 	}
 
-	ctx := context.Background()
+	// 初始化自检也要有上限：MinIO 不可达时若无限等待，
+	// 进程会卡在启动阶段不返回（现象是「起来了但端口不监听」）。
+	ctx, cancel := context.WithTimeout(context.Background(), remoteInitTimeout)
+	defer cancel()
+
 	exists, err := client.BucketExists(ctx, cfg.Bucket)
 	if err != nil {
 		return nil, fmt.Errorf("检查Bucket失败: %w", err)
@@ -59,7 +63,7 @@ func newMinIO(cfg OSSConfig) (*minioUploader, error) {
 	}, nil
 }
 
-func (m *minioUploader) Upload(file *multipart.FileHeader) (string, error) {
+func (m *minioUploader) Upload(ctx context.Context, file *multipart.FileHeader) (string, error) {
 	src, err := file.Open()
 	if err != nil {
 		return "", fmt.Errorf("打开文件失败: %w", err)
@@ -77,7 +81,8 @@ func (m *minioUploader) Upload(file *multipart.FileHeader) (string, error) {
 		contentType = "application/octet-stream"
 	}
 
-	_, err = m.client.PutObject(context.Background(), m.bucket, objectKey, src, file.Size, minio.PutObjectOptions{
+	// 透传调用方的 ctx（MinIO SDK 支持），客户端断开时取消在途上传
+	_, err = m.client.PutObject(ctx, m.bucket, objectKey, src, file.Size, minio.PutObjectOptions{
 		ContentType: contentType,
 	})
 	if err != nil {
@@ -87,9 +92,9 @@ func (m *minioUploader) Upload(file *multipart.FileHeader) (string, error) {
 	return objectKey, nil
 }
 
-func (m *minioUploader) Delete(path string) error {
+func (m *minioUploader) Delete(ctx context.Context, path string) error {
 	objectKey := strings.TrimPrefix(path, "/")
-	return m.client.RemoveObject(context.Background(), m.bucket, objectKey, minio.RemoveObjectOptions{})
+	return m.client.RemoveObject(ctx, m.bucket, objectKey, minio.RemoveObjectOptions{})
 }
 
 func (m *minioUploader) GetURL(path string) string {

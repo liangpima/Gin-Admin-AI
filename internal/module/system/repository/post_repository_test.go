@@ -72,7 +72,7 @@ func TestPostRepositoryCRUD(t *testing.T) {
 	t.Run("Update 生效且不改租户", func(t *testing.T) {
 		created.Name = "研发中心"
 		created.Status = 0
-		if err := repo.Update(created); err != nil {
+		if err := repo.Update(postTenantA, created); err != nil {
 			t.Fatalf("更新失败: %v", err)
 		}
 

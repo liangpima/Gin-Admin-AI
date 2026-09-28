@@ -193,21 +193,42 @@ func TestMemberTagRepositoryDeleteCleansRelations(t *testing.T) {
 	}
 }
 
-// TestMemberTagRepositoryDeleteOnlyOwnTenant 跨租户 Delete 不能删掉别家的标签。
+// TestMemberTagRepositoryDeleteOnlyOwnTenant 跨租户 Delete 必须被拒绝，
+// 且**不能碰到对方的任何数据**（标签本身与会员关联都不能动）。
 //
-// 注意：关联清理那一步是按 tag_id 直接删的，没有租户维度（关联表无 tenant_id）。
-// 因此租户校验必须发生在标签本身的删除上 —— 若那一步漏了租户条件，
-// 攻击者可以拿别家的 tagID 删掉对方的标签并连带清空对方的会员关联。
+// pay_member_tag_rel 是纯关联表（无 tenant_id），关联清理只能按 tag_id 直接删。
+// 因此「先无条件删关联、再按租户删标签」的写法是危险的：拿别家的 tagID 调用时，
+// 第一条 DELETE 会真实删掉对方的会员关联，第二条命中 0 行却不报错，
+// 事务照常提交、接口返回成功 —— 一次跨租户的静默数据破坏。
+//
+// 所以租户校验必须在**动关联表之前**完成，并把跨租户调用明确报错。
+// 本用例此前只断言「对方的标签还在」，于是关联被清空这一点被漏掉了；
+// 现在同时断言标签、关联、以及返回错误三者。
 func TestMemberTagRepositoryDeleteOnlyOwnTenant(t *testing.T) {
 	repo := newTagRepoWithDB(t)
 	theirs := seedTag(t, memberTenantB, "乙租户标签", 1, 1)
 
-	if err := repo.Delete(memberTenantA, theirs.ID); err != nil {
-		t.Fatalf("删除调用本身不应报错: %v", err)
+	// 给对方标签造一条会员关联，用来验证它不会被连带删除
+	rel := model.MemberTagRel{MemberID: 201, TagID: theirs.ID}
+	if err := database.DB.Create(&rel).Error; err != nil {
+		t.Fatalf("准备关联失败: %v", err)
+	}
+
+	err := repo.Delete(memberTenantA, theirs.ID)
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("跨租户删除应返回 ErrRecordNotFound（而不是静默成功），实际 %v", err)
 	}
 
 	if _, err := repo.FindByID(memberTenantB, theirs.ID); err != nil {
-		t.Error("跨租户删除竟然生效了")
+		t.Error("跨租户删除竟然删掉了对方的标签")
+	}
+
+	var left int64
+	if err := database.DB.Model(&model.MemberTagRel{}).Where("tag_id = ?", theirs.ID).Count(&left).Error; err != nil {
+		t.Fatalf("统计关联失败: %v", err)
+	}
+	if left != 1 {
+		t.Errorf("跨租户删除不应碰到对方的会员关联，实际残留 %d 条（应为 1）", left)
 	}
 }
 

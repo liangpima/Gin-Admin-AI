@@ -34,6 +34,11 @@ temp/
 .env
 .env.*
 
+# ---- 本地开发配置：含默认 JWT 密钥与默认库密码，绝不进镜像 ----
+# 容器运行配置由 volume 挂载 deploy/config.docker.yaml 注入（见 Dockerfile）。
+# 排除它只是不进入构建上下文，不影响 `COPY config/casbin/`（路径不同）。
+config/config.yaml
+
 # ---- 版本控制与编辑器 ----
 .git
 .gitignore

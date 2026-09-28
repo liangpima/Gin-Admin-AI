@@ -392,17 +392,19 @@ func TestLogControllerErrorPaths(t *testing.T) {
 		t.Errorf("非法分页参数应返回 400，实际 %v", resp["code"])
 	}
 
-	// 缺少租户上下文（tenantID=0）时仓储会拒绝：不能退化成「清空全平台」
+	// 缺少租户上下文（tenantID=0）时仓储会拒绝：不能退化成「清空全平台」。
+	// 断言 403 而不只是「失败」：此前这条路径返回的是系统错误（500），
+	// 前端只能提示「服务器内部错误」，用户完全不知道该怎么做。
 	c, w = newCtx(http.MethodDelete, "/api/v1/system/log/operation", 0, 0)
 	ctl.ClearOperationLogs(c)
-	if resp := decodeResp(t, w); resp["code"].(float64) == 0 {
-		t.Error("缺少租户上下文时必须拒绝清空操作日志")
+	if resp := decodeResp(t, w); resp["code"].(float64) != float64(common.CodeForbidden) {
+		t.Errorf("缺少租户上下文时应返回 403，实际 %v（%v）", resp["code"], resp["message"])
 	}
 
 	c, w = newCtx(http.MethodDelete, "/api/v1/system/log/login", 0, 0)
 	ctl.ClearLoginLogs(c)
-	if resp := decodeResp(t, w); resp["code"].(float64) == 0 {
-		t.Error("缺少租户上下文时必须拒绝清空登录日志")
+	if resp := decodeResp(t, w); resp["code"].(float64) != float64(common.CodeForbidden) {
+		t.Errorf("缺少租户上下文时应返回 403（登录日志），实际 %v（%v）", resp["code"], resp["message"])
 	}
 }
 

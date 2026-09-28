@@ -44,9 +44,27 @@ func (r *memberTagRepository) Update(tenantID uint, tag *model.MemberTag) error 
 	return database.DB.Save(tag).Error
 }
 
-// Delete 软删除会员标签，并清理会员-标签关联，避免留下孤儿记录
+// Delete 软删除会员标签，并清理会员-标签关联，避免留下孤儿记录。
+//
+// 必须先按租户确认标签归属，再动关联表：
+// `pay_member_tag_rel` **没有 tenant_id 列**，关联表的删除无法靠 TenantScope 约束；
+// 而标签 ID 是全平台自增主键，只可能属于某一个租户。若先无条件删关联、
+// 再按租户删标签，那么拿他租户的标签 ID 来删时，第一条 DELETE 会**真实删掉
+// 对方的会员-标签关联**，第二条命中 0 行却不报错，事务照常提交、接口返回成功 ——
+// 一次跨租户的静默数据破坏。
 func (r *memberTagRepository) Delete(tenantID, id uint) error {
 	return database.DB.Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := common.TenantScope(tx, tenantID).
+			Model(&model.MemberTag{}).
+			Where("id = ?", id).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		if count == 0 {
+			return gorm.ErrRecordNotFound
+		}
+
 		if err := tx.Where("tag_id = ?", id).Delete(&model.MemberTagRel{}).Error; err != nil {
 			return err
 		}

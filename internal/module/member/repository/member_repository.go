@@ -19,6 +19,9 @@ type MemberRepository interface {
 	UpdateStatus(tenantID, id uint, status int8) error
 	ReplaceTags(tenantID, memberID uint, tagIDs []uint) error
 	FindTagIDsByMemberID(tenantID, memberID uint) ([]uint, error)
+	// FindTagIDsByMemberIDs 批量版：返回 memberID → tagIDs。
+	// 列表接口必须用它，否则每行都要查一次关联表（N+1）。
+	FindTagIDsByMemberIDs(tenantID uint, memberIDs []uint) (map[uint][]uint, error)
 	UpdatePoints(tenantID, memberID uint, points int64) error
 	FindMaxMemberNo() (string, error)
 }
@@ -110,7 +113,28 @@ func (r *memberRepository) FindList(tenantID uint, phone, nickname string, level
 	return members, total, err
 }
 
+// UpdateStatus 修改会员状态，并**确认目标确实属于本租户**。
+//
+// 为什么不能只看 UPDATE 的影响行数：本项目的 DSN 没有开启 `clientFoundRows`，
+// MySQL 返回的 RowsAffected 是「实际发生变化的行数」而非「匹配的行数」，
+// 把已是停用的会员再停用一次会得到 0 行，被误判成「不存在」。
+// 因此先用一条按租户过滤的 COUNT 确认归属，再更新：语义明确，
+// 且与 clientFoundRows 的取值无关。
+//
+// 归属校验本身是必须的：TenantScope 命中 0 行时 GORM **不返回错误**，
+// 不检查的话调用方会以为「改成功」—— 枚举 ID 就能声称改掉了其他租户的会员。
 func (r *memberRepository) UpdateStatus(tenantID, id uint, status int8) error {
+	var count int64
+	if err := common.TenantScope(database.DB, tenantID).
+		Model(&model.Member{}).
+		Where("id = ?", id).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return gorm.ErrRecordNotFound
+	}
+
 	return common.TenantScope(database.DB, tenantID).Model(&model.Member{}).Where("id = ?", id).Update("status", status).Error
 }
 
@@ -167,6 +191,46 @@ func (r *memberRepository) FindTagIDsByMemberID(tenantID, memberID uint) ([]uint
 	return tagIDs, err
 }
 
+// memberTagRelRow 批量查询的投影：只取两列，避免把整张关联表的列都读进来。
+type memberTagRelRow struct {
+	MemberID uint `gorm:"column:member_id"`
+	TagID    uint `gorm:"column:tag_id"`
+}
+
+// FindTagIDsByMemberIDs 批量查询多个会员的标签 ID，返回 memberID → tagIDs。
+//
+// 存在的理由是性能而不是功能：会员列表此前对每一行各查一次关联表
+// （pageSize 上限 100 → 一次列表请求最多产生 100 次额外查询），
+// 列表越靠后越慢，且随页大小线性放大。这里一次 IN 查询取回整页的关联。
+//
+// 租户约束与单条版完全一致：关联表 pay_member_tag_rel 没有 tenant_id 列，
+// 只能通过子查询回连 pay_member 施加约束。**不能因为「调用方已经过滤过」
+// 就省掉它** —— 那样签名里的 tenantID 就成了一句空话。
+//
+// 返回的 map 只为「有标签的会员」建键；调用方读取不存在键时得到 nil 切片，
+// 恰好就是「该会员没有标签」的正确语义，无需再补默认值。
+func (r *memberRepository) FindTagIDsByMemberIDs(tenantID uint, memberIDs []uint) (map[uint][]uint, error) {
+	out := make(map[uint][]uint, len(memberIDs))
+	if len(memberIDs) == 0 {
+		return out, nil
+	}
+
+	var rows []memberTagRelRow
+	query := database.DB.Model(&model.MemberTagRel{}).Where("member_id IN ?", memberIDs)
+	if tenantID > 0 {
+		query = query.Where("member_id IN (?)",
+			database.DB.Model(&model.Member{}).Select("id").Where("tenant_id = ?", tenantID))
+	}
+	if err := query.Select("member_id", "tag_id").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	for _, row := range rows {
+		out[row.MemberID] = append(out[row.MemberID], row.TagID)
+	}
+	return out, nil
+}
+
 func (r *memberRepository) UpdatePoints(tenantID, memberID uint, points int64) error {
 	return common.TenantScope(database.DB, tenantID).Model(&model.Member{}).Where("id = ?", memberID).UpdateColumn("points", points).Error
 }
@@ -175,14 +239,21 @@ func (r *memberRepository) UpdatePoints(tenantID, memberID uint, points int64) e
 //
 // 与 CountByUsername 是同一个取舍：**约束是全局的，推导就必须是全局的**。
 //
-// pay_member 的 `uk_member_no` 是全局唯一索引（`sql/init.sql`），同表的
-// `uk_phone` 也一样 ——「一个手机号全平台只能注册一次」说明会员本身被当作
-// 平台级实体。早前这里按租户取最大值，于是每个租户在空库上都从 100001 起号，
+// pay_member 的 `uk_member_no` 是全局唯一索引（`sql/init.sql`），所以推导也必须
+// 全平台取最大值。早前这里按租户取最大值，于是每个租户在空库上都从 100001 起号，
 // 第二个租户建第一个会员就撞 `uk_member_no`，对外是 1062 唯一键冲突：
 // **多租户部署下除首个租户外完全无法创建会员**（单租户部署不暴露，所以长期没被发现）。
 //
 // 因此这里没有 tenantID 参数是**有意**的，不要"补"上 ——
 // 补上就会退回「每个租户各自从 100001 开始」的冲突状态。
+//
+// ⚠️ 别拿手机号索引来反推这里的范围。同表的 `uk_phone` 已改为
+// `uk_tenant_phone`(tenant_id, phone) 的**租户内**唯一（2026-09-28，见
+// `sql/migrations/2026-09-28-member-phone-tenant.sql`）—— 两个索引范围不同是
+// 刻意为之：手机号是租户内的业务标识（应用层查重也按租户），
+// 而会员编号由全平台共用的序列发出，链式依赖了**编号本身**的全局唯一。
+// 若哪天产品要求「编号也按租户独立编号」，这里要连同
+// `generateMemberNo` 的 Redis 键、索引定义和本注释一起改。
 func (r *memberRepository) FindMaxMemberNo() (string, error) {
 	var memberNo string
 	err := database.DB.Model(&model.Member{}).

@@ -10,6 +10,7 @@ import (
 	"go-admin/internal/common"
 	"go-admin/internal/module/system/dto"
 	"go-admin/internal/module/system/model"
+	"go-admin/internal/module/system/vo"
 	"go-admin/internal/testsupport"
 
 	"gorm.io/gorm"
@@ -308,16 +309,16 @@ func TestLogServiceListsAndClear(t *testing.T) {
 
 	// tenantID=0 会退化成「不过滤」= 清空全平台，必须直接拒绝。
 	//
-	// 这里断言的是「仓库层显式护栏」而不是「有 error 就行」：GORM 对不带条件的
-	// Delete 本身会返回 "WHERE conditions required"，把仓库层的 if tenantID == 0
-	// 整段删掉后，这个兜底仍会报错 —— 只断言 err != nil 根本区分不出护栏在不在
-	// （变异验证实测转绿）。所以必须钉住错误来源。
-	if err := svc.ClearOperationLogs(0); err == nil || !strings.Contains(err.Error(), "租户上下文") {
-		t.Errorf("缺少租户上下文时必须由仓库层显式拒绝，实际 err=%v", err)
-	}
-	if err := svc.ClearLoginLogs(0); err == nil || !strings.Contains(err.Error(), "租户上下文") {
-		t.Errorf("缺少租户上下文时必须由仓库层显式拒绝（登录日志），实际 err=%v", err)
-	}
+	// 这里断言「仓库层护栏存在」+「对外是 403 业务错误」，而不是「有 error 就行」：
+	// GORM 对不带条件的 Delete 本身会返回 "WHERE conditions required"，
+	// 把仓库层的 if tenantID == 0 整段删掉后这个兜底仍会报错 ——
+	// 只断言 err != nil 根本区分不出护栏在不在（变异验证实测转绿）。
+	//
+	// 断言业务码则是另一个独立缺陷：护栏此前用 errors.New 返回，
+	// 会被 FailWith 归一成 500，超管点「清空」永远只看到「服务器内部错误」，
+	// 既清不掉也不知道为什么 —— 护栏拦对了，但用户拿不到可行动的信息。
+	assertBizError(t, svc.ClearOperationLogs(0), common.CodeForbidden)
+	assertBizError(t, svc.ClearLoginLogs(0), common.CodeForbidden)
 }
 
 // TestLogServiceCleanExpiredLogs 定时清理：按保留期删除，且保留期 <= 0 时不做事。
@@ -921,8 +922,14 @@ func TestRoleServiceReadsAndDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("按 ID 查询失败: %v", err)
 	}
-	if raw.(*model.SysRole).Code != "editor" {
-		t.Errorf("内容不符: %+v", raw)
+	// 详情返回的是 RoleDetailVO：除角色本体外还带 MenuIds，
+	// 前端权限分配对话框靠它回显菜单树（见 role_service.FindByID）。
+	detail, ok := raw.(*vo.RoleDetailVO)
+	if !ok {
+		t.Fatalf("详情应为 *vo.RoleDetailVO，实际 %T", raw)
+	}
+	if detail.Code != "editor" {
+		t.Errorf("内容不符: %+v", detail)
 	}
 	_, err = svc.FindByID(1, 99999)
 	assertBizError(t, err, common.CodeNotFound)
@@ -948,7 +955,7 @@ func TestRoleServiceReadsAndDelete(t *testing.T) {
 		t.Errorf("应只看到本租户 1 个角色，实际 %d", len(all))
 	}
 
-	if err := svc.UpdateStatus(1, &dto.StatusRequest{ID: mine.ID, Status: 0}); err != nil {
+	if err := svc.UpdateStatus(1, 1, &dto.StatusRequest{ID: mine.ID, Status: 0}); err != nil {
 		t.Fatalf("改状态失败: %v", err)
 	}
 	var fresh model.SysRole
@@ -959,7 +966,7 @@ func TestRoleServiceReadsAndDelete(t *testing.T) {
 		t.Errorf("状态应被更新为 0，实际 %d", fresh.Status)
 	}
 
-	if err := svc.Delete(1, mine.ID); err != nil {
+	if err := svc.Delete(1, 1, mine.ID); err != nil {
 		t.Fatalf("删除失败: %v", err)
 	}
 	var left int64

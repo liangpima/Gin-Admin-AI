@@ -1,6 +1,7 @@
 package upload
 
 import (
+	"context"
 	"fmt"
 	"mime/multipart"
 	"os"
@@ -15,7 +16,9 @@ import (
 
 type localUploader struct{}
 
-func (l *localUploader) Upload(file *multipart.FileHeader) (string, error) {
+// Upload 本地存储不发出站请求，ctx 用不上；
+// 保留该参数是为了满足 uploader 接口，让调用方无需区分存储类型。
+func (l *localUploader) Upload(_ context.Context, file *multipart.FileHeader) (string, error) {
 	savePath := config.Cfg.Upload.SavePath
 
 	dir := filepath.Join(savePath, time.Now().Format("2006/01/02"))
@@ -49,7 +52,7 @@ func (l *localUploader) Upload(file *multipart.FileHeader) (string, error) {
 	return relPath, nil
 }
 
-func (l *localUploader) Delete(path string) error {
+func (l *localUploader) Delete(_ context.Context, path string) error {
 	// 防止路径穿越：path 最终来自数据库记录，若被篡改成
 	// "../../config/config.yaml" 之类的值，拼接后会删到上传目录之外。
 	root := filepath.Clean(config.Cfg.Upload.SavePath)

@@ -235,9 +235,13 @@ func TestMemberLevelServiceUpdateErrors(t *testing.T) {
 
 // TestMemberLevelServiceDeleteScopedToTenant 删除必须限定在本租户。
 //
-// 仓储用的是 `TenantScope(...).Delete(&MemberLevel{}, id)`：条件不匹配时
-// GORM 返回 nil（0 行受影响），所以**不会报错** —— 只能靠「记录是否还在」来验证。
-// 这条用例的存在就是为了堵住「不报错 = 删掉了」的误判。
+// 仓储现在会检查影响行数：条件不匹配（记录不存在或不属于本租户）时返回
+// gorm.ErrRecordNotFound，Service 转成 404。所以这里既要断言「明确失败」，
+// 也要断言「记录还在」—— 只断言前者的话，一个「把记录删掉但顺手返回错误」
+// 的实现也能通过。
+//
+// 此前的实现是「0 行受影响即返回 nil」，用例只能靠「记录是否还在」反推，
+// 而且给出的是虚假成功回执。
 func TestMemberLevelServiceDeleteScopedToTenant(t *testing.T) {
 	newMemberDB(t)
 	svc := NewMemberLevelService()
@@ -246,10 +250,8 @@ func TestMemberLevelServiceDeleteScopedToTenant(t *testing.T) {
 	}
 	mine, _, _ := svc.FindList(tenantA, &dto.MemberLevelListRequest{})
 
-	// 别的租户来删：不报错，但也不能真的删掉
-	if err := svc.Delete(tenantB, mine[0].ID); err != nil {
-		t.Fatalf("跨租户删除不应返回错误（GORM 0 行受影响即 nil）: %v", err)
-	}
+	// 别的租户来删：明确 404，且不能真的删掉
+	assertBizCode(t, svc.Delete(tenantB, mine[0].ID), common.CodeNotFound)
 	still, total, _ := svc.FindList(tenantA, &dto.MemberLevelListRequest{})
 	if total != 1 {
 		t.Fatalf("跨租户删除把别人的等级删掉了: total=%d", total)
@@ -420,7 +422,11 @@ func TestMemberTagServiceDeleteRemovesRelations(t *testing.T) {
 	}
 }
 
-// TestMemberTagServiceDeleteScopedToTenant 跨租户删除不得生效。
+// TestMemberTagServiceDeleteScopedToTenant 跨租户删除必须被拒绝（404），且不得生效。
+//
+// 断言的是「明确报错」而不是「静默成功」：静默成功会掩盖关联表已被误删这一后果
+// —— pay_member_tag_rel 没有 tenant_id，关联清理只能按 tag_id 直删，
+// 因此租户校验必须发生在动关联表之前，跨租户调用必须失败。
 func TestMemberTagServiceDeleteScopedToTenant(t *testing.T) {
 	newMemberDB(t)
 	svc := NewMemberTagService()
@@ -430,9 +436,8 @@ func TestMemberTagServiceDeleteScopedToTenant(t *testing.T) {
 	}
 	mine, _, _ := svc.FindList(tenantA, &dto.MemberTagListRequest{})
 
-	if err := svc.Delete(tenantB, mine[0].ID); err != nil {
-		t.Fatalf("跨租户删除不应返回错误: %v", err)
-	}
+	assertBizCode(t, svc.Delete(tenantB, mine[0].ID), common.CodeNotFound)
+
 	if _, total, _ := svc.FindList(tenantA, &dto.MemberTagListRequest{}); total != 1 {
 		t.Errorf("跨租户删除把别人的标签删掉了: total=%d", total)
 	}

@@ -19,6 +19,12 @@ type ConfigRepository interface {
 	Delete(id uint) error
 	FindByKeyPrefix(prefix string) ([]model.SysConfig, error)
 	UpsertByKey(config *model.SysConfig) error
+	// Transaction 在**单个**数据库事务内执行 fn，fn 收到的是绑定到该事务的仓储副本。
+	//
+	// 用于批量保存：一批配置项若逐条提交，中途失败会留下「前几项已生效、
+	// 后面几项没写」的混合状态 —— 对支付/OSS 这类成组配置尤其危险
+	// （密钥写了一半，表现为「签名失败」却指不到是配置没保存全）。
+	Transaction(fn func(tx ConfigRepository) error) error
 }
 
 type configRepository struct {
@@ -70,8 +76,22 @@ func (r *configRepository) FindList(name string, page, pageSize int) ([]model.Sy
 	return configs, total, err
 }
 
+// Update 更新配置项。
+//
+// 改 config_key 时可能撞 `uk_config_key`（全局唯一），必须包装成
+// common.ErrDuplicateKey 交给 Service 转成可读提示 —— 否则改名冲突会以
+// 500「服务器内部错误」返回，用户完全不知道是自己把键名改重复了。
+// 同仓的 Create 早就这么做了，Update 这条路径此前漏了。
 func (r *configRepository) Update(config *model.SysConfig) error {
-	return r.db.Model(config).Select("Name", "ConfigKey", "Value", "Type", "Remark", "UpdateBy").Updates(config).Error
+	if err := r.db.Model(config).
+		Select("Name", "ConfigKey", "Value", "Type", "Remark", "UpdateBy").
+		Updates(config).Error; err != nil {
+		if database.IsDuplicateKey(err) {
+			return fmt.Errorf("%w: %w", common.ErrDuplicateKey, err)
+		}
+		return err
+	}
+	return nil
 }
 
 // Delete 软删除配置项。删除前改写 config_key 释放唯一索引占用，
@@ -108,4 +128,11 @@ func (r *configRepository) UpsertByKey(config *model.SysConfig) error {
 	existing.Value = config.Value
 	existing.UpdateBy = config.UpdateBy
 	return r.db.Model(&existing).Select("Value", "UpdateBy").Updates(&existing).Error
+}
+
+// Transaction 见接口注释。
+func (r *configRepository) Transaction(fn func(tx ConfigRepository) error) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		return fn(&configRepository{db: tx})
+	})
 }

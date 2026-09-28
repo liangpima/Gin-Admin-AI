@@ -79,8 +79,12 @@ func (r *dictRepository) FindTypeList(name string, page, pageSize int) ([]model.
 	return dictTypes, total, err
 }
 
+// UpdateType 更新字典类型。Select 里刻意不含 Type：
+// 归属类型不可变（改了会让该类型下的字典数据整体失联），
+// 与姊妹方法 UpdateData 排除 DictType 是同一条约定。
+// 此前这里带着 Type，接口契约说不可变、实现却允许改，属实现与契约不一致。
 func (r *dictRepository) UpdateType(dictType *model.SysDictType) error {
-	return r.db.Model(dictType).Select("Name", "Type", "Status", "Remark", "UpdateBy").Updates(dictType).Error
+	return r.db.Model(dictType).Select("Name", "Status", "Remark", "UpdateBy").Updates(dictType).Error
 }
 
 // DeleteType 软删除字典类型。删除前改写 type 释放唯一索引占用，

@@ -64,7 +64,7 @@ const docTemplate = `{
             "post": {
                 "security": [
                     {
-                        "ApiKeyAuth": []
+                        "BearerAuth": []
                     }
                 ],
                 "produces": [
@@ -132,7 +132,7 @@ const docTemplate = `{
             "get": {
                 "security": [
                     {
-                        "ApiKeyAuth": []
+                        "BearerAuth": []
                     }
                 ],
                 "produces": [
@@ -3424,7 +3424,7 @@ const docTemplate = `{
             "put": {
                 "security": [
                     {
-                        "ApiKeyAuth": []
+                        "BearerAuth": []
                     }
                 ],
                 "consumes": [
@@ -3495,7 +3495,7 @@ const docTemplate = `{
             "get": {
                 "security": [
                     {
-                        "BearerApiAuth": []
+                        "BearerAuth": []
                     }
                 ],
                 "produces": [
@@ -3857,25 +3857,31 @@ const docTemplate = `{
             ],
             "properties": {
                 "cssClass": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "dictType": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "label": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "listClass": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "remark": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 500
                 },
                 "sort": {
                     "type": "integer"
                 },
                 "value": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 }
             }
         },
@@ -3887,11 +3893,13 @@ const docTemplate = `{
             ],
             "properties": {
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "type": {
                     "description": "Type 字典类型编码，业务代码里按它取值（如 useDict('sys_user_status')），\n因此只允许小写字母、数字、下划线，格式校验在 Service 层。",
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 }
             }
         },
@@ -4112,6 +4120,7 @@ const docTemplate = `{
                 },
                 "menuIds": {
                     "type": "array",
+                    "maxItems": 500,
                     "items": {
                         "type": "integer"
                     }
@@ -4165,6 +4174,7 @@ const docTemplate = `{
                 },
                 "postIds": {
                     "type": "array",
+                    "maxItems": 100,
                     "items": {
                         "type": "integer"
                     }
@@ -4175,6 +4185,7 @@ const docTemplate = `{
                 },
                 "roleIds": {
                     "type": "array",
+                    "maxItems": 100,
                     "items": {
                         "type": "integer"
                     }
@@ -4306,16 +4317,20 @@ const docTemplate = `{
             ],
             "properties": {
                 "cssClass": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "label": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "listClass": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "remark": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 500
                 },
                 "sort": {
                     "type": "integer"
@@ -4324,7 +4339,8 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "value": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 }
             }
         },
@@ -4335,10 +4351,12 @@ const docTemplate = `{
             ],
             "properties": {
                 "name": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 128
                 },
                 "remark": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 500
                 },
                 "status": {
                     "type": "integer"
@@ -4611,6 +4629,7 @@ const docTemplate = `{
                 },
                 "menuIds": {
                     "type": "array",
+                    "maxItems": 500,
                     "items": {
                         "type": "integer"
                     }
@@ -4675,6 +4694,7 @@ const docTemplate = `{
                 },
                 "postIds": {
                     "type": "array",
+                    "maxItems": 100,
                     "items": {
                         "type": "integer"
                     }
@@ -4685,6 +4705,7 @@ const docTemplate = `{
                 },
                 "roleIds": {
                     "type": "array",
+                    "maxItems": 100,
                     "items": {
                         "type": "integer"
                     }
@@ -4709,6 +4730,7 @@ const docTemplate = `{
                 },
                 "roleIds": {
                     "type": "array",
+                    "maxItems": 100,
                     "items": {
                         "type": "integer"
                     }

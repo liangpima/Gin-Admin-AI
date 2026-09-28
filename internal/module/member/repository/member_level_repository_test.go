@@ -142,8 +142,12 @@ func TestMemberLevelRepositoryTenantIsolation(t *testing.T) {
 	})
 
 	t.Run("跨租户 Delete 删不掉", func(t *testing.T) {
-		if err := repo.Delete(memberTenantA, theirs.ID); err != nil {
-			t.Fatalf("删除调用本身不应报错: %v", err)
+		// 与同文件上方「跨租户 Update 被拒」用同一口径：跨租户写入必须明确失败。
+		// 返回 nil 会给出虚假成功回执（调用方以为删掉了，实际没有），
+		// 且无法区分「越权未遂」与「ID 打错」—— 后者本就返回同一个错误，
+		// 因此不构成信息泄漏。
+		if err := repo.Delete(memberTenantA, theirs.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
+			t.Fatalf("跨租户 Delete 应被拒（ErrRecordNotFound），实际 %v", err)
 		}
 		if _, err := repo.FindByID(memberTenantB, theirs.ID); err != nil {
 			t.Error("跨租户删除竟然生效了")

@@ -375,3 +375,112 @@ func TestMenuRepositoryParentHelpers(t *testing.T) {
 		}
 	})
 }
+
+// TestMenuRepositoryCountByName 菜单标识查重（供 Service 写入前校验）。
+//
+// 为什么需要它：name 会写进 Vue Router 的 route.name，而 tagsView 的
+// keep-alive include 与登出时的 removeRoute 都按它匹配，重名会静默串页。
+// sys_menu 上没有 name 的唯一索引，所以这层应用校验是唯一的防线。
+func TestMenuRepositoryCountByName(t *testing.T) {
+	repo := newMenuRepoWithDB(t)
+	a := seedMenu(t, repo, "User", "管理员", 0, 1, 1, "")
+	seedMenu(t, repo, "Role", "角色管理", 0, 2, 1, "")
+
+	t.Run("同名计入", func(t *testing.T) {
+		n, err := repo.CountByName("User", 0)
+		if err != nil {
+			t.Fatalf("统计失败: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("应统计到 1 条同名菜单，实际 %d", n)
+		}
+	})
+
+	t.Run("未使用的标识为 0", func(t *testing.T) {
+		n, err := repo.CountByName("NotUsed", 0)
+		if err != nil {
+			t.Fatalf("统计失败: %v", err)
+		}
+		if n != 0 {
+			t.Errorf("未使用的标识应为 0，实际 %d", n)
+		}
+	})
+
+	t.Run("excludeID 排除自身", func(t *testing.T) {
+		// 编辑时保存原标识不能算「重名」，否则「只改标题」也会被拒
+		n, err := repo.CountByName("User", a.ID)
+		if err != nil {
+			t.Fatalf("统计失败: %v", err)
+		}
+		if n != 0 {
+			t.Errorf("排除自身后应为 0，实际 %d", n)
+		}
+
+		// 排除自身后若仍有别的同名记录，仍应统计到
+		seedMenu(t, repo, "User", "管理员(副本)", 0, 3, 1, "")
+		n, err = repo.CountByName("User", a.ID)
+		if err != nil {
+			t.Fatalf("统计失败: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("排除自身后应剩 1 条同名，实际 %d", n)
+		}
+	})
+
+	t.Run("空标识恒为 0", func(t *testing.T) {
+		// 目录/按钮都可能没有标识，把它们算成重名会让第二个无标识菜单被误拒
+		seedMenu(t, repo, "", "无标识目录", 0, 4, 1, "")
+		seedMenu(t, repo, "", "无标识目录2", 0, 5, 1, "")
+		n, err := repo.CountByName("", 0)
+		if err != nil {
+			t.Fatalf("统计失败: %v", err)
+		}
+		if n != 0 {
+			t.Errorf("空标识不应参与查重，实际 %d", n)
+		}
+	})
+
+	t.Run("软删除后释放标识", func(t *testing.T) {
+		// 软删除的菜单不应再占用标识，否则删掉再重建同名菜单会被误拒
+		if err := repo.Delete(a.ID); err != nil {
+			t.Fatalf("删除失败: %v", err)
+		}
+		n, err := repo.CountByName("User", 0)
+		if err != nil {
+			t.Fatalf("统计失败: %v", err)
+		}
+		if n != 1 { // 只剩上面新建的那条副本
+			t.Errorf("软删除的记录不应再计入，实际 %d", n)
+		}
+	})
+}
+
+// TestMenuRepositoryDeleteNotFound 删除不存在的菜单必须返回 ErrRecordNotFound。
+//
+// GORM 删除不存在的记录**不报错**（RowsAffected=0），不检查影响行数就会
+// 「删除成功」而实际什么都没删：前端提示已删除、刷新后菜单还在，
+// 且与 dept / role / agreement 的 Delete（都已检查）行为不一致。
+func TestMenuRepositoryDeleteNotFound(t *testing.T) {
+	repo := newMenuRepoWithDB(t)
+
+	if err := repo.Delete(999999); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("删除不存在的菜单应返回 ErrRecordNotFound，实际: %v", err)
+	}
+
+	// 存在的菜单仍应正常删除，且顺带清掉角色-菜单关联
+	m := seedMenu(t, repo, "User", "用户管理", 0, 1, 1, "system:user:list")
+	bindRoleMenus(t, 7, m.ID)
+	if err := repo.Delete(m.ID); err != nil {
+		t.Fatalf("删除存在的菜单失败: %v", err)
+	}
+	if _, err := repo.FindByID(m.ID); err == nil {
+		t.Error("菜单应已被删除")
+	}
+	var rels int64
+	if err := database.DB.Model(&model.SysRoleMenu{}).Where("menu_id = ?", m.ID).Count(&rels).Error; err != nil {
+		t.Fatalf("统计关联失败: %v", err)
+	}
+	if rels != 0 {
+		t.Errorf("角色-菜单关联应被清理，实际残留 %d 条", rels)
+	}
+}

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -231,6 +232,16 @@ type ServerConfig struct {
 	// 部署在 nginx / SLB 之后时填其内网网段（如 10.0.0.0/8、172.16.0.0/12），
 	// 不要填 0.0.0.0/0 —— 那等于恢复成「信任一切」，gin 也会直接拒绝。
 	TrustedProxies []string `mapstructure:"trusted_proxies"`
+	// MaxBodySize 请求体大小上限（单位 MB）。缺省（<=0）时由 Validate 填默认值。
+	//
+	// 为什么必须有：Go 的 http 服务器**不限制**请求体大小，而本项目的
+	// 操作日志中间件会把整个 body io.ReadAll 进内存（再 Unmarshal 一份副本），
+	// 上传接口也会先把整个 multipart 收完才校验大小。没有上限时，
+	// 任意一个已登录用户（以及未鉴权的支付回调）发一个超大 body
+	// 就能吃光进程内存或临时盘。
+	//
+	// 必须**大于** upload.max_size：否则合法的上传请求会被这一层拦掉。
+	MaxBodySize int `mapstructure:"max_body_size"`
 }
 
 type DatabaseConfig struct {
@@ -292,6 +303,16 @@ func Init(path string) error {
 	viper.SetConfigType("yaml")
 
 	if err := viper.ReadInConfig(); err != nil {
+		// 配置文件缺失是最常见的一种失败：镜像**刻意不包含** config/config.yaml
+		// （它带默认 JWT 密钥与默认库密码，见 Dockerfile），必须由 volume 挂载注入。
+		// 这里给出可直接照做的提示，否则使用者只看到 "no such file or directory"，
+		// 会去怀疑路径写错或工作目录不对。
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("读取配置文件失败: %w\n"+
+				"提示：配置文件不存在。容器部署必须挂载配置，例如：\n"+
+				"  docker run -v $PWD/deploy/config.docker.yaml:/app/config/config.yaml:ro ...\n"+
+				"（镜像内不含 config/config.yaml：它带有默认密钥，不应随镜像分发）", err)
+		}
 		return fmt.Errorf("读取配置文件失败: %w", err)
 	}
 
@@ -321,6 +342,22 @@ const (
 	defaultReadHeaderTimeout = 10
 	maxReadHeaderTimeout     = 60
 )
+
+// 请求体大小上限的默认值（MB）。
+//
+// 取 64 而不是贴着 upload.max_size（10）：上限若与上传上限相等，
+// 任何 multipart 的边界开销都会让合法上传刚好超限。留出余量也更便于
+// 将来临时调大上传限制而不必同步改这里。
+const defaultMaxBodySize = 64
+
+// MaxBodyBytes 请求体上限（字节），供请求体限流中间件使用。
+func (c *ServerConfig) MaxBodyBytes() int64 {
+	size := c.MaxBodySize
+	if size <= 0 {
+		size = defaultMaxBodySize
+	}
+	return int64(size) << 20
+}
 
 // Validate 校验关键配置项的取值范围，并补齐可缺省的字段。
 //
@@ -355,6 +392,19 @@ func Validate() error {
 		problems = append(problems, fmt.Sprintf(
 			"server.read_header_timeout 过大（%d 秒），不应超过 %d 秒",
 			Cfg.Server.ReadHeaderTimeout, maxReadHeaderTimeout))
+	}
+
+	// MaxBodySize 同样是后加字段：缺省时补默认值，避免升级后既有配置起不来。
+	if Cfg.Server.MaxBodySize <= 0 {
+		Cfg.Server.MaxBodySize = defaultMaxBodySize
+	}
+	// 上限必须大于上传上限，否则「配了上传大小限制」反而变成
+	// 「所有上传都被请求体上限拒绝」，且错误来自中间件、与上传配置毫无关联，
+	// 排查成本很高。这里在启动时直接拦下。
+	if Cfg.Upload.MaxSize > 0 && Cfg.Server.MaxBodySize <= Cfg.Upload.MaxSize {
+		problems = append(problems, fmt.Sprintf(
+			"server.max_body_size(%d MB) 必须大于 upload.max_size(%d MB)，否则上传请求会被请求体上限拦掉",
+			Cfg.Server.MaxBodySize, Cfg.Upload.MaxSize))
 	}
 
 	problems = append(problems, validateTrustedProxies(Cfg.Server.TrustedProxies)...)
@@ -554,6 +604,18 @@ const (
 	defaultDBPassword = "123456"
 )
 
+// minJWTSecretLen 生产环境 JWT 密钥的最小长度（字符）。
+//
+// 32 是 HMAC-SHA256 的块长，也是「用随机数生成」的自然下限
+// （`openssl rand -base64 48` 约 64 字符）。
+//
+// 只拒绝「空」与「恰好等于内置默认值」是不够的：`JWT_SECRET=abc` 同样能通过。
+// 而 HS256 的密钥只有 3 字节时，攻击者只要拿到任意一枚合法 token
+// （日志、抓包、浏览器 cookie）就能离线暴力枚举出密钥，随后伪造
+// TenantID/UserID 任意组合的 access token —— 租户 ID 正是从 claims 取的，
+// 因此这等价于任意租户的越权登录。
+const minJWTSecretLen = 32
+
 // ValidateSecurity 校验生产环境的关键密钥是否仍为默认值。
 //
 // 默认值一旦被带上生产环境，攻击者可据此伪造 JWT（等同于任意用户登录）
@@ -566,8 +628,18 @@ func ValidateSecurity() error {
 
 	var problems []string
 
-	if secret := GetJWTSecret(); secret == "" || secret == defaultJWTSecret {
-		problems = append(problems, "jwt.secret 仍为默认值（请设置环境变量 JWT_SECRET）")
+	// 先判「是否默认值」（文案更具体），再判长度。两个分支互斥，
+	// 避免同一个问题报两条、让使用者以为有两处错误。
+	switch secret := GetJWTSecret(); {
+	case secret == "" || secret == defaultJWTSecret:
+		problems = append(problems, fmt.Sprintf(
+			"jwt.secret 仍为默认值（%q）：任何知道该值的人都能伪造任意用户的 token；"+
+				"请设置环境变量 JWT_SECRET（生成方式：openssl rand -base64 48）", defaultJWTSecret))
+	case len(secret) < minJWTSecretLen:
+		problems = append(problems, fmt.Sprintf(
+			"jwt.secret 长度不足（当前 %d 字符，至少 %d）：短密钥可被离线暴力枚举，"+
+				"进而伪造任意用户的 token；请用 openssl rand -base64 48 重新生成",
+			len(secret), minJWTSecretLen))
 	}
 	if Cfg.Database.Password == defaultDBPassword {
 		problems = append(problems, "database.password 仍为默认值（请设置环境变量 DB_PASSWORD）")

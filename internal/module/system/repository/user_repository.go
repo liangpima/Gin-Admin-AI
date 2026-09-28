@@ -17,7 +17,7 @@ type UserRepository interface {
 	FindByUsername(tenantID uint, username string) (*model.SysUser, error)
 	FindByUsernameForAuth(username string) (*model.SysUser, error)
 	FindList(tenantID uint, username, phone string, status *int8, deptID uint, page, pageSize int) ([]model.SysUser, int64, error)
-	Update(user *model.SysUser) error
+	Update(tenantID uint, user *model.SysUser) error
 	Delete(tenantID, id uint) error
 	UpdateStatus(tenantID, id uint, status int8) error
 	ResetPassword(tenantID, id uint, password string) error
@@ -28,6 +28,19 @@ type UserRepository interface {
 	FindRoleIDsByUserIDs(userIDs []uint) (map[uint][]uint, error)
 	// CountByUsername 按用户名统计，**不做租户过滤**（详见实现处注释）
 	CountByUsername(username string, excludeID uint) (int64, error)
+	// Transaction 在**单个**数据库事务内执行 fn，fn 收到的是绑定到该事务的仓储副本。
+	//
+	// 为什么需要它：一次「建用户」实际要写三张表
+	// （sys_user + sys_user_role + sys_user_post）。仓储的每个方法各自开事务
+	// 只能保证「自己那一笔」原子 —— 主表已落库、关联表失败时仍会留下半成品：
+	// 用户建好了、角色是空的，调用方拿到 500 以为整次操作失败，
+	// 实际上那个账号已经能用（且没有任何权限，排查时现象离根因很远）。
+	//
+	// 把 `*gorm.DB` 交给 Service 会破坏分层（Service 不应感知存储细节），
+	// 因此由仓储提供事务边界，Service 只负责组合调用。
+	// 实现内部会开 SAVEPOINT 而非新事务（GORM 对已处于事务中的会话自动降级），
+	// 所以 fn 里继续调用 ReplaceRoles 这类自带事务的方法也是安全的。
+	Transaction(fn func(tx UserRepository) error) error
 }
 
 type userRepository struct {
@@ -48,6 +61,14 @@ func (r *userRepository) Create(user *model.SysUser) error {
 		return err
 	}
 	return nil
+}
+
+// Transaction 见接口注释。fn 收到的仓储共享同一个事务，
+// 因此其中任何一步失败都会把先前的写入一并回滚。
+func (r *userRepository) Transaction(fn func(tx UserRepository) error) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		return fn(&userRepository{db: tx})
+	})
 }
 
 func (r *userRepository) FindByID(tenantID, id uint) (*model.SysUser, error) {
@@ -96,8 +117,27 @@ func (r *userRepository) FindList(tenantID uint, username, phone string, status 
 	return users, total, err
 }
 
-func (r *userRepository) Update(user *model.SysUser) error {
-	return r.db.Model(user).Select("Username", "Nickname", "Phone", "Email", "Avatar", "Password", "Status", "DeptID", "Remark", "UpdateBy").Updates(user).Error
+// Update 更新用户的可编辑字段。
+//
+// 两个要点，都是「调用方看着没事、换个调用方就出事」的那类：
+//
+//  1. **必须带租户条件**（规则 7）。当前两个调用方（`userService.Update` /
+//     `UpdateDept`）都先做了 `FindByID(tenantID, ...)`，所以「看起来」不会
+//     跨租户。但那层校验一旦被删掉或绕过，这里就是最后一道闸 ——
+//     仓储层不该把隔离性寄托在调用方的自觉上。
+//     不传 tenantID 时（tenantID==0）TenantScope 不过滤，保持平台级调用可用。
+//
+//  2. **Select 刻意不含 Password**。`user` 是从库里读出来的，它的 Password
+//     是**读取那一刻**的哈希；并发场景下（管理员改资料的同时该用户自己重置了
+//     密码）把它写回去，会把新哈希**静默回滚**成旧值 —— 用户改完密码发现
+//     旧密码又能用了，且没有任何报错。密码只能走 ResetPassword。
+//     `UpdateLoginTime` 处已有同类的明文警告。
+func (r *userRepository) Update(tenantID uint, user *model.SysUser) error {
+	return common.TenantScope(r.db, tenantID).
+		Model(&model.SysUser{}).
+		Where("id = ?", user.ID).
+		Select("Username", "Nickname", "Phone", "Email", "Avatar", "Status", "DeptID", "Remark", "UpdateBy").
+		Updates(user).Error
 }
 
 // Delete 软删除用户，并清理其角色/岗位关联。
@@ -127,7 +167,30 @@ func (r *userRepository) Delete(tenantID, id uint) error {
 	})
 }
 
+// UpdateStatus 修改用户状态，并**确认目标确实属于本租户**。
+//
+// 为什么不能只靠 UPDATE 的影响行数：
+// 本项目的 DSN 没有开启 `clientFoundRows`，MySQL 返回的 RowsAffected 是
+// 「实际发生变化的行数」而非「匹配的行数」。于是把已经是停用的用户再停用一次
+// （status 值没变）会得到 0 行，被误判成「用户不存在」而返回 404 —— 那是把
+// 幂等操作变成了报错。因此这里先用一条按租户过滤的 COUNT 确认归属，
+// 再执行更新：语义明确，且与 clientFoundRows 的取值无关。
+//
+// 归属校验本身是必须的：TenantScope 命中 0 行时 GORM **不返回错误**，
+// 若不检查，调用方会以为「改成功」，随后依据这次「成功」去吊销 Token
+// （用的还是原始 ID）—— 那就是跨租户强制下线。
 func (r *userRepository) UpdateStatus(tenantID, id uint, status int8) error {
+	var count int64
+	if err := common.TenantScope(r.db, tenantID).
+		Model(&model.SysUser{}).
+		Where("id = ?", id).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return gorm.ErrRecordNotFound
+	}
+
 	return common.TenantScope(r.db, tenantID).Model(&model.SysUser{}).Where("id = ?", id).Update("status", status).Error
 }
 
@@ -155,7 +218,10 @@ func (r *userRepository) ReplaceRoles(userID uint, roleIDs []uint) error {
 		if err := tx.Where("user_id = ?", userID).Delete(&model.SysUserRole{}).Error; err != nil {
 			return err
 		}
-		for _, roleID := range roleIDs {
+		// 去重（sys_user_role 是 (user_id, role_id) 复合主键）：
+		// Service 层目前也会去重，但仓储层不该依赖调用方的自觉 ——
+		// 重复 ID 撞主键是 500，而它本可以是一次正常的幂等写入
+		for _, roleID := range common.UniqueNonZeroIDs(roleIDs) {
 			ur := model.SysUserRole{UserID: userID, RoleID: roleID}
 			if err := tx.Create(&ur).Error; err != nil {
 				return err
@@ -170,7 +236,8 @@ func (r *userRepository) ReplacePosts(userID uint, postIDs []uint) error {
 		if err := tx.Where("user_id = ?", userID).Delete(&model.SysUserPost{}).Error; err != nil {
 			return err
 		}
-		for _, postID := range postIDs {
+		// 同 ReplaceRoles：sys_user_post 也是 (user_id, post_id) 复合主键
+		for _, postID := range common.UniqueNonZeroIDs(postIDs) {
 			up := model.SysUserPost{UserID: userID, PostID: postID}
 			if err := tx.Create(&up).Error; err != nil {
 				return err

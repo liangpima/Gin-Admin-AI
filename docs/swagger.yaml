@@ -59,18 +59,24 @@ definitions:
   dto.CreateDictDataRequest:
     properties:
       cssClass:
+        maxLength: 128
         type: string
       dictType:
+        maxLength: 128
         type: string
       label:
+        maxLength: 128
         type: string
       listClass:
+        maxLength: 128
         type: string
       remark:
+        maxLength: 500
         type: string
       sort:
         type: integer
       value:
+        maxLength: 128
         type: string
     required:
     - dictType
@@ -80,11 +86,13 @@ definitions:
   dto.CreateDictTypeRequest:
     properties:
       name:
+        maxLength: 128
         type: string
       type:
         description: |-
           Type 字典类型编码，业务代码里按它取值（如 useDict('sys_user_status')），
           因此只允许小写字母、数字、下划线，格式校验在 Service 层。
+        maxLength: 128
         type: string
     required:
     - name
@@ -254,6 +262,7 @@ definitions:
       menuIds:
         items:
           type: integer
+        maxItems: 500
         type: array
       name:
         maxLength: 64
@@ -291,6 +300,7 @@ definitions:
       postIds:
         items:
           type: integer
+        maxItems: 100
         type: array
       remark:
         maxLength: 500
@@ -298,6 +308,7 @@ definitions:
       roleIds:
         items:
           type: integer
+        maxItems: 100
         type: array
       status:
         enum:
@@ -404,18 +415,23 @@ definitions:
   dto.UpdateDictDataRequest:
     properties:
       cssClass:
+        maxLength: 128
         type: string
       label:
+        maxLength: 128
         type: string
       listClass:
+        maxLength: 128
         type: string
       remark:
+        maxLength: 500
         type: string
       sort:
         type: integer
       status:
         type: integer
       value:
+        maxLength: 128
         type: string
     required:
     - label
@@ -424,8 +440,10 @@ definitions:
   dto.UpdateDictTypeRequest:
     properties:
       name:
+        maxLength: 128
         type: string
       remark:
+        maxLength: 500
         type: string
       status:
         type: integer
@@ -621,6 +639,7 @@ definitions:
       menuIds:
         items:
           type: integer
+        maxItems: 500
         type: array
       name:
         maxLength: 64
@@ -665,6 +684,7 @@ definitions:
       postIds:
         items:
           type: integer
+        maxItems: 100
         type: array
       remark:
         maxLength: 500
@@ -672,6 +692,7 @@ definitions:
       roleIds:
         items:
           type: integer
+        maxItems: 100
         type: array
       status:
         enum:
@@ -688,6 +709,7 @@ definitions:
       roleIds:
         items:
           type: integer
+        maxItems: 100
         type: array
     required:
     - id
@@ -849,7 +871,7 @@ paths:
           schema:
             $ref: '#/definitions/common.Response'
       security:
-      - ApiKeyAuth: []
+      - BearerAuth: []
       summary: 退出登录
       tags:
       - 认证
@@ -893,7 +915,7 @@ paths:
                   $ref: '#/definitions/vo.UserInfoResponse'
               type: object
       security:
-      - ApiKeyAuth: []
+      - BearerAuth: []
       summary: 获取用户信息
       tags:
       - 认证
@@ -2958,7 +2980,7 @@ paths:
           schema:
             $ref: '#/definitions/common.Response'
       security:
-      - ApiKeyAuth: []
+      - BearerAuth: []
       summary: 修改密码
       tags:
       - 管理员
@@ -3010,7 +3032,7 @@ paths:
           schema:
             type: file
       security:
-      - BearerApiAuth: []
+      - BearerAuth: []
       summary: 导出用户列表
       tags:
       - 管理员

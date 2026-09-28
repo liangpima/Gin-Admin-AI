@@ -87,7 +87,7 @@ func (s *postService) Update(tenantID, id uint, name, code string, sort int, sta
 	post.Status = status
 	post.UpdateBy = operatorID
 
-	if err := s.postRepo.Update(post); err != nil {
+	if err := s.postRepo.Update(tenantID, post); err != nil {
 		// 改编码时可能撞 (tenant_id, code) 唯一索引
 		if errors.Is(err, common.ErrDuplicateKey) {
 			return common.NewBizError("岗位编码已存在")
@@ -135,5 +135,5 @@ func (s *postService) UpdateStatus(tenantID, id uint, status int8) error {
 		return common.NotFoundOrErr(err, "岗位不存在")
 	}
 	post.Status = status
-	return s.postRepo.Update(post)
+	return s.postRepo.Update(tenantID, post)
 }

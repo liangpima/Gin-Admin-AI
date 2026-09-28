@@ -21,25 +21,35 @@ type tencentCOS struct {
 }
 
 func newTencentCOS(cfg OSSConfig) (*tencentCOS, error) {
-	var baseURL *cos.BaseURL
-
-	if cfg.Domain != "" {
-		domain := cfg.Domain
-		if !strings.HasPrefix(domain, "http") {
-			domain = "https://" + domain
-		}
-		u, _ := neturl.Parse(domain)
-		baseURL = &cos.BaseURL{BucketURL: u}
-	} else {
-		bucketURL := fmt.Sprintf("https://%s.cos.%s.myqcloud.com", cfg.Bucket, cfg.Endpoint)
-		u, _ := neturl.Parse(bucketURL)
-		baseURL = &cos.BaseURL{BucketURL: u}
+	// BucketURL 必须是 **COS 的 API 端点**，而不是 oss.domain。
+	//
+	// oss.domain 的语义是「对外访问域名」（通常是 CDN / 自定义加速域名），
+	// 它只用于生成给前端用的直链。把它当 API 端点会让所有 Put/Delete/Get
+	// 都发到 CDN 主机上 —— CDN 一般只回源 GET，上传会直接失败，
+	// 表现为「配了 domain 之后反而传不上去」，而错误信息只是笼统的连接失败。
+	if cfg.Endpoint == "" {
+		return nil, fmt.Errorf("COS 初始化失败: 缺少 oss.endpoint（区域，如 ap-guangzhou）")
+	}
+	if cfg.Bucket == "" {
+		return nil, fmt.Errorf("COS 初始化失败: 缺少 oss.bucket")
 	}
 
-	client := cos.NewClient(baseURL, &http.Client{})
-
-	_, _, err := client.Bucket.Get(context.Background(), nil)
+	// endpoint 统一剥掉协议，避免拼出 `https://b.cos.https://cos...`
+	region := stripScheme(cfg.Endpoint)
+	bucketURL := fmt.Sprintf("https://%s.cos.%s.myqcloud.com", cfg.Bucket, region)
+	u, err := neturl.Parse(bucketURL)
 	if err != nil {
+		return nil, fmt.Errorf("COS 初始化失败: 解析 BucketURL %q 出错: %w", bucketURL, err)
+	}
+
+	// 显式给 SDK 的 HTTP 客户端设超时：默认客户端没有总超时，
+	// COS 卡住时上传请求会永远挂着（理由同 aliyun_oss.go）。
+	client := cos.NewClient(&cos.BaseURL{BucketURL: u}, &http.Client{Timeout: uploadTimeout})
+
+	ctx, cancel := context.WithTimeout(context.Background(), remoteInitTimeout)
+	defer cancel()
+
+	if _, _, err := client.Bucket.Get(ctx, nil); err != nil {
 		return nil, fmt.Errorf("连接COS失败: %w", err)
 	}
 
@@ -47,11 +57,11 @@ func newTencentCOS(cfg OSSConfig) (*tencentCOS, error) {
 		client:     client,
 		domain:     strings.TrimRight(cfg.Domain, "/"),
 		bucketName: cfg.Bucket,
-		region:     cfg.Endpoint,
+		region:     region,
 	}, nil
 }
 
-func (t *tencentCOS) Upload(file *multipart.FileHeader) (string, error) {
+func (t *tencentCOS) Upload(ctx context.Context, file *multipart.FileHeader) (string, error) {
 	src, err := file.Open()
 	if err != nil {
 		return "", fmt.Errorf("打开文件失败: %w", err)
@@ -69,7 +79,9 @@ func (t *tencentCOS) Upload(file *multipart.FileHeader) (string, error) {
 		contentType = "application/octet-stream"
 	}
 
-	_, err = t.client.Object.Put(context.Background(), objectKey, src, &cos.ObjectPutOptions{
+	// 透传调用方的 ctx：COS SDK 支持 ctx，客户端断开时能真正取消在途上传，
+	// 不必把整个文件传完才释放连接（这是本地存储不需要、而远端存储必须做的事）。
+	_, err = t.client.Object.Put(ctx, objectKey, src, &cos.ObjectPutOptions{
 		ObjectPutHeaderOptions: &cos.ObjectPutHeaderOptions{
 			ContentType: contentType,
 		},
@@ -81,9 +93,9 @@ func (t *tencentCOS) Upload(file *multipart.FileHeader) (string, error) {
 	return objectKey, nil
 }
 
-func (t *tencentCOS) Delete(path string) error {
+func (t *tencentCOS) Delete(ctx context.Context, path string) error {
 	objectKey := strings.TrimPrefix(path, "/")
-	_, err := t.client.Object.Delete(context.Background(), objectKey)
+	_, err := t.client.Object.Delete(ctx, objectKey)
 	return err
 }
 
@@ -94,5 +106,5 @@ func (t *tencentCOS) GetURL(path string) string {
 		return t.domain + "/" + objectKey
 	}
 
-	return fmt.Sprintf("https://%s.cos.%s.myqcloud.com/%s", t.bucketName, t.region, objectKey)
+	return fmt.Sprintf("https://%s.cos.%s.myqcloud.com/%s", t.bucketName, stripScheme(t.region), objectKey)
 }

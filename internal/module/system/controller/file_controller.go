@@ -61,7 +61,11 @@ func (ctl *FileController) FindList(c *gin.Context) {
 	name := c.Query("name")
 	mimeType := c.Query("mimeType")
 	sortOrder := c.DefaultQuery("sortOrder", "desc")
-	page, pageSize := common.GetPageInfo(c)
+	page, pageSize, err := common.GetPageInfo(c)
+	if err != nil {
+		common.Error(c, common.CodeBadRequest, err.Error())
+		return
+	}
 
 	tenantID := common.GetTenantID(c)
 	list, total, err := ctl.fileService.FindList(tenantID, name, mimeType, sortOrder, page, pageSize)

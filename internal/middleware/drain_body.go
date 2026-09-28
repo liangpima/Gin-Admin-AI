@@ -4,24 +4,49 @@ import (
 	"io"
 	"net/http"
 
+	"go-admin/config"
+
 	"github.com/gin-gonic/gin"
 )
 
-// maxDrainBytes 补读请求体的上限，与 net/http 的 maxPostHandlerReadBytes 同值。
+// # 补读上限怎么取
 //
-// 取同一个值不是巧合，而是刻意的（见 DrainBody 的注释）：本中间件做的事
-// 与 net/http 对 keep-alive 请求在 handler 返回后做的事完全相同，
-// 上游注释里那句 "approximately what a typical machine's TCP buffer size is anyway"
-// 同样适用于这里。
+// 上限必须**覆盖「任何会被服务端接受的请求体」**，即 ≥ `server.max_body_size`。
+// 因此它不是一个写死的常量，而是由 DrainBodyFromConfig 从配置里取。
 //
-// 有上限也是必要的：这个函数运行在**尚未通过鉴权**的请求上，
-// 无上限地读完等于让匿名调用方用一个 Content-Length 就能让我们替他把数据收完。
+// 为什么不能写一个小常量：这里曾经是 256KB（与 net/http 的
+// maxPostHandlerReadBytes 同值），而它**小于 `upload.max_size`（默认 10MB）**，
+// 于是上传路径上本中间件要修的缺陷并没有修好 ——
+// 上传时 access token 刚过期（正是 B4「401 → 续期 → 重放」要覆盖的路径）
+// 被 401 拒绝后，补读在 256KB 处就停了，剩余约 9.7MB 仍压在接收缓冲区里，
+// 关连接照旧发 RST，那个 401 还是收不到：nginx 把它报成 502，
+// 前端拿不到 401，续期流程根本不会触发，用户直接被登出页接走。
+// 此前这里的注释还断言「≤10MB 的上传都远小于这个值」，与配置事实正好相反，
+// 会让人误以为已经覆盖 —— 这类「注释与实际取值矛盾」比没有注释更危险。
+//
+// 为什么取 max_body_size 而不是干脆不设上限：本中间件运行在**尚未通过鉴权**的
+// 请求上，无上限地读完等于让匿名调用方用一个 Content-Length 就能让我们
+// 替他把数据收完。取 `server.max_body_size` 的好处是**不引入新的资源占用形态** ——
+// 同一份 body 只要请求被正常受理，本来就会被读完（请求体限流中间件 + 业务解析），
+// 所以「一次请求最多让我们读多少」的上界没有任何变化。
+// 声明长度就超限的请求（413）另行短路，见 DrainBody 里的说明。
+//
 // 超过上限时放弃补读，连接仍会被重置（退回修复前的行为）——
-// 比「为拒绝一个请求而先收下 1GB」划算，且真正会被拒绝的合法请求
-// （JSON 写接口、≤10MB 的上传）都远小于这个值。
-const maxDrainBytes = 256 << 10
+// 比「为拒绝一个请求而先收下 1GB」划算。
 
-// DrainBody 在请求结束前把**未被读完**的请求体读掉并丢弃。
+// DrainBodyFromConfig 按当前配置返回补读中间件。
+//
+// 单独提供这个入口而不是让调用方自己读配置：上限的来源与约束
+// （必须 ≥ server.max_body_size）都定义在这里，调用方只需要一个入口。
+// 与 BodyLimitFromConfig 是同一套约定。
+func DrainBodyFromConfig() gin.HandlerFunc {
+	return DrainBody(config.Cfg.Server.MaxBodyBytes())
+}
+
+// DrainBody 在请求结束前把**未被读完**的请求体读掉并丢弃，最多读 limit 字节。
+//
+// limit <= 0 表示不补读 —— 宁可退回缺陷行为，也不做无上限读取。
+// 生产代码请用 DrainBodyFromConfig，不要自己算这个值。
 //
 // # 它修的是什么
 //
@@ -94,22 +119,39 @@ const maxDrainBytes = 256 << 10
 //     此时 `io.Copy` 只会做一次立即返回 EOF 的 Read。
 //  2. **拒绝响应可能被推迟**：若客户端声明了 body 却迟迟不发，补读会等到
 //     body 到达或读超时（`server.read_timeout`，本项目 60s）为止，响应因此延后。
-//     这与 net/http 对 keep-alive 请求本就会做的事一致（同样的 256KB 上限、
-//     同样受 read_timeout 约束），因此**没有引入新的资源占用形态** ——
-//     只是把 `Connection: close` 对齐到 keep-alive 已有的行为。
+//     这与「请求被正常受理时本就要把 body 读完」是同一件事（同样受
+//     read_timeout 约束、同样的字节量上界），因此**没有引入新的资源占用形态** ——
+//     只是把 `Connection: close` 对齐到正常路径已有的行为。
 //     刻意不加一个更短的读超时：那会让「body 比响应晚到」的慢速客户端
 //     重新落回 RST，也就是把本中间件要修的场景又修坏。
-func DrainBody() gin.HandlerFunc {
+func DrainBody(limit int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Next()
+
+		if limit <= 0 {
+			return
+		}
 
 		body := c.Request.Body
 		if body == nil || body == http.NoBody {
 			return
 		}
 
+		// 已经因为「请求体过大」被拒绝的请求不必补读。
+		//
+		// 这类请求的 body 按定义就大于 `server.max_body_size`（即大于我们
+		// 会接受的任何 body），补读只会把上限内的数据白读一遍 —— 那恰好是
+		// 「为拒绝一个超大请求而先把它收下来」，正是本中间件要避免的代价。
+		// 丢一个 413 的代价可以接受：客户端本来就不该发这么大的 body。
+		//
+		// 注意这里看的是**响应状态码**而不是「BodyLimit 有没有跑过」：
+		// 413 的语义就是「这个 body 我不收」，与本中间件的取舍完全一致。
+		if c.Writer.Status() == http.StatusRequestEntityTooLarge {
+			return
+		}
+
 		// 只补读、不报错：客户端中途挂断（写一半就不发了）是常态，
 		// 那种情况下读到的错误没有处理价值，也不该污染日志。
-		_, _ = io.Copy(io.Discard, io.LimitReader(body, maxDrainBytes))
+		_, _ = io.Copy(io.Discard, io.LimitReader(body, limit))
 	}
 }

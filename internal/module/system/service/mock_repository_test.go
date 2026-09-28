@@ -6,6 +6,7 @@ import (
 	"go-admin/internal/common"
 	"go-admin/internal/module/system/dto"
 	"go-admin/internal/module/system/model"
+	"go-admin/internal/module/system/repository"
 
 	"gorm.io/gorm"
 )
@@ -27,6 +28,13 @@ type mockUserRepo struct {
 	// 记录调用情况，供断言
 	createdUsers    []*model.SysUser
 	updatedUsers    []*model.SysUser
+	// updateTenants 与 updatedUsers 一一对应，记录 Update 收到的租户 ID。
+	//
+	// 桩本身不做租户过滤（它没有数据库），所以「跨租户改数据」这类缺陷
+	// 只能由 repository 包的用例覆盖。但**「Service 有没有把 tenantID 传下去」**
+	// 只有这里能验：传 0 等于让 TenantScope 不过滤，而这个错误在仓储层
+	// 是看不出来的（0 是合法的「平台级」取值）。
+	updateTenants   []uint
 	replacedRoles   []uint
 	resetPwdCalls   int
 	lastResetPwdVal string
@@ -62,11 +70,12 @@ func (m *mockUserRepo) FindList(tenantID uint, username, phone string, status *i
 	return nil, 0, nil
 }
 
-func (m *mockUserRepo) Update(user *model.SysUser) error {
+func (m *mockUserRepo) Update(tenantID uint, user *model.SysUser) error {
 	// 记录快照而非指针：Service 在 Update 前就地修改同一个对象，
 	// 只存指针的话断言时看到的永远是最终状态，检测不出「字段被清成零值」
 	snapshot := *user
 	m.updatedUsers = append(m.updatedUsers, &snapshot)
+	m.updateTenants = append(m.updateTenants, tenantID)
 	return nil
 }
 
@@ -115,6 +124,15 @@ func (m *mockUserRepo) CountByUsername(username string, excludeID uint) (int64, 
 		return m.countByUsernameFn(username, excludeID)
 	}
 	return 0, nil
+}
+
+// Transaction 桩没有数据库，无法提供真正的回滚语义。
+//
+// 这里把**自身**交给回调而不是新建一个「事务副本」：既满足接口，
+// 又让回调内的调用照旧被记录到 m 上，既有用例的断言不受影响。
+// 真实事务语义由 repository 包的用例（走内存库）覆盖。
+func (m *mockUserRepo) Transaction(fn func(repository.UserRepository) error) error {
+	return fn(m)
 }
 
 // stubDeptService 只实现 normalizeDeptID 会触达的 FindByID，

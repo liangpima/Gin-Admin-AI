@@ -149,7 +149,7 @@ func (ctl *UserController) FindList(c *gin.Context) {
 // @Summary 导出用户列表
 // @Tags 管理员
 // @Produce application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
-// @Security BearerApiAuth
+// @Security BearerAuth
 // @Param username query string false "用户名"
 // @Param phone query string false "手机号"
 // @Param status query int false "状态"
@@ -329,7 +329,7 @@ func (ctl *UserController) UpdateDept(c *gin.Context) {
 // @Tags 管理员
 // @Accept json
 // @Produce json
-// @Security ApiKeyAuth
+// @Security BearerAuth
 // @Param body body dto.ChangePasswordRequest true "密码信息"
 // @Success 200 {object} common.Response
 // @Router /system/user/changePwd [put]

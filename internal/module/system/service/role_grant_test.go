@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"go-admin/internal/common"
+	"go-admin/internal/database"
 	"go-admin/internal/middleware"
 	"go-admin/internal/module/system/dto"
 	"go-admin/internal/module/system/model"
@@ -384,5 +385,130 @@ func TestUserServiceRejectsGrantingAdminRole(t *testing.T) {
 	roleIDs, _ := userRepo.FindRoleIDsByUserID(target.ID)
 	if len(roleIDs) != 0 {
 		t.Errorf("被拒绝的绑定不应落库，实际 %v", roleIDs)
+	}
+}
+
+// ---- 删除 / 停用 admin 角色（H14）----
+
+// hasCasbinRuleFor 查询策略表里是否存在以 roleCode 为主体的策略。
+func hasCasbinRuleFor(t *testing.T, roleCode string) bool {
+	t.Helper()
+	var n int64
+	if err := database.DB.Model(&middleware.CasbinRule{}).
+		Where("v0 = ?", roleCode).Count(&n).Error; err != nil {
+		t.Fatalf("统计策略失败: %v", err)
+	}
+	return n > 0
+}
+
+// TestRoleCannotDeleteAdminRole 非 admin 操作者不得删除 admin 角色。
+//
+// 后果比「改坏一个角色」严重得多：`SyncPoliciesFromRoleMenus` 会**无条件**
+// 写入 `{admin, default, *, *}`，与 admin 角色挂了哪些菜单无关。
+// 删掉 admin 角色后这条通配策略仍在，但已无人持有 `admin` 编码 ——
+// 策略成孤儿，**所有超级管理员瞬间失去全部权限**，而且此时已经进不去
+// 系统了（连"新建一个 admin 角色"这个界面都打不开），只能改库恢复。
+func TestRoleCannotDeleteAdminRole(t *testing.T) {
+	f := newGrantFixture(t)
+
+	admin := &model.SysRole{
+		TenantBaseModel: common.TenantBaseModel{TenantID: testTenantID},
+		Name:            "超级管理员",
+		Code:            middleware.AdminRoleCode,
+		Status:          1,
+	}
+	if err := f.roleRepo.Create(admin); err != nil {
+		t.Fatalf("创建 admin 角色失败: %v", err)
+	}
+
+	err := f.svc.Delete(testTenantID, grantOperatorUserID, admin.ID)
+	assertBizError(t, err, common.CodeForbidden)
+
+	// 校验必须在删除之前：被拒绝后角色必须还在
+	if _, err := f.roleRepo.FindByID(testTenantID, admin.ID); err != nil {
+		t.Errorf("被拒绝的删除不应生效，实际查不到该角色: %v", err)
+	}
+}
+
+// TestRoleCannotDisableAdminRole 非 admin 操作者不得停用 admin 角色。
+//
+// 停用同样会让通配策略失去持有者：SyncPoliciesFromRoleMenus 只统计
+// `r.status = 1` 的角色，admin 被停用后连那条无条件写入的通配策略也会
+// 指向一个「不生效的角色」，效果与删除等价。
+func TestRoleCannotDisableAdminRole(t *testing.T) {
+	f := newGrantFixture(t)
+
+	admin := &model.SysRole{
+		TenantBaseModel: common.TenantBaseModel{TenantID: testTenantID},
+		Name:            "超级管理员",
+		Code:            middleware.AdminRoleCode,
+		Status:          1,
+	}
+	if err := f.roleRepo.Create(admin); err != nil {
+		t.Fatalf("创建 admin 角色失败: %v", err)
+	}
+
+	err := f.svc.UpdateStatus(testTenantID, grantOperatorUserID,
+		&dto.StatusRequest{ID: admin.ID, Status: 0})
+	assertBizError(t, err, common.CodeForbidden)
+
+	got, err := f.roleRepo.FindByID(testTenantID, admin.ID)
+	if err != nil {
+		t.Fatalf("回查失败: %v", err)
+	}
+	if got.Status != 1 {
+		t.Errorf("被拒绝的停用不应生效，状态应仍为 1，实际 %d", got.Status)
+	}
+}
+
+// TestRoleUpdateStatusSyncsPolicies 停用普通角色必须**立即**重建策略。
+//
+// 此前的实现直接 return，不同步策略 —— 而 SyncPoliciesFromRoleMenus 是按
+// `r.status = 1` 过滤的，也就是说「停用角色」这个撤销动作不会落到策略表上：
+// 被停用的角色在 `rbac:roles:` 缓存 TTL（60s）内仍能正常鉴权，
+// 甚至在下一次任何角色/菜单变更触发同步之前一直有效。
+//
+// 断言对象选「策略表里还有没有该角色的规则」，而不是「接口返回成功」：
+// 后者在缺陷存在时同样是成功。
+func TestRoleUpdateStatusSyncsPolicies(t *testing.T) {
+	f := newGrantFixture(t)
+
+	ops := &model.SysRole{
+		TenantBaseModel: common.TenantBaseModel{TenantID: testTenantID},
+		Name:            "运维",
+		Code:            "ops",
+		Status:          1,
+	}
+	if err := f.roleRepo.Create(ops); err != nil {
+		t.Fatalf("创建角色失败: %v", err)
+	}
+	if err := f.roleRepo.ReplaceMenus(testTenantID, ops.ID, []uint{f.userListMenu.ID}); err != nil {
+		t.Fatalf("绑定菜单失败: %v", err)
+	}
+
+	// 前置条件：先手动同步一次，确认 ops 的策略确实会被写进去
+	if err := middleware.SyncPoliciesFromRoleMenus(); err != nil {
+		t.Fatalf("同步策略失败: %v", err)
+	}
+	if !hasCasbinRuleFor(t, "ops") {
+		t.Fatal("前置条件不成立：启用中的 ops 角色应有策略")
+	}
+
+	// 停用 → 策略必须同步消失
+	if err := f.svc.UpdateStatus(testTenantID, grantOperatorUserID,
+		&dto.StatusRequest{ID: ops.ID, Status: 0}); err != nil {
+		t.Fatalf("停用普通角色应成功: %v", err)
+	}
+	if hasCasbinRuleFor(t, "ops") {
+		t.Error("停用角色后必须立即重建策略，否则在缓存 TTL 内仍能鉴权")
+	}
+
+	// 反向验证：重新启用后策略必须回来（不能是「同步时把规则删了就不管」）
+	if err := f.svc.UpdateStatus(testTenantID, grantOperatorUserID,
+		&dto.StatusRequest{ID: ops.ID, Status: 1}); err != nil {
+		t.Fatalf("重新启用应成功: %v", err)
+	}
+	if !hasCasbinRuleFor(t, "ops") {
+		t.Error("重新启用后策略应恢复")
 	}
 }

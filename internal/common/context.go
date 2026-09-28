@@ -1,6 +1,7 @@
 package common
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -112,10 +113,33 @@ func GetUintParam(c *gin.Context, key string) (uint, error) {
 }
 
 // GetPageInfo 从查询参数读取分页参数并归一化（query 风格入口）。
-func GetPageInfo(c *gin.Context) (int, int) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "10"))
-	return NormalizePageParams(page, pageSize)
+//
+// 参数非法时返回 error 而不是静默回落默认分页 —— 与 BindPage（DTO 风格入口）
+// 的行为对齐。此前这里用 `_` 丢掉了 Atoi 的错误，于是 `?page=abc` 被当成
+// 「没传」并按第一页返回：用户以为自己翻到了某一页、实际看到的是第一页，
+// 既不报错也无从察觉；而同一个参数走 DTO 风格的接口却是 400。
+//
+// 「缺省」与「非法」必须分开：参数缺失或为空串是正常情况（前端可能传空值），
+// 按默认值处理；只有**明确写了非数字**才算非法。
+func GetPageInfo(c *gin.Context) (int, int, error) {
+	page, err := atoiOrDefault(c.Query("page"), 1)
+	if err != nil {
+		return 0, 0, fmt.Errorf("page 必须是数字")
+	}
+	pageSize, err := atoiOrDefault(c.Query("pageSize"), DefaultPageSize)
+	if err != nil {
+		return 0, 0, fmt.Errorf("pageSize 必须是数字")
+	}
+	page, pageSize = NormalizePageParams(page, pageSize)
+	return page, pageSize, nil
+}
+
+// atoiOrDefault 解析查询参数；空白串视为「未提供」并用 fallback 兜底。
+func atoiOrDefault(raw string, fallback int) (int, error) {
+	if strings.TrimSpace(raw) == "" {
+		return fallback, nil
+	}
+	return strconv.Atoi(raw)
 }
 
 // 分页的默认值与上限。
@@ -129,15 +153,34 @@ const (
 	MaxPageSize     = 100
 )
 
+// MaxPage 页码上限。
+//
+// 它存在的理由不是「业务上不可能有这么多页」，而是**整数溢出**。
+// offset 由 `(page-1)*pageSize` 算出，而 page 直接来自用户输入，
+// `strconv.Atoi` 在 64 位平台可以一路返回到 9.2e18。一旦乘出 int64 的表示范围，
+// offset 变成**负数**，而 GORM 对负 offset 的处理是**直接省略 OFFSET 子句** ——
+// 于是 `?page=99999999999999999` 返回的是**第一页数据**：
+// 既不报错，调用方也无从察觉自己拿到的不是想要的那一页。
+// 「静默返回错误的数据」比「报错」危险得多，所以这里夹住而不是放行。
+//
+// 取 100 万：× MaxPageSize(100) = 1e8，离 int64 上限还有 11 个数量级，
+// 任何真实数据集都不可能触及，因此不会误伤合法请求。
+// 超出时夹到上限，结果是一页空数据 —— 语义上比「第一页」正确。
+const MaxPage = 1_000_000
+
 // NormalizePageParams 归一化分页参数，返回合法的 (page, pageSize)。
 //
 // 这是**唯一**的分页参数收口点，DTO 风格（req.Page/req.PageSize）与
 // query 风格（GetPageInfo）都应经过它。此前存在三套写法，其中
 // 「只归一 pageSize、不归一 page」那套会让 page=0 或负数算出负 offset，
 // 轻则 SQL 报错、重则返回异常结果 —— 统一收口顺带修掉了这个问题。
+//
+// page 的上限（MaxPage）同理：见该常量的注释。
 func NormalizePageParams(page, pageSize int) (int, int) {
 	if page < 1 {
 		page = 1
+	} else if page > MaxPage {
+		page = MaxPage
 	}
 	if pageSize < 1 || pageSize > MaxPageSize {
 		pageSize = DefaultPageSize

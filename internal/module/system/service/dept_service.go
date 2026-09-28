@@ -152,7 +152,10 @@ func (s *deptService) Delete(tenantID, id uint) error {
 	if children > 0 {
 		return ErrDeptHasChildren
 	}
-	return s.deptRepo.Delete(tenantID, id)
+	// 仓储在「记录不存在或不属于本租户」时返回 gorm.ErrRecordNotFound，
+	// 不转换就会被 FailWith 当作系统错误回 500 —— 用户传了个不存在的 ID，
+	// 得到的却是「服务器内部错误」。与 post/role/user 的 Delete 保持一致。
+	return common.NotFoundOrErr(s.deptRepo.Delete(tenantID, id), "部门不存在")
 }
 
 func (s *deptService) FindByID(tenantID, id uint) (interface{}, error) {

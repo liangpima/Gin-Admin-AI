@@ -43,8 +43,20 @@ func (r *memberLevelRepository) Update(tenantID uint, level *model.MemberLevel) 
 	return database.DB.Save(level).Error
 }
 
+// Delete 软删除会员等级。
+//
+// 必须检查影响行数：GORM 删除不存在的记录不报错、RowsAffected 为 0，
+// 不检查就会「删除成功」而什么都没删 —— 前端提示已删除、刷新后等级还在，
+// 且枚举 ID 能对其他租户的等级拿到同样的「成功」回执（租户隔离失效的信号）。
 func (r *memberLevelRepository) Delete(tenantID, id uint) error {
-	return common.TenantScope(database.DB, tenantID).Delete(&model.MemberLevel{}, id).Error
+	res := common.TenantScope(database.DB, tenantID).Delete(&model.MemberLevel{}, id)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (r *memberLevelRepository) FindByID(tenantID, id uint) (*model.MemberLevel, error) {

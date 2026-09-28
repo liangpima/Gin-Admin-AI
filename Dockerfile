@@ -49,9 +49,20 @@ WORKDIR /app
 COPY --from=builder /out/go-admin /app/go-admin
 COPY --from=builder /out/migrate /app/migrate
 
-# 配置与 casbin 模型随镜像分发（casbin 加载失败会**拒绝启动**，必须存在）。
-# 运行时用 volume 覆盖 config/config.yaml 注入容器环境（见 deploy/config.docker.yaml）。
-COPY config/ /app/config/
+# 只分发 casbin 模型，**刻意不 COPY config/config.yaml**。
+#
+# 原因：config/config.yaml 是本地开发配置，里面带 `mode: debug`、
+# 默认 JWT 密钥（change-me-in-production）与默认库密码（123456）。
+# 把它烘进镜像的后果是 `docker run -p 8080:8080 gin-admin:latest`
+# （不挂 compose 的配置卷）会以 debug 模式启动，而
+# `config.ValidateSecurity()` 在非 release 模式下直接 return nil，
+# 于是默认密钥被放行 —— 该密钥是公开常量，任何人可据此伪造
+# 任意用户（含 admin）的 token。
+#
+# 现在镜像内**没有**配置文件，启动必须由 volume 挂载注入
+# （compose 已挂 deploy/config.docker.yaml）。缺失时进程启动即失败，
+# 而不是带病运行。casbin 模型则必须随镜像分发：加载失败会拒绝启动。
+COPY config/casbin/ /app/config/casbin/
 
 # sql/ 一并放入，便于在容器内执行初始化与迁移脚本
 COPY sql/ /app/sql/
@@ -70,6 +81,11 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
     CMD wget -qO- http://127.0.0.1:8080/health || exit 1
 
-# main.go 从 os.Args[1] 读取配置路径，显式传入便于用 volume 覆盖
+# main.go 从 os.Args[1] 读取配置路径，显式传入便于用 volume 覆盖。
+#
+# ⚠️ 镜像内**不含** config/config.yaml（见上方 COPY 处的说明），
+# 因此直接 `docker run` 会以「配置文件不存在」启动失败 —— 这是有意的：
+# 必须挂载配置（compose 已挂 deploy/config.docker.yaml），
+# 才能避免用开发默认密钥在生产跑起来。
 ENTRYPOINT ["/app/go-admin"]
 CMD ["config/config.yaml"]

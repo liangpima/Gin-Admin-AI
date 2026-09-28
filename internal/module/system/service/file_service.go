@@ -90,5 +90,6 @@ func (s *fileService) FindList(tenantID uint, name, mimeType, sortOrder string, 
 }
 
 func (s *fileService) Delete(tenantID, id uint) error {
-	return s.fileRepo.Delete(tenantID, id)
+	// 仓储在「记录不存在或不属于本租户」时返回 gorm.ErrRecordNotFound → 404
+	return common.NotFoundOrErr(s.fileRepo.Delete(tenantID, id), "文件不存在")
 }

@@ -11,10 +11,16 @@ import (
 	"testing"
 	"time"
 
+	"go-admin/config"
 	"go-admin/internal/common"
 
 	"github.com/gin-gonic/gin"
 )
+
+// testDrainLimit 通用用例的补读上限：只要远大于用例造的 payload 即可。
+// 刻意不从 config 读 —— 这些用例关心的是「有没有补读」，
+// 不该随配置漂移（上限本身的回归保护见 TestDrainBodyCoversUploadSizedBody）。
+const testDrainLimit = 1 << 20
 
 // countingBody 记录被读走的字节数，用来断言「请求体到底有没有被读完」。
 //
@@ -35,11 +41,20 @@ func (b *countingBody) Read(p []byte) (int, error) {
 func (b *countingBody) Close() error { return nil }
 
 // runDrainBody 让一个请求穿过 DrainBody 与下游 handler，返回响应与读字节数。
+//
+// limit 用 testDrainLimit—— 上限本身的回归保护见
+// TestDrainBodyCoversUploadSizedBody 与 TestDrainBodyStopsAtCap。
 func runDrainBody(t *testing.T, payload string, downstream gin.HandlerFunc) (*httptest.ResponseRecorder, *countingBody) {
+	t.Helper()
+	return runDrainBodyWith(t, DrainBody(testDrainLimit), payload, downstream)
+}
+
+// runDrainBodyWith 同上，但允许指定中间件实例（用例需要自定义上限时使用）。
+func runDrainBodyWith(t *testing.T, mw gin.HandlerFunc, payload string, downstream gin.HandlerFunc) (*httptest.ResponseRecorder, *countingBody) {
 	t.Helper()
 
 	r := gin.New()
-	r.Use(DrainBody())
+	r.Use(mw)
 	r.POST("/x", downstream)
 
 	req := httptest.NewRequest(http.MethodPost, "/x", nil)
@@ -131,15 +146,81 @@ func TestDrainBodyIsNoopForConsumedBody(t *testing.T) {
 // 没有上限的话，匿名调用方声明一个 1GB 的 Content-Length 就能让服务端
 // 替他把这 1GB 收完。上限之外的连接仍会被重置 —— 那是修复前的行为，
 // 比「为拒绝一个请求而先收下 1GB」划算。
+//
+// 这里显式传一个小上限，是为了让「读满即停」这条断言不依赖配置值
+// （否则 payload 得造到 64MB，用例又慢又费内存）。
+//
+// 拒绝用 401 而不是 413：413 会被中间件短路成「不补读」
+// （见 TestDrainBodySkipsOversizeRejection），那样就测不到上限了。
 func TestDrainBodyStopsAtCap(t *testing.T) {
-	payload := strings.Repeat("a", maxDrainBytes+4096)
+	const limit = 256 << 10
+	payload := strings.Repeat("a", limit+4096)
 
-	_, body := runDrainBody(t, payload, func(c *gin.Context) {
+	_, body := runDrainBodyWith(t, DrainBody(limit), payload, func(c *gin.Context) {
+		common.Unauthorized(c, "未登录")
+		c.Abort()
+	})
+
+	if body.read != limit {
+		t.Errorf("补读应在上限 %d 字节处停止，实际读走 %d 字节", limit, body.read)
+	}
+}
+
+// TestDrainBodySkipsOversizeRejection 已经因「请求体过大」被拒绝时不做补读。
+//
+// 这条守住的是「补读上限可以放到 max_body_size」这个决定的前提：
+// 413 意味着这个 body 按定义就大于我们会接受的任何 body，
+// 再把它读一遍恰好就是本中间件要避免的代价 ——「为拒绝一个超大请求而先收下它」。
+func TestDrainBodySkipsOversizeRejection(t *testing.T) {
+	payload := strings.Repeat("a", 4096)
+
+	_, body := runDrainBodyWith(t, DrainBody(testDrainLimit), payload, func(c *gin.Context) {
 		c.Status(http.StatusRequestEntityTooLarge)
 	})
 
-	if body.read != maxDrainBytes {
-		t.Errorf("补读应在上限 %d 字节处停止，实际读走 %d 字节", maxDrainBytes, body.read)
+	if body.read != 0 {
+		t.Errorf("413 之后不应再补读，实际读走 %d 字节", body.read)
+	}
+}
+
+// TestDrainBodyCoversUploadSizedBody 上传大小级别的请求体必须被**完整**补读。
+//
+// 这是 M10 的回归保护。历史上上限是一个写死的 256KB，而 `upload.max_size`
+// 默认 10MB —— 于是上传请求被提前拒绝时（最典型的就是上传时 access token
+// 刚过期，正是 B4「401 → 续期 → 重放」要覆盖的路径），补读在 256KB 处就停了，
+// 剩余数据仍压在接收缓冲区里，关连接照旧发 RST，那个 401 还是收不到：
+// nginx 报 502，前端拿不到 401，续期流程根本不会触发。
+//
+// 也就是说「补读上限」这个数值直接决定了本中间件在上传路径上是否有效，
+// 因此它必须由配置驱动、且不小于上传上限 —— 这条用例把该不变量钉住。
+//
+// 显式设置配置，避免依赖 config.yaml 或其它用例留下的状态：
+// 若 `upload.max_size` 读成 0，payload 会退化成一个很小的值，
+// 那条断言就会在「上限小于上传上限」的实现上照样通过（假绿）。
+func TestDrainBodyCoversUploadSizedBody(t *testing.T) {
+	prevUpload := config.Cfg.Upload.MaxSize
+	prevBody := config.Cfg.Server.MaxBodySize
+	config.Cfg.Upload.MaxSize = 10
+	config.Cfg.Server.MaxBodySize = 64
+	t.Cleanup(func() {
+		config.Cfg.Upload.MaxSize = prevUpload
+		config.Cfg.Server.MaxBodySize = prevBody
+	})
+
+	payload := strings.Repeat("a", config.Cfg.Upload.MaxSize<<20)
+
+	w, body := runDrainBodyWith(t, DrainBodyFromConfig(), payload, func(c *gin.Context) {
+		common.Unauthorized(c, "未登录")
+		c.Abort()
+	})
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("状态码应为 401，实际 %d", w.Code)
+	}
+	if body.read != len(payload) {
+		t.Errorf("上传级别（%d 字节）的请求体应被完整补读，实际只读了 %d 字节 —— "+
+			"补读上限小于 upload.max_size 时，上传被提前拒绝仍会因未读数据触发 RST，"+
+			"调用方收不到那个 401", len(payload), body.read)
 	}
 }
 
@@ -158,7 +239,7 @@ func TestDrainBodyHandlesEmptyBody(t *testing.T) {
 	for name, rc := range cases {
 		t.Run(name, func(t *testing.T) {
 			r := gin.New()
-			r.Use(DrainBody())
+			r.Use(DrainBody(testDrainLimit))
 			r.GET("/x", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 			req := httptest.NewRequest(http.MethodGet, "/x", nil)
@@ -203,7 +284,7 @@ func TestDrainBodyKeepsRejectionVisibleAfterServerCloses(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	r := gin.New()
-	r.Use(DrainBody())
+	r.Use(DrainBody(testDrainLimit))
 	r.Use(func(c *gin.Context) {
 		common.Unauthorized(c, "未登录")
 		c.Abort()

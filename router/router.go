@@ -138,7 +138,17 @@ func Setup(mode string) *gin.Engine {
 	// 所以只有挂在这里，补读请求体才会发生在连接关闭之前、且晚于所有下游拒绝。
 	// 详见 middleware.DrainBody 的注释 —— 漏了它，被提前拒绝的写请求
 	// 在 Connection: close 的调用方（含本项目 nginx 配置）眼里会变成连接重置。
-	r.Use(middleware.DrainBody())
+	//
+	// 用 DrainBodyFromConfig 而不是传一个写死的上限：上限必须 ≥ server.max_body_size，
+	// 否则大 body 的上传请求被 401 拒绝时补读会中途停止，RST 照旧发生
+	// （曾经写死 256KB < upload.max_size 10MB，这条路径一直是坏的）。
+	r.Use(middleware.DrainBodyFromConfig())
+	// 请求体上限必须早于**任何读取 body 的代码**（操作日志中间件、上传、
+	// 支付回调都会整份读入），因此紧跟 DrainBody 注册。
+	// DrainBody 要留在最外层（它的收尾要贴着 socket 关闭那一刻），
+	// 而本中间件只需在所有业务中间件之前，所以顺序是这两者的唯一解。
+	// 上限取自 server.max_body_size，Validate 已强制它大于 upload.max_size。
+	r.Use(middleware.BodyLimitFromConfig())
 	r.Use(middleware.Recovery())
 	r.Use(middleware.Logger())
 	r.Use(middleware.Cors())

@@ -2,6 +2,15 @@ package dto
 
 import "go-admin/internal/common"
 
+// ID 数组类字段的长度上限（写在 tag 里，故不抽常量）。
+//
+// 为什么必须有：这些切片会被直接拼成 `IN (...)` 并构造等量的占位参数。
+// 无上限时一个请求体就能让服务端分配数百万个 uint、生成一条几 MB 的 SQL，
+// 单个请求即可打满内存与 DB 解析开销。上限本身要远高于真实用量：
+// 一个用户挂 100 个角色、一个角色挂 500 个菜单都已经是异常配置。
+//
+// 用 omitempty 是为了让「不传该字段」（部分更新语义）继续合法：
+// 对切片而言 omitempty 只在 nil 时跳过，空数组仍会走 max 校验并通过。
 type CreateUserRequest struct {
 	Username string `json:"username" binding:"required,min=2,max=64"`
 	Password string `json:"password" binding:"required,min=6,max=128"`
@@ -10,8 +19,8 @@ type CreateUserRequest struct {
 	Phone    string `json:"phone" binding:"omitempty,len=11"`
 	Status   int8   `json:"status" binding:"oneof=0 1"`
 	DeptID   uint   `json:"deptId" binding:"required"`
-	RoleIds  []uint `json:"roleIds"`
-	PostIds  []uint `json:"postIds"`
+	RoleIds  []uint `json:"roleIds" binding:"omitempty,max=100"`
+	PostIds  []uint `json:"postIds" binding:"omitempty,max=100"`
 	Remark   string `json:"remark" binding:"max=500"`
 }
 
@@ -27,8 +36,8 @@ type UpdateUserRequest struct//
 	Phone    *string `json:"phone" binding:"omitempty,len=11"`
 	Status   *int8   `json:"status" binding:"omitempty,oneof=0 1"`
 	DeptID   *uint   `json:"deptId"`
-	RoleIds  []uint  `json:"roleIds"`
-	PostIds  []uint  `json:"postIds"`
+	RoleIds  []uint  `json:"roleIds" binding:"omitempty,max=100"`
+	PostIds  []uint  `json:"postIds" binding:"omitempty,max=100"`
 	Remark   *string `json:"remark" binding:"omitempty,max=500"`
 }
 
@@ -44,7 +53,7 @@ type ChangePasswordRequest struct {
 
 type UpdateUserRolesRequest struct {
 	ID      uint   `json:"id" binding:"required"`
-	RoleIds []uint `json:"roleIds"`
+	RoleIds []uint `json:"roleIds" binding:"omitempty,max=100"`
 }
 
 type UpdateUserDeptRequest struct {

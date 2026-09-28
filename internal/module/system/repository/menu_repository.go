@@ -25,6 +25,12 @@ type MenuRepository interface {
 	FindParentID(id uint) (uint, bool, error)
 	// CountByParentID 统计直接子节点数（删除前确认没有下级）
 	CountByParentID(id uint) (int64, error)
+	// CountByName 统计同名菜单数（excludeID 用于更新时排除自身）。
+	//
+	// name 会被写进 Vue Router 的 route.name，重名会让 keep-alive 的
+	// include 列表与登出时的 removeRoute 串到别的页面，故写入前必须查重。
+	// sys_menu 是**全局表**（无 tenant_id 列），刻意不做租户过滤。
+	CountByName(name string, excludeID uint) (int64, error)
 }
 
 type menuRepository struct {
@@ -93,7 +99,18 @@ func (r *menuRepository) Delete(id uint) error {
 		if err := tx.Where("menu_id = ?", id).Delete(&model.SysRoleMenu{}).Error; err != nil {
 			return err
 		}
-		return tx.Delete(&model.SysMenu{}, id).Error
+		// 必须检查影响行数：菜单不存在时 GORM 不报错、RowsAffected 为 0，
+		// 不检查就会「删除成功」而实际什么都没删 —— 前端提示已删除、
+		// 刷新后菜单还在，与 dept/role/agreement 的 404 行为也不一致。
+		// 关联表的清理放在前面无妨：菜单不存在时它本来也没有关联记录。
+		res := tx.Delete(&model.SysMenu{}, id)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
 	})
 }
 
@@ -117,6 +134,25 @@ func (r *menuRepository) FindParentID(id uint) (uint, bool, error) {
 func (r *menuRepository) CountByParentID(id uint) (int64, error) {
 	var count int64
 	if err := r.db.Model(&model.SysMenu{}).Where("parent_id = ?", id).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// CountByName 见接口注释。
+//
+// 空 name 直接返回 0：目录/按钮都可能没有标识，把它们算作「重名」会
+// 让第二个无标识菜单被误拒（NOT NULL 允许空串，DB 侧不构成冲突）。
+func (r *menuRepository) CountByName(name string, excludeID uint) (int64, error) {
+	if name == "" {
+		return 0, nil
+	}
+	q := r.db.Model(&model.SysMenu{}).Where("name = ?", name)
+	if excludeID > 0 {
+		q = q.Where("id <> ?", excludeID)
+	}
+	var count int64
+	if err := q.Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil

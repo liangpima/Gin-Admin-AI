@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"go-admin/config"
@@ -51,7 +50,7 @@ func Auth() gin.HandlerFunc {
 		// 早前用 `userRevoked, _ :=` 吞掉错误，Redis 异常时会当成「未吊销」，
 		// 已停用账号仍可继续访问。
 		userRevoked, existsErr := cache.Exists(context.Background(),
-			fmt.Sprintf("user:token_revoked:%d", claims.UserID))
+			cache.UserTokenRevokedKey(claims.UserID))
 		if existsErr != nil {
 			logger.Log.Errorf("[auth] 查询用户级 token 吊销标记失败: %v", existsErr)
 			common.Error(c, common.CodeInternalError, "鉴权服务暂时不可用，请稍后重试")

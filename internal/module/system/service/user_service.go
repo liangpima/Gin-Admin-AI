@@ -11,7 +11,6 @@ import (
 	"go-admin/config"
 	"go-admin/internal/cache"
 	"go-admin/internal/common"
-	"go-admin/internal/logger"
 	"go-admin/internal/middleware"
 	"go-admin/internal/module/system/dto"
 	"go-admin/internal/module/system/model"
@@ -85,25 +84,9 @@ func (s *userService) normalizeDeptID(tenantID, deptID uint) (uint, error) {
 	return deptID, nil
 }
 
-// dedupeNonZeroIDs 去重并剔除 0，保持原有顺序；无有效项时返回 nil。
-func dedupeNonZeroIDs(ids []uint) []uint {
-	if len(ids) == 0 {
-		return nil
-	}
-	unique := make([]uint, 0, len(ids))
-	seen := make(map[uint]bool, len(ids))
-	for _, id := range ids {
-		if id == 0 || seen[id] {
-			continue
-		}
-		seen[id] = true
-		unique = append(unique, id)
-	}
-	if len(unique) == 0 {
-		return nil
-	}
-	return unique
-}
+// dedupeNonZeroIDs 已上移到 common.UniqueNonZeroIDs（会员模块此前有一份
+// 行为略有差异的副本 —— 全为 0 时一个返回 nil、一个返回空切片，
+// 正是「复制粘贴后各自演化」的典型。收敛到一处后不再有这个问题）。
 
 // normalizeRoleIDs 校验角色 ID 全部属于当前租户，并返回去重后的合法列表。
 //
@@ -121,7 +104,7 @@ func dedupeNonZeroIDs(ids []uint) []uint {
 // 等价于把该角色的全部权限授予该用户，若只校验归属，一个只有 user:edit 权限的
 // 管理员就能把超管角色绑给自己或新建的账号 —— 这是比改角色菜单更短的一条提权路径。
 func (s *userService) normalizeRoleIDs(tenantID, operatorID uint, roleIDs []uint) ([]uint, error) {
-	unique := dedupeNonZeroIDs(roleIDs)
+	unique := common.UniqueNonZeroIDs(roleIDs)
 	if len(unique) == 0 {
 		return nil, nil
 	}
@@ -143,7 +126,7 @@ func (s *userService) normalizeRoleIDs(tenantID, operatorID uint, roleIDs []uint
 // normalizePostIDs 与 normalizeRoleIDs 同理：sys_user_post 也是纯关联表，
 // 且 sys_post 已改为租户内数据，必须确认岗位属于当前租户后再绑定。
 func (s *userService) normalizePostIDs(tenantID uint, postIDs []uint) ([]uint, error) {
-	unique := dedupeNonZeroIDs(postIDs)
+	unique := common.UniqueNonZeroIDs(postIDs)
 	if len(unique) == 0 {
 		return nil, nil
 	}
@@ -209,26 +192,33 @@ func (s *userService) Create(tenantID uint, req *dto.CreateUserRequest, operator
 	}
 	user.Remark = req.Remark
 
-	if err := s.userRepo.Create(user); err != nil {
-		// 上面的 Count 校验存在时间窗口，并发下仍可能撞唯一索引，靠这里兜底
-		if errors.Is(err, common.ErrDuplicateKey) {
-			return common.NewBizError("用户名已存在")
-		}
-		return err
-	}
-
-	if len(roleIDs) > 0 {
-		if err := s.userRepo.ReplaceRoles(user.ID, roleIDs); err != nil {
+	// 主表与两张关联表必须在**一次提交**里完成。
+	//
+	// 分成三次写（原先的写法）时，用户已落库、角色写入失败会留下一个
+	// 「能登录但没有任何权限」的半成品账号：调用方看到 500 以为整次操作
+	// 失败了，实际那个账号已经存在且可登录，排查时现象离根因很远。
+	// 反过来，ReplacePosts 失败也会留下「有角色、没岗位」的中间态。
+	return s.userRepo.Transaction(func(txRepo repository.UserRepository) error {
+		if err := txRepo.Create(user); err != nil {
+			// 上面的 Count 校验存在时间窗口，并发下仍可能撞唯一索引，靠这里兜底
+			if errors.Is(err, common.ErrDuplicateKey) {
+				return common.NewBizError("用户名已存在")
+			}
 			return err
 		}
-	}
-	if len(postIDs) > 0 {
-		if err := s.userRepo.ReplacePosts(user.ID, postIDs); err != nil {
-			return err
-		}
-	}
 
-	return nil
+		if len(roleIDs) > 0 {
+			if err := txRepo.ReplaceRoles(user.ID, roleIDs); err != nil {
+				return err
+			}
+		}
+		if len(postIDs) > 0 {
+			if err := txRepo.ReplacePosts(user.ID, postIDs); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *userService) Update(tenantID uint, req *dto.UpdateUserRequest, operatorID uint) error {
@@ -242,6 +232,9 @@ func (s *userService) Update(tenantID uint, req *dto.UpdateUserRequest, operator
 		}
 		return err
 	}
+
+	// 记下变更前的状态：停用必须吊销 Token，而「本来就是停用」不应重复吊销
+	prevStatus := user.Status
 
 	// 逐字段判断「是否提供」：指针为 nil 即本次不涉及该字段
 	if req.Nickname != nil {
@@ -290,17 +283,45 @@ func (s *userService) Update(tenantID uint, req *dto.UpdateUserRequest, operator
 		}
 	}
 
-	if err := s.userRepo.Update(user); err != nil {
+	if err := s.userRepo.Transaction(func(txRepo repository.UserRepository) error {
+		if err := txRepo.Update(tenantID, user); err != nil {
+			return err
+		}
+
+		if req.RoleIds != nil {
+			if err := txRepo.ReplaceRoles(user.ID, roleIDs); err != nil {
+				return err
+			}
+		}
+		if req.PostIds != nil {
+			if err := txRepo.ReplacePosts(user.ID, postIDs); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 
+	// 下面两步都必须放在**事务提交之后**：
+	//   - 在事务内清缓存的话，并发请求可能读到提交前的旧数据并把它写回缓存，
+	//     于是「清缓存」之后缓存里仍是旧角色，TTL（60s）内撤销授权不生效 ——
+	//     清了等于没清；
+	//   - Token 吊销依赖 Redis，不参与数据库事务、回滚也不会撤销它。
+	//     放进事务内会在提交失败时产生「用户已下线但资料没改」的不一致。
 	if req.RoleIds != nil {
-		if err := s.userRepo.ReplaceRoles(user.ID, roleIDs); err != nil {
-			return err
-		}
+		// 角色变更后必须失效该用户的角色缓存，否则最长 60s 内仍按旧角色鉴权。
+		// UpdateRoles 接口一直是这么做的，这里漏了 —— 走「编辑用户」改角色
+		// 会绕过缓存清理，撤销授权不即时生效。
+		middleware.ClearRoleCache(tenantID, user.ID)
 	}
-	if req.PostIds != nil {
-		if err := s.userRepo.ReplacePosts(user.ID, postIDs); err != nil {
+
+	// 停用即下线：改 status 字段与调 UpdateStatus 接口必须产生同样的效果。
+	// 此前只有 UpdateStatus 会吊销 Token，于是走「编辑用户」把状态改成停用
+	// 就能绕过吊销 —— 而被停用的账号仍能继续访问，且 refresh token 还能
+	// 换发新的 access token（RefreshToken 只查吊销标记、不查库）。
+	if user.Status == common.StatusDisabled && prevStatus != common.StatusDisabled {
+		if err := s.revokeUserTokens(user.ID); err != nil {
 			return err
 		}
 	}
@@ -309,7 +330,12 @@ func (s *userService) Update(tenantID uint, req *dto.UpdateUserRequest, operator
 }
 
 func (s *userService) Delete(tenantID, id uint) error {
-	return s.userRepo.Delete(tenantID, id)
+	if err := s.userRepo.Delete(tenantID, id); err != nil {
+		return common.NotFoundOrErr(err, "用户不存在")
+	}
+	// 删除同样必须下线：软删除后 Auth 中间件并不查库，旧 token 依旧有效。
+	// 吊销失败要报错，不能静默 —— 否则「已删除的账号仍可访问」无人知晓。
+	return s.revokeUserTokens(id)
 }
 
 func (s *userService) FindByID(tenantID, id uint) (interface{}, error) {
@@ -417,12 +443,15 @@ func (s *userService) query(tenantID uint, req *dto.UserListRequest, page, pageS
 }
 
 func (s *userService) UpdateStatus(tenantID uint, req *dto.StatusRequest) error {
+	// 仓储会先确认目标属于本租户（不属于则返回 ErrRecordNotFound），
+	// 因此下面的吊销只可能作用在本租户用户上 —— 早前不校验归属时，
+	// 枚举 ID 就能强制下线其他租户的用户。
 	if err := s.userRepo.UpdateStatus(tenantID, req.ID, req.Status); err != nil {
-		return err
+		return common.NotFoundOrErr(err, "用户不存在")
 	}
 	// 禁用用户时吊销其 Token
 	if req.Status == common.StatusDisabled {
-		s.revokeUserTokens(req.ID)
+		return s.revokeUserTokens(req.ID)
 	}
 	return nil
 }
@@ -430,7 +459,11 @@ func (s *userService) UpdateStatus(tenantID uint, req *dto.StatusRequest) error 
 func (s *userService) UpdateRoles(tenantID, operatorID uint, req *dto.UpdateUserRolesRequest) error {
 	_, err := s.userRepo.FindByID(tenantID, req.ID)
 	if err != nil {
-		return common.NewNotFoundError("用户不存在")
+		// 只把 gorm.ErrRecordNotFound 转成 404，其余（DB 故障、连接断开）
+		// 必须原样透出成 500。此前这里写的是无条件 NewNotFoundError，
+		// 于是数据库故障被报成「用户不存在」—— 用户按提示反复刷新，
+		// 而监控里一条 5xx 都没有，故障可以静默持续（违反规则 5）。
+		return common.NotFoundOrErr(err, "用户不存在")
 	}
 
 	// 校验角色归属与授权收敛：这是「更新角色」接口，也是跨租户提权
@@ -450,7 +483,8 @@ func (s *userService) UpdateRoles(tenantID, operatorID uint, req *dto.UpdateUser
 func (s *userService) UpdateDept(tenantID uint, req *dto.UpdateUserDeptRequest) error {
 	user, err := s.userRepo.FindByID(tenantID, req.ID)
 	if err != nil {
-		return common.NewNotFoundError("用户不存在")
+		// 同 UpdateRoles：区分「不存在」（404）与「数据库故障」（500）
+		return common.NotFoundOrErr(err, "用户不存在")
 	}
 
 	// 与 Update 里的 deptId 校验同源：sys_user.dept_id 指向租户内表，
@@ -460,7 +494,7 @@ func (s *userService) UpdateDept(tenantID uint, req *dto.UpdateUserDeptRequest) 
 		return err
 	}
 	user.DeptID = deptID
-	return s.userRepo.Update(user)
+	return s.userRepo.Update(tenantID, user)
 }
 
 func (s *userService) ResetPassword(tenantID uint, req *dto.ResetPasswordRequest) error {
@@ -481,8 +515,7 @@ func (s *userService) ResetPassword(tenantID uint, req *dto.ResetPasswordRequest
 	// 唯独这条管理员重置路径之前漏了 —— 而「密码疑似泄露、紧急重置」正是它最
 	// 主要的使用场景。不吊销的话，攻击者手里的 refresh token 仍能继续换发新的
 	// access token，重置密码等于没做。
-	s.revokeUserTokens(req.ID)
-	return nil
+	return s.revokeUserTokens(req.ID)
 }
 
 func (s *userService) ChangePassword(userID uint, req *dto.ChangePasswordRequest) error {
@@ -508,38 +541,68 @@ func (s *userService) ChangePassword(userID uint, req *dto.ChangePasswordRequest
 	}
 
 	// 密码修改后吊销所有 Token
-	s.revokeUserTokens(userID)
-	return nil
+	return s.revokeUserTokens(userID)
 }
 
 // revokeUserTokens 吊销用户的所有 refresh token，并使其旧 access token 失效。
 //
 // refresh token 本身是随机串，必须依靠登录时登记的用户维度集合才能枚举出来；
 // 早前直接删 refresh_token:user:<id> 是删了一个从未写入的键，等于没吊销。
-func (s *userService) revokeUserTokens(userID uint) {
+//
+// 失败必须返回错误，而不是只记一条日志继续返回成功：调用方（改密、重置密码、
+// 停用、删除）都是**安全动作**，它们依赖这个返回值来表达「该账号已下线」。
+// 静默失败会让「已停用」只体现在数据库里 —— 账号仍能继续访问，
+// 直到 access token 自然过期（2h），甚至用 refresh token 继续换发（7 天）。
+func (s *userService) revokeUserTokens(userID uint) error {
 	ctx := context.Background()
 
 	tokens, err := cache.SMembers(ctx, cache.RefreshTokenSetKey(userID))
+	if errors.Is(err, cache.ErrNotReady) {
+		// Redis 未启用：系统本就没有可吊销的 refresh token（token 集合、
+		// 吊销标记都无处存放），因此这里不是失败而是无事可做。
+		//
+		// 为什么可以安全返回 nil：Auth 与 RefreshToken 检查吊销标记时同样
+		// 依赖 Redis，`cache.IsTokenRevoked` 在 ErrNotReady 下 fail-closed
+		// （见 middleware/auth.go），也就是说没有 Redis 时请求本来就进不来。
+		// 若在这里返回错误，只会让「未配置 Redis 的部署」连停用用户都做不到。
+		return nil
+	}
 	if err != nil {
-		logger.Log.Warnf("读取refresh token列表失败: %v", err)
+		// 读不到集合就枚举不出该用户的 refresh token。此时**不能**只删集合键
+		// 就当作吊销完成 —— 真正的 refresh_token:* 会全部残留，而调用方
+		// 会以为已经下线。宁可报错让调用方知道吊销没做成。
+		return fmt.Errorf("读取用户 refresh token 列表失败: %w", err)
 	}
 
-	keys := make([]string, 0, len(tokens)+1)
+	keys := make([]string, 0, len(tokens)+2)
 	for _, t := range tokens {
 		keys = append(keys, cache.RefreshTokenKey(t))
 	}
 	keys = append(keys, cache.RefreshTokenSetKey(userID))
+	// 标记一并删除，避免「集合已清空、标记还在」的中间态
+	keys = append(keys, cache.UserTokenRevokedKey(userID))
 
 	if err := cache.Del(ctx, keys...); err != nil {
-		logger.Log.Warnf("吊销refresh token失败: %v", err)
+		return fmt.Errorf("吊销 refresh token 失败: %w", err)
 	}
 
-	// 同时设置一个标记，使得该用户的所有旧 access token 失效
-	if err := cache.Set(ctx, fmt.Sprintf("user:token_revoked:%d", userID), "1",
-		time.Duration(config.Cfg.JWT.AccessExpire)*time.Second); err != nil {
-		logger.Log.Warnf("设置token吊销标记失败: %v", err)
+	// 标记的存活时间必须覆盖 **refresh token 的有效期**，而不是 access token 的。
+	// 该标记同时被 Auth 与 RefreshToken 检查：TTL 只等于 AccessExpire（2h）时，
+	// 2 小时后被停用的账号又能用 refresh token 换出新的 access token，
+	// 「停用」等于没生效。
+	if err := cache.Set(ctx, cache.UserTokenRevokedKey(userID), "1",
+		time.Duration(config.Cfg.JWT.RefreshExpire)*time.Second); err != nil {
+		return fmt.Errorf("设置 token 吊销标记失败: %w", err)
 	}
+	return nil
 }
+
+// maxPasswordBytes bcrypt 能处理的密码长度上限（字节）。
+//
+// 它不是我们的策略选择，而是 bcrypt 的硬限制：超过 72 字节
+// GenerateFromPassword 会直接报错。放在这里是为了让「为什么是 72」
+// 有一个可查的来源，而不是散落在错误文案里。
+const maxPasswordBytes = 72
 
 // validatePasswordStrength 校验密码强度：至少包含大写字母、小写字母、数字中的两种
 func validatePasswordStrength(password string) error {
@@ -572,6 +635,17 @@ func validatePasswordStrength(password string) error {
 	}
 	if strings.ContainsAny(password, " \t\n\r") {
 		return common.NewBizError("密码不能包含空格")
+	}
+	// bcrypt 的输入上限是 72 **字节**（不是字符）。
+	//
+	// 超过时 GenerateFromPassword 直接返回 ErrPasswordTooLong 而不是截断，
+	// 于是 utils.HashPassword 报错、整条链路以 500「服务器内部错误」结束 ——
+	// 用户只是密码太长，却拿不到任何可操作的提示。在业务层拦成 400。
+	//
+	// 必须按字节数判断：DTO 上的 `max=128` 是**字符**数，一个汉字占 3 字节，
+	// 128 个汉字是 384 字节，照样超限。
+	if len(password) > maxPasswordBytes {
+		return common.NewBizError("密码过长，请控制在 72 个字节以内（约 72 个英文字符或 24 个汉字）")
 	}
 	return nil
 }

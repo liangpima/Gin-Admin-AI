@@ -48,7 +48,8 @@ func (s *memberLevelService) Create(req *dto.CreateMemberLevelRequest, operatorI
 func (s *memberLevelService) Update(req *dto.UpdateMemberLevelRequest, operatorID, tenantID uint) error {
 	level, err := s.levelRepo.FindByID(tenantID, req.ID)
 	if err != nil {
-		return common.NewNotFoundError("等级不存在")
+		// 只把「记录不存在」转成 404，DB 故障仍走 500
+		return common.NotFoundOrErr(err, "等级不存在")
 	}
 	if req.Name != "" {
 		level.Name = req.Name
@@ -73,7 +74,8 @@ func (s *memberLevelService) Update(req *dto.UpdateMemberLevelRequest, operatorI
 }
 
 func (s *memberLevelService) Delete(tenantID, id uint) error {
-	return s.levelRepo.Delete(tenantID, id)
+	// 仓储在「不存在或不属于本租户」时返回 gorm.ErrRecordNotFound → 404
+	return common.NotFoundOrErr(s.levelRepo.Delete(tenantID, id), "等级不存在")
 }
 
 func (s *memberLevelService) FindList(tenantID uint, req *dto.MemberLevelListRequest) ([]model.MemberLevel, int64, error) {

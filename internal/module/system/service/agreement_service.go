@@ -79,7 +79,9 @@ func (s *agreementService) Update(id uint, title, content, typ string, sort int,
 }
 
 func (s *agreementService) Delete(tenantID, id uint) error {
-	return s.agreementRepo.Delete(tenantID, id)
+	// 仓储对「不存在或不属于本租户」返回 gorm.ErrRecordNotFound，
+	// 不转换就是 500；用户传错 ID 时应当明确告知「记录不存在」。
+	return common.NotFoundOrErr(s.agreementRepo.Delete(tenantID, id), "记录不存在")
 }
 
 func (s *agreementService) FindByID(tenantID, id uint) (*model.SysAgreement, error) {
@@ -91,7 +93,13 @@ func (s *agreementService) FindByID(tenantID, id uint) (*model.SysAgreement, err
 }
 
 func (s *agreementService) FindByType(tenantID uint, typ string) (*model.SysAgreement, error) {
-	return s.agreementRepo.FindByType(tenantID, typ)
+	agreement, err := s.agreementRepo.FindByType(tenantID, typ)
+	if err != nil {
+		// 这是前台展示用的查询：该类型未配置（或已全部停用）时应回 404
+		// 「该类型的协议未配置」，而不是把 gorm.ErrRecordNotFound 透出成 500。
+		return nil, common.NotFoundOrErr(err, "该类型的协议未配置")
+	}
+	return agreement, nil
 }
 
 func (s *agreementService) FindList(tenantID uint, name, typ string, status *int8, page, pageSize int) ([]model.SysAgreement, int64, error) {

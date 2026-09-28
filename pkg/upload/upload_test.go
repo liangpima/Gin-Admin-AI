@@ -1,6 +1,7 @@
 package upload
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -26,7 +27,7 @@ func TestLocalDeleteRejectsPathTraversal(t *testing.T) {
 
 	u := &localUploader{}
 	traversal := "../" + filepath.Base(outside)
-	if err := u.Delete(traversal); err == nil {
+	if err := u.Delete(context.Background(), traversal); err == nil {
 		t.Fatalf("路径穿越未被拦截: Delete(%q) 未返回错误", traversal)
 	}
 	if _, err := os.Stat(outside); err != nil {
@@ -34,7 +35,7 @@ func TestLocalDeleteRejectsPathTraversal(t *testing.T) {
 	}
 
 	// 绝对路径同样应被拒绝
-	if err := u.Delete(outside); err == nil {
+	if err := u.Delete(context.Background(), outside); err == nil {
 		t.Error("绝对路径未被拦截")
 	}
 	if _, err := os.Stat(outside); err != nil {
@@ -57,7 +58,7 @@ func TestLocalDeleteAllowsNormalPath(t *testing.T) {
 	}
 
 	u := &localUploader{}
-	if err := u.Delete("2026/01/02/a.png"); err != nil {
+	if err := u.Delete(context.Background(), "2026/01/02/a.png"); err != nil {
 		t.Fatalf("删除正常路径失败: %v", err)
 	}
 	if _, err := os.Stat(file); !os.IsNotExist(err) {
@@ -100,12 +101,16 @@ func TestSetAllowedExts(t *testing.T) {
 	}()
 
 	t.Run("按配置收紧白名单", func(t *testing.T) {
+		// 用 .webp 而不是 .svg 举例：`.svg` 现在**本来就不在内置默认值里**，
+		// 拿它断言「配置生效」的话，即便 SetAllowedExts 完全没被接线
+		// （那正是本用例要防的历史缺陷），用例照样会通过 —— 断言必须落在
+		// 「一个默认允许、被配置删掉」的扩展名上才有区分力。
 		SetAllowedExts(".jpg,.png")
 		if err := ValidateFile("a.jpg"); err != nil {
 			t.Errorf(".jpg 应被允许: %v", err)
 		}
-		if err := ValidateFile("a.svg"); err == nil {
-			t.Error("配置中删除了 .svg，应被拒绝（修复前仍会放行）")
+		if err := ValidateFile("a.webp"); err == nil {
+			t.Error("配置里删掉了 .webp，应被拒绝（SetAllowedExts 未接线时会误放行）")
 		}
 	})
 
@@ -143,6 +148,52 @@ func TestSetAllowedExts(t *testing.T) {
 		}
 		if err := ValidateFile("evil.exe"); err == nil {
 			t.Error("即便配置里写了 .exe，也必须被硬编码黑名单拦下")
+		}
+	})
+}
+
+// TestSVGNotAllowedByDefault SVG 默认禁止上传，但可以由配置显式开启。
+//
+// 为什么两头都要钉：
+//   - **默认禁止**：`.svg` 可以内嵌 `<script>` 与 `<foreignObject>`。本地存储时
+//     `/uploads` 有 `UploadSecurity()` 的 CSP `sandbox` 兜着，但**对象存储部署下
+//     `GetURL()` 返回的是不经过后端的直链**，那层头不存在 → 上传者控制的同源文档
+//     = 存储型 XSS。所以它不该出现在默认白名单里。
+//   - **可显式开启**：它也不能进 `dangerousExts` 黑名单（黑名单不随配置放宽），
+//     否则有些确实需要矢量图标的部署就再没有出路了。要留一条**可逆**的口子
+//     （改一行 `upload.allow_exts`）。
+//
+// ⚠️ 本文件的用例会改写包级 `allowedExts`，因此**不能** t.Parallel。
+func TestSVGNotAllowedByDefault(t *testing.T) {
+	orig := allowedExts
+	defer func() {
+		allowedExtsMu.Lock()
+		allowedExts = orig
+		allowedExtsMu.Unlock()
+	}()
+
+	// 显式恢复到内置默认值（前面的用例会改它；它们各自都有 defer 还原，
+	// 这里再显式设一次，避免用例顺序变化时结论漂移）
+	allowedExtsMu.Lock()
+	allowedExts = orig
+	allowedExtsMu.Unlock()
+
+	t.Run("内置默认白名单不含 .svg", func(t *testing.T) {
+		if err := ValidateFile("logo.svg"); err == nil {
+			t.Error(".svg 不在默认白名单里，必须被拒绝（它能内嵌 <script>，而对象存储直链不过后端、没有 CSP sandbox）")
+		}
+	})
+
+	t.Run("不把 .svg 放进危险黑名单（否则配置永远加不回来）", func(t *testing.T) {
+		if dangerousExts[".svg"] {
+			t.Error(".svg 不应进危险扩展名黑名单 —— 黑名单不随配置放宽，那会让它无法被显式开启")
+		}
+	})
+
+	t.Run("配置里显式加回即可上传", func(t *testing.T) {
+		SetAllowedExts(".jpg,.svg")
+		if err := ValidateFile("logo.svg"); err != nil {
+			t.Errorf("配置显式允许 .svg 后应当放行: %v", err)
 		}
 	})
 }

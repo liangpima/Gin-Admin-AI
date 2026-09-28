@@ -71,8 +71,15 @@ func (s *Snowflake) NextID() int64 {
 }
 
 func GenerateID() int64 {
-	if sf == nil {
-		InitSnowflake(1)
-	}
+	// 用 sfOnce 而不是「先判空、再初始化」。
+	//
+	// 原写法是 `if sf == nil { InitSnowflake(1) }`：对全局变量 sf 的**读**
+	// 发生在 sfOnce.Do 之外，与 Do 内部对 sf 的**写**没有任何同步关系 ——
+	// 并发首次调用时构成数据竞争（-race 能报出来，而竞态下的表现是
+	// 拿到一个 nil 的 *Snowflake 并 panic，或两个 goroutine 各建一个实例）。
+	// 让 Once 独自负责初始化：Do 返回后读 sf 才有 happens-before 保证。
+	//
+	// 幂等：若 InitSnowflake 已经跑过，这里就是空操作，不会覆盖它的 machineID。
+	sfOnce.Do(func() { sf = &Snowflake{machineID: 1} })
 	return sf.NextID()
 }
