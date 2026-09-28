@@ -110,6 +110,123 @@ describe('loadData', () => {
   })
 })
 
+describe('loadData 的请求时序', () => {
+  /**
+   * 用手动 resolve 的 promise 造出「两次请求同时在飞」的局面。
+   *
+   * 为什么必须这样造：真实场景是「先发的慢、后发的快」，而默认的 mock 是
+   * 立即 resolve 的 —— 那样两次请求天然按顺序完成，缺陷根本不会显现。
+   * 这与「验证竞态缺陷必须先消除竞速」是同一条教训。
+   */
+  function deferredList() {
+    const resolvers: ((value: unknown) => void)[] = []
+    const list = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolvers.push(resolve)
+        }),
+    )
+    return { list, resolvers }
+  }
+
+  it('先发的请求后返回时，不得覆盖后发请求的结果', async () => {
+    const { list, resolvers } = deferredList()
+    const crud = useCrud<Row, Form>({
+      list: list as never,
+      createForm: () => ({ id: 0, name: '' }),
+      immediate: false,
+    })
+
+    const first = crud.loadData()
+    const second = crud.loadData()
+
+    // 后发的先返回（用户已经改了搜索条件再查一次）
+    resolvers[1]({ data: { list: [{ id: 2, name: '新条件的结果' }], total: 1 } })
+    await second
+
+    // 先发的此时才返回 —— 它带的是**旧条件**的数据，必须被丢弃
+    resolvers[0]({ data: { list: [{ id: 1, name: '旧条件的结果' }], total: 99 } })
+    await first
+
+    expect(crud.tableData.value).toEqual([{ id: 2, name: '新条件的结果' }])
+    // total 也必须来自最后一次请求，否则分页器页数会按旧条件算
+    expect(crud.total.value).toBe(1)
+  })
+
+  it('过期请求返回时不得复位 loading', async () => {
+    const { list, resolvers } = deferredList()
+    const crud = useCrud<Row, Form>({
+      list: list as never,
+      createForm: () => ({ id: 0, name: '' }),
+      immediate: false,
+    })
+
+    const first = crud.loadData()
+    const second = crud.loadData()
+
+    resolvers[0]({ data: { list: [], total: 0 } })
+    await first
+
+    // 用户正在等的第二次请求还没回来，转圈不能停
+    expect(crud.loading.value).toBe(true)
+
+    resolvers[1]({ data: { list: [], total: 0 } })
+    await second
+
+    expect(crud.loading.value).toBe(false)
+  })
+
+  it('过期请求不触发 afterLoad（树形页的下拉选项不能被旧数据重算）', async () => {
+    const { list, resolvers } = deferredList()
+    const afterLoad = vi.fn()
+    const crud = useCrud<Row, Form>({
+      list: list as never,
+      createForm: () => ({ id: 0, name: '' }),
+      afterLoad,
+      immediate: false,
+    })
+
+    const first = crud.loadData()
+    const second = crud.loadData()
+
+    resolvers[1]({ data: { list: [{ id: 2, name: '新' }], total: 1 } })
+    await second
+    resolvers[0]({ data: { list: [{ id: 1, name: '旧' }], total: 1 } })
+    await first
+
+    expect(afterLoad).toHaveBeenCalledTimes(1)
+    expect(afterLoad).toHaveBeenCalledWith([{ id: 2, name: '新' }])
+  })
+
+  it('每次请求各持一份序号，互不干扰', async () => {
+    // 反向对照：序号若写成模块级变量，B 页面的请求会让 A 页面正在飞的结果作废
+    const a = deferredList()
+    const b = deferredList()
+    const crudA = useCrud<Row, Form>({
+      list: a.list as never,
+      createForm: () => ({ id: 0, name: '' }),
+      immediate: false,
+    })
+    const crudB = useCrud<Row, Form>({
+      list: b.list as never,
+      createForm: () => ({ id: 0, name: '' }),
+      immediate: false,
+    })
+
+    const pendingA = crudA.loadData()
+    const pendingB = crudB.loadData()
+
+    a.resolvers[0]({ data: { list: [{ id: 1, name: 'A 页' }], total: 1 } })
+    b.resolvers[0]({ data: { list: [{ id: 2, name: 'B 页' }], total: 1 } })
+    await Promise.all([pendingA, pendingB])
+
+    expect(crudA.tableData.value).toEqual([{ id: 1, name: 'A 页' }])
+    expect(crudB.tableData.value).toEqual([{ id: 2, name: 'B 页' }])
+    expect(crudA.loading.value).toBe(false)
+    expect(crudB.loading.value).toBe(false)
+  })
+})
+
 describe('handleSearch', () => {
   it('回到第 1 页再查（否则第 3 页搜出 1 条会显示空列表）', async () => {
     const { crud, list } = setup()

@@ -127,6 +127,7 @@ import { ElMessage } from 'element-plus'
 import type { TreeInstance } from 'element-plus'
 import {
   getRoleList,
+  getRoleById,
   createRole,
   updateRole,
   deleteRole,
@@ -238,19 +239,56 @@ function handleAction(cmd: string, row: RoleItem) {
 
 async function handlePermission(row: RoleItem) {
   currentRoleId.value = row.id
-  checkedMenuIds.value = row.menuIds || []
+  permLoading.value = true
   try {
-    const res = await getMenuTree()
-    menuTree.value = res.data
+    // 必须同时取「菜单树」与「该角色已授权的 menuIds」。
+    // 早前只取菜单树、并把 checkedMenuIds 设为 row.menuIds —— 而列表接口
+    // 不返回该字段，于是勾选恒为空，用户点「确定」就会提交空数组，
+    // 把该角色已有的授权整体清空（静默的权限丢失）。
+    const [treeRes, roleRes] = await Promise.all([getMenuTree(), getRoleById(row.id)])
+    menuTree.value = treeRes.data ?? []
+
+    // 只回显**叶子**节点，父节点交给 el-tree 自行推导「全选/半选」。
+    //
+    // 原因：提交时写入的 menuIds 里同时含父节点（见 handlePermSubmit 合并了
+    // getHalfCheckedKeys），而 el-tree 在 check-strictly=false 下会把父节点的
+    // 选中状态**级联到它的全部子节点** —— 若把父 ID 一并回填，角色原本没有的
+    // 权限会被静默勾上，等于扩权。只填叶子，则「回显 → 提交」正好互为逆运算。
+    const leafIds = new Set(collectLeafIds(menuTree.value))
+    checkedMenuIds.value = (roleRes.data.menuIds ?? []).filter((id) => leafIds.has(id))
   } catch (err) {
-    // 菜单树取不到就没法分配权限，但仍要打开弹窗并给出空态，
-    // 否则用户点了「分配权限」没有任何反应，比看到空列表更困惑
-    console.warn('[role] 菜单树加载失败，权限分配将无菜单可选', err)
+    // 取不到就**不打开弹窗**：空树 + 空勾选一旦被提交，结果就是清空授权，
+    // 比「点了没反应」严重得多。给出明确提示让用户重试。
+    menuTree.value = []
+    checkedMenuIds.value = []
+    ElMessage.error('加载角色权限失败，请稍后重试')
+    console.warn('[role] 加载菜单树或角色授权失败', err)
+    return
+  } finally {
+    permLoading.value = false
   }
   permDialogVisible.value = true
 }
 
+/** 递归收集菜单树的叶子节点 ID（父节点的勾选状态由 el-tree 推导）。 */
+function collectLeafIds(nodes: MenuItem[], out: number[] = []): number[] {
+  for (const node of nodes) {
+    const children = node.children ?? []
+    if (children.length > 0) {
+      collectLeafIds(children, out)
+    } else {
+      out.push(node.id)
+    }
+  }
+  return out
+}
+
 async function handlePermSubmit() {
+  // 兜底：菜单树为空时提交出去等于清空授权，直接拦住
+  if (menuTree.value.length === 0) {
+    ElMessage.warning('菜单树未加载完成，请关闭弹窗后重试')
+    return
+  }
   permLoading.value = true
   try {
     const checkedKeys = menuTreeRef.value?.getCheckedKeys() || []

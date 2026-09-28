@@ -57,7 +57,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getDashboardStats, type DashboardStats } from '@/api/dashboard'
 
 const stats = ref<DashboardStats>({
@@ -90,6 +90,19 @@ const modules = [
   { title: '日志管理', desc: '操作与登录日志', icon: 'Document', colorClass: 'color-warning' },
 ]
 
+/**
+ * 计时器句柄统一登记，卸载时清掉。
+ *
+ * `animateCount` 的 `clearInterval` 只在 `current >= target`（动画正常跑完）
+ * 这一条路径上执行。若用户在 800ms 内离开页面（切路由、登出），
+ * 定时器会继续跑到结束，期间反复写一个已卸载组件的 ref ——
+ * 不报错、不清内存，属于典型的「卸载后仍在运行的副作用」。
+ *
+ * 页面对应 `/dashboard`，登录后必然访问，所以这条路径很容易被触发；
+ * 又因为它不产生任何可见症状，一直被忽略。
+ */
+const countTimers: ReturnType<typeof setInterval>[] = []
+
 function animateCount(target: number, index: number) {
   if (target === 0) {
     animatedValues.value[index] = 0
@@ -107,6 +120,7 @@ function animateCount(target: number, index: number) {
       animatedValues.value[index] = Math.floor(current)
     }
   }, 16)
+  countTimers.push(timer)
 }
 
 onMounted(async () => {
@@ -119,6 +133,11 @@ onMounted(async () => {
     // 统计加载失败时保持 0 值展示，页面其余部分仍然可用
     console.warn('[dashboard] 统计数据加载失败', err)
   }
+})
+
+onUnmounted(() => {
+  countTimers.forEach((t) => clearInterval(t))
+  countTimers.length = 0
 })
 </script>
 

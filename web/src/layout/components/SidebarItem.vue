@@ -27,6 +27,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { RouteRecordRaw } from 'vue-router'
+import { menuIndex, resolvePath as resolveChildPath } from './sidebarLogic'
 
 const props = defineProps<{
   item: RouteRecordRaw
@@ -40,12 +41,18 @@ const visibleChildren = computed(() => {
 
 const hasMultiChildren = computed(() => visibleChildren.value.length > 1)
 
-const menuPath = computed(() => {
-  if (visibleChildren.value.length === 1) {
-    return props.basePath || props.item.path || ''
-  }
-  return props.basePath || props.item.path || ''
-})
+/**
+ * 菜单项的 index。判定与拼接都放在 `sidebarLogic.ts` 里（有单测）：
+ * 单可见子节点时必须用**子路由解析后的路径**，不能是父路径 ——
+ * 否则「首页」永远不高亮（详见 sidebarLogic.ts 的注释）。
+ */
+const menuPath = computed(() =>
+  menuIndex(
+    props.basePath,
+    props.item.path,
+    visibleChildren.value.map((c) => c.path),
+  ),
+)
 
 const menuIcon = computed(() => {
   if (visibleChildren.value.length === 1) {
@@ -62,8 +69,6 @@ const menuTitle = computed(() => {
 })
 
 function resolvePath(childPath: string): string {
-  if (!childPath) return props.basePath || ''
-  if (childPath.startsWith('/')) return childPath
-  return props.basePath ? `${props.basePath}/${childPath}` : childPath
+  return resolveChildPath(props.basePath, childPath)
 }
 </script>

@@ -30,6 +30,7 @@ import { ref, shallowRef, watch, onBeforeUnmount } from 'vue'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 import type { IDomEditor, IToolbarConfig } from '@wangeditor/editor'
 import ImagePicker from '@/components/ImagePicker/index.vue'
+import { sanitizeHtml } from '@/utils/sanitize'
 
 const props = withDefaults(
   defineProps<{
@@ -49,7 +50,9 @@ const emit = defineEmits<{
 }>()
 
 const editorRef = shallowRef<IDomEditor>()
-const valueHtml = ref(props.modelValue)
+// 初始值也要净化：`props.modelValue` 直接来自接口（协议内容存的是原始 HTML），
+// 不净化就会在编辑器挂载时把 `<img src=x onerror=...>` 解析成真实 DOM → 立即执行
+const valueHtml = ref(sanitizeHtml(props.modelValue))
 const imagePickerVisible = ref(false)
 const videoPickerVisible = ref(false)
 

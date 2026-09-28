@@ -2,7 +2,9 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/x-icon" href="/images/logo.png" />
+    <!-- 指向实际存在的文件：此前写的是 logo.png，而 public/images/ 下只有
+         logo.jpg 与 media.png，导致 favicon 全站 404（控制台噪声 + 标签页无图标）。 -->
+    <link rel="icon" type="image/jpeg" href="/images/logo.jpg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Go-Admin</title>
   </head>

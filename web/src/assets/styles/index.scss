@@ -191,7 +191,13 @@ html.dark {
   // Tabs
   --el-tabs__item-hover-color: #e5eaf3;
   --el-tabs__item-active-color: var(--el-color-primary);
-  --el-tabs__nav-wrap: : after: #363637;
+  // el-tabs 的下划线是 ::after 伪元素，Element Plus 没有为它暴露独立变量
+  // （它走的是 --el-border-color-light），因此只能写规则、写不成变量。
+  // 此前这里是 `--el-tabs__nav-wrap: : after: #363637;` ——
+  // 把伪元素选择器塞进了变量名，是一条永远不生效的死声明。
+  .el-tabs__nav-wrap::after {
+    background-color: #363637;
+  }
 
   // Breadcrumb
   --el-breadcrumb__inner-text-color: #a3a6ad;

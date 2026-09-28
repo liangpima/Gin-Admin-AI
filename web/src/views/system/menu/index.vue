@@ -64,6 +64,17 @@
         <el-form-item label="菜单名称" prop="title">
           <el-input v-model="form.title" placeholder="请输入菜单名称" />
         </el-form-item>
+        <!--
+          路由名称（后端字段 name，binding:required）。它会被原样写进
+          Vue Router 的 route.name，必须**全局唯一**：重名时 vue-router 会
+          报 "Duplicate named routes definition"，后注册的覆盖前者的 name，
+          于是 router.push({ name }) 与 keep-alive 的 include 匹配都会串到别的页面上。
+          此前表单里没有这一项，而后端 required —— 新增菜单 100% 返回 400，
+          该页最核心的动作完全不可用（编辑不受影响，因为 Update 是 omitempty）。
+        -->
+        <el-form-item label="路由名称" prop="name">
+          <el-input v-model="form.name" placeholder="全局唯一，如 User、MemberAdd" />
+        </el-form-item>
         <el-form-item v-if="form.type !== 2" label="路由地址" prop="path">
           <el-input v-model="form.path" placeholder="请输入路由地址" />
         </el-form-item>
@@ -187,6 +198,7 @@ const {
 
 const formRules = {
   title: [{ required: true, message: '请输入菜单名称', trigger: 'blur' }],
+  name: [{ required: true, message: '请输入路由名称', trigger: 'blur' }],
 }
 
 /** MobileAction 的下拉分发：窄屏时操作收进「更多」，点击后按 label 回到原处理函数 */

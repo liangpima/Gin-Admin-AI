@@ -15,11 +15,17 @@ import { createPinia } from 'pinia'
 import { getSiteInfo } from './api/config'
 import { registerAppIcons } from './utils/icons'
 
-import './assets/styles/tokens/light.scss'
-import './assets/styles/tokens/dark.scss'
-import './assets/styles/tokens/_index.scss'
+// 样式入口只剩两份：
+//   · reset.scss —— 基础重置（a 的颜色除外，那条被 index.scss 覆盖，见该文件注释）
+//   · index.scss —— 全局变量与工具类（含 @include mobile 的移动端基线）
+//
+// ⚠️ 这里曾 import 过 tokens/{light,dark,_index}.scss 与 element-override.scss，
+// 但**四个文件都只剩注释**（内容早已被删空，只留下「using Element Plus defaults」
+// 这类说明），另有一个无人引用的 variables.scss。留着它们会误导后人以为
+// 项目存在一套 design token / 暗色主题体系，从而去「修」一个不存在的东西。
+// 已连同文件一并删除（2026-09-28）。要重新引入 token 体系时请新建文件，
+// 别复活这几个空壳。
 import './assets/styles/reset.scss'
-import './assets/styles/element-override.scss'
 import './assets/styles/index.scss'
 
 const app = createApp(App)

@@ -88,8 +88,12 @@
           </el-button>
         </el-form>
 
+        <!-- 此前这里写着「默认账号: admin / admin123」，与紧邻的注释
+             「不要预填任何默认账号密码」自相矛盾 —— 生产环境直接向所有
+             访问者公示默认口令（种子数据里 admin 走 casbin `*` 通配）。
+             部署方若未改口令，等于把后台入口贴在了登录页上。 -->
         <div class="login-form-footer">
-          <span>默认账号: admin / admin123</span>
+          <span>请使用管理员分配的账号登录</span>
         </div>
       </div>
     </div>

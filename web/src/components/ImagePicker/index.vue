@@ -25,7 +25,7 @@
           ref="fileInputRef"
           type="file"
           :accept="acceptFilter"
-          multiple
+          :multiple="multiple"
           style="display: none"
           @change="onFileInputChange"
         />
@@ -89,6 +89,7 @@ import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Check, VideoCamera } from '@element-plus/icons-vue'
 import { getFileList, uploadFile, type FileItem } from '@/api/file'
+import { partitionMediaFiles } from './logic'
 
 const props = withDefaults(
   defineProps<{
@@ -170,7 +171,8 @@ function handleSearch() {
 async function loadData() {
   loading.value = true
   try {
-    const mimeType = props.type === 'video' ? 'video' : props.type === 'image' ? 'image' : ''
+    // `type` 的联合类型只有 'image' | 'video'，因此这里不需要再兜底空串
+    const mimeType = props.type
     const res = await getFileList({
       name: searchName.value,
       mimeType,
@@ -191,23 +193,29 @@ async function onFileInputChange(e: Event) {
   const files = Array.from(input.files)
   input.value = ''
 
-  const maxSize = props.type === 'video' ? 50 * 1024 * 1024 : 10 * 1024 * 1024
-  const valid: File[] = []
-  for (const file of files) {
-    if (file.size > maxSize) {
-      ElMessage.error(`${file.name} 超过${props.type === 'video' ? '50MB' : '10MB'}`)
-      continue
-    }
-    valid.push(file)
+  // 体积与**类型**都校验（见 ./logic.ts 的说明）。
+  //
+  // 此前只校验体积：`accept` 属性只是浏览器的选择提示，用户可以改成
+  // 「所有文件」或直接把文件拖进来 —— 于是 `type='image'` 的图片选择器
+  // 能传上 `.html` / `.js`，落在可直链访问的 `/uploads/` 下，
+  // 成为存储型 XSS 的入口。
+  //
+  // ⚠️ 这只是体验优化，不是安全边界：攻击者可以直接 POST 上传接口。
+  // 真正的把关在服务端 pkg/upload.ValidateFile（扩展名白名单 + 危险名单）。
+  const { accepted, rejected } = partitionMediaFiles(files, props.type)
+
+  if (rejected.length > 0) {
+    // 逐条提示而不是只报条数：用户需要知道是哪个文件、为什么被拒
+    rejected.forEach((reason) => ElMessage.error(reason))
   }
-  if (valid.length === 0) return
+  if (accepted.length === 0) return
 
   uploading.value = true
   try {
-    for (const file of valid) {
+    for (const file of accepted) {
       await uploadFile(file)
     }
-    ElMessage.success(`成功上传 ${valid.length} 个文件`)
+    ElMessage.success(`成功上传 ${accepted.length} 个文件`)
     loadData()
   } catch {
     ElMessage.error('上传失败')

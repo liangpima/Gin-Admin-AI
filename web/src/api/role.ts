@@ -9,7 +9,9 @@ export interface RoleItem {
   status: number
   dataScope: number
   createdAt: string
-  // 角色已授权的菜单/按钮 ID，由后端在列表里带出，用于回显授权树
+  // 角色已授权的菜单/按钮 ID。**只有详情接口**（getRoleById）会带出，
+  // 列表接口不返回 —— 列表一页 10 条，逐条查关联表就是 10 次额外查询，
+  // 而列表渲染并不需要它。「分配权限」对话框靠 getRoleById 回显。
   menuIds?: number[]
 }
 

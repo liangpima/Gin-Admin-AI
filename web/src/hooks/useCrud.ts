@@ -114,7 +114,23 @@ export function useCrud<
   // 不必区分 form.value.xxx
   const form = reactive(createForm()) as F
 
+  /**
+   * 请求序号：只认**最后一次发出**的请求的结果。
+   *
+   * 没有它时会出现两类「不报错、但结果错」的现象，且用户看到的是哪一种取决于
+   * 网络时序 —— 因此很难复现、更难归因：
+   *   ① 旧响应覆盖新响应：快速连点搜索或翻页时，先发的请求可能后返回，
+   *      于是列表显示的是**上一次**条件的数据，而搜索框/页码已经是新的；
+   *   ② `loading` 被先完成的那次提前复位：表格停止转圈，但用户正在等的那次
+   *      请求其实还没回来，看起来像「查完了、就是没数据」。
+   *
+   * 必须放在 hook 作用域内而不是模块级：每个页面各持一份序号，
+   * 否则 A 页面的请求会让 B 页面正在飞的结果被丢弃。
+   */
+  let loadSeq = 0
+
   async function loadData() {
+    const seq = ++loadSeq
     loading.value = true
     try {
       const merged: Record<string, unknown> = { ...(query?.() ?? {}) }
@@ -126,6 +142,12 @@ export function useCrud<
       // 而 P 是调用方声明的强类型查询接口。页面侧因此不必再写 `as`，
       // 强转收敛到这一处（「新增搜索字段却忘了传」由页面标注的类型守住）。
       const res = await list(merged as unknown as P)
+
+      // 已经有更新的请求发出 → 本次结果整体作废。
+      // `afterLoad` 也要跳过：树形页面用它派生下拉选项，
+      // 用过期数据覆盖会连带把选项弄错（症状比列表错更隐蔽）。
+      if (seq !== loadSeq) return
+
       // 两种返回形状：分页 `{ list, total }` / 树形直接是数组
       const payload = res.data
       const rows = Array.isArray(payload) ? payload : payload.list
@@ -133,8 +155,10 @@ export function useCrud<
       total.value = Array.isArray(payload) ? payload.length : payload.total
       afterLoad?.(tableData.value)
     } finally {
-      // 失败时也要复位，否则表格会一直转圈（错误提示由拦截器负责）
-      loading.value = false
+      // 只有最后一次请求有资格复位 loading。
+      // 失败时也要复位，否则表格会一直转圈（错误提示由拦截器负责）；
+      // 但**过期请求**复位会让仍在飞的那次看起来已经结束 —— 见上面 ②。
+      if (seq === loadSeq) loading.value = false
     }
   }
 

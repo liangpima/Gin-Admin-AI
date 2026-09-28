@@ -23,10 +23,10 @@
           placeholder="搜索文件名"
           clearable
           style="width: 200px"
-          @keyup.enter="loadData"
-          @clear="loadData"
+          @keyup.enter="handleSearch"
+          @clear="handleSearch"
         />
-        <el-select v-model="sortOrder" style="width: 160px" @change="loadData">
+        <el-select v-model="sortOrder" style="width: 160px" @change="handleSearch">
           <el-option label="上传时间倒序" value="desc" />
           <el-option label="上传时间正序" value="asc" />
         </el-select>
@@ -198,11 +198,26 @@ function formatSize(bytes: number) {
   return (bytes / 1024 / 1024).toFixed(1) + ' MB'
 }
 
+/**
+ * 筛选 / 排序条件变化时从第一页重新加载。
+ *
+ * 必须重置页码：停在第 5 页再改条件时，结果集变小会让当前页直接落到
+ * 空列表上，用户看到的是「筛选之后什么都没有」——而实际只是页码越界了。
+ */
+function handleSearch() {
+  page.value = 1
+  loadData()
+}
+
 async function loadData() {
   loading.value = true
   try {
     const res = await getFileList({
       name: queryParams.name,
+      // sortOrder 必须真的传下去。此前它只绑在 <el-select> 上，
+      // 请求参数里却漏了这个字段 —— 于是排序选择器**完全无效**：
+      // 切换后重新请求了，但后端收到的仍是默认排序，界面毫无变化。
+      sortOrder: sortOrder.value,
       page: page.value,
       pageSize: pageSize.value,
     })
