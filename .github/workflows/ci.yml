@@ -106,7 +106,8 @@ jobs:
       #
       # 门槛为什么不设 100%、阈值怎么定、本项目有意划出了哪些测试边界，
       # 都写在 scripts/check-coverage.sh 的头部注释里。
-      # 调整阈值时必须同步更新 docs/review-fix-plan.md 里的实测值。
+      # 调整阈值时必须同步更新本地规划文档 docs/review-fix-plan.md 里的实测值
+      # （该文档按 .gitignore 不入库，只作过程记录）。
       #
       # -count=1 关掉测试结果缓存，否则改了代码也可能命中旧结果。
       # 用 `bash scripts/...` 而不是 `./scripts/...`：可执行位在 Windows

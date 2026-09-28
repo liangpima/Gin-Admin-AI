@@ -3,7 +3,9 @@
 # 包均覆盖率门槛。
 #
 # 口径：`go test -cover ./...` 输出里**每个包的百分比取算术平均**
-# （与 docs/review-fix-plan.md 一致）。用算术平均而不是「按语句总数加权」，
+# （与本地规划文档 docs/review-fix-plan.md 一致 —— 该文档按 .gitignore
+# 不入库，只作过程记录；口径本身以本脚本的实现为准）。
+# 用算术平均而不是「按语句总数加权」，
 # 是因为加权口径下小包（pkg/task 这类十几条语句的）补测试几乎没有体现，
 # 而它们恰恰是最容易补到 100%、性价比最高的部分。
 #
@@ -14,13 +16,13 @@
 # 为什么门槛不设 100%：覆盖率是「哪里没测到」的探照灯，不是目标函数。
 # 本项目已明确划出边界 —— 云存储后端（aliyun/tencent/minio）与真实出网的
 # 网关方法（Prepay/Refund/QueryTrade）不进单测，硬凑 100% 只能靠 mock 掉
-# 整个网络层，那样测的是 mock 而不是代码。理由详见
-# docs/review-fix-plan.md 的「覆盖率基线与边界」。
+# 整个网络层，那样测的是 mock 而不是代码。理由详见本地规划文档
+# docs/review-fix-plan.md 的「覆盖率基线与边界」（该文档不入库）。
 #
 # 阈值怎么定：取「当前实测值 - 1.5」左右。留缓冲是因为 CI 跑在
 # ubuntu-latest、本地跑在 Windows，个别涉及文件路径与换行的用例覆盖率
 # 可能有一两个点的差异，卡在实测值上会让 CI 随机变红。
-# **调整阈值时必须同步更新 docs/review-fix-plan.md 里的实测值**，
+# **调整阈值时必须同步更新本地规划文档 docs/review-fix-plan.md 里的实测值**，
 # 否则阈值和文档会各说各话。
 #
 # 用法：
@@ -84,6 +86,7 @@ if awk -v a="$avg" -v t="$THRESHOLD" 'BEGIN { exit (a < t) }'; then
 else
   echo "❌ 包均覆盖率 ${avg}% 低于门槛 ${THRESHOLD}%。" >&2
   echo "   新增生产代码请同时补测试。若确需下调门槛，请在" >&2
-  echo "   docs/review-fix-plan.md 里写清原因，而不是只改这个数字。" >&2
+  echo "   本地规划文档 docs/review-fix-plan.md（不入库）里写清原因，" >&2
+  echo "   而不是只改这个数字。" >&2
   exit 1
 fi

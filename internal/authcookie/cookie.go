@@ -55,7 +55,8 @@ const (
 	// 为什么必须额外下发它：access / refresh token 都是 HttpOnly，JS 读不到 ——
 	// 于是前端失去了「本地有没有凭据」这个判断依据。若不做补偿，
 	// 路由守卫会退化成「永远判定未登录 → 死循环跳 /login」
-	// （docs/plan-p3-optional.md 的 B.2 第 ① 条讲的就是这件事）。
+	// （本地规划文档 docs/plan-p3-optional.md 的 B.2 第 ① 条讲的就是这件事；
+	// 该文档按 .gitignore 不入库，此处只作指引）。
 	//
 	// 为什么它可以**不是** HttpOnly：它不含任何凭据，读走或伪造都没有价值 ——
 	// 伪造它最多让前端多发一次 /auth/userInfo，随后 401 回来清会话。
