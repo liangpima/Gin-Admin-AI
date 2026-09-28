@@ -10,11 +10,11 @@
     <template v-if="isDesktop">
       <el-button
         v-for="action in actions"
-        :key="action.label"
+        :key="actionKey(action)"
         :type="action.type ?? 'primary'"
         link
         size="small"
-        @click="emit('command', action.label)"
+        @click="emit('command', actionKey(action))"
         >{{ action.label }}</el-button
       >
     </template>
@@ -23,7 +23,11 @@
         <el-icon class="action-trigger"><MoreFilled /></el-icon>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item v-for="action in actions" :key="action.label" :command="action.label">
+            <el-dropdown-item
+              v-for="action in actions"
+              :key="actionKey(action)"
+              :command="actionKey(action)"
+            >
               <!-- 图标色由 type 派生，页面不用再各写一遍 var(--el-color-xxx) -->
               <el-icon :style="{ color: `var(--el-color-${action.type ?? 'primary'})` }">
                 <component :is="action.icon" />
@@ -39,17 +43,10 @@
 
 <script setup lang="ts">
 import { useResponsive } from '@/hooks/useResponsive'
-
-interface Action {
-  label: string
-  /** 全局注册的图标组件名（须在 utils/icons.ts 的 appIcons 白名单里） */
-  icon: string
-  /** 语义色：桌面按钮的 type 与下拉图标的颜色都用它 */
-  type?: 'primary' | 'success' | 'warning' | 'danger' | 'info'
-}
+import { actionKey, type MobileActionItem } from './logic'
 
 defineProps<{
-  actions: Action[]
+  actions: MobileActionItem[]
 }>()
 
 const emit = defineEmits<{

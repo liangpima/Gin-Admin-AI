@@ -102,6 +102,11 @@ import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Document } from '@element-plus/icons-vue'
 import { getFileList, deleteFile, uploadFile, type FileItem } from '@/api/file'
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock'
+
+// 预览弹层打开时锁住整页滚动。解锁由 hook 在组件卸载时兜底，
+// 不依赖 closePreview() 一定被调用（切路由时它不会）。
+const { lock: lockBodyScroll, unlock: unlockBodyScroll } = useBodyScrollLock()
 
 const loading = ref(false)
 const tableData = ref<FileItem[]>([])
@@ -128,12 +133,12 @@ function openPreview(item: FileItem) {
   viewerIndex.value = imageList.value.indexOf(item.url)
   viewerUrl.value = item.url
   showViewer.value = true
-  document.body.style.overflow = 'hidden'
+  lockBodyScroll()
 }
 
 function closePreview() {
   showViewer.value = false
-  document.body.style.overflow = ''
+  unlockBodyScroll()
 }
 
 function goPrev() {
@@ -161,6 +166,9 @@ onMounted(() => {
   loadData()
   document.addEventListener('keydown', onKeydown)
 })
+// 只摘键盘监听：body 滚动锁的解锁已由 useBodyScrollLock 在卸载时自动完成 ——
+// 早前解锁只写在 closePreview() 里，而切换路由时它不会被调用，
+// 于是预览打开着离开本页会让**整站滚动永久锁死**（刷新前不自愈）。
 onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 
 async function onFileInputChange(e: Event) {

@@ -106,10 +106,19 @@
 import { ref, computed } from 'vue'
 import { CircleCheck, CircleClose, Aim } from '@element-plus/icons-vue'
 import { getCaptcha, verifyCaptcha, type CaptchaPoint } from '@/api/captcha'
+import { useTimers } from '@/hooks/useTimers'
 
 const emit = defineEmits<{
   (e: 'success', token: string): void
 }>()
+
+/**
+ * 延时任务走 useTimers：本组件的定时器都安排在「用户可能已经离开」的时间点上
+ * （成功 0.7s 后关闭、失败 1.2s 后刷新），卸载时必须清掉 ——
+ * 否则在登录页点完验证码立刻切走，回调仍会跑：既发一次多余的 getCaptcha，
+ * 也写已经卸载组件的 ref（静默无效，不报错）。
+ */
+const { later } = useTimers()
 
 const visible = ref(false)
 const loading = ref(false)
@@ -241,20 +250,20 @@ async function verify() {
       verified.value = true
       emit('success', data.token)
       // 留一点时间让用户看到成功反馈再关闭
-      setTimeout(() => {
+      later(() => {
         visible.value = false
       }, 700)
     } else {
       result.value = 'fail'
       message.value = data.message || '验证失败'
-      setTimeout(() => {
+      later(() => {
         refresh()
       }, 1200)
     }
   } catch {
     result.value = 'fail'
     message.value = '验证请求失败'
-    setTimeout(() => {
+    later(() => {
       refresh()
     }, 1200)
   }

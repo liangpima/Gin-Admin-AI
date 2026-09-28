@@ -58,17 +58,10 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { getDashboardStats, type DashboardStats } from '@/api/dashboard'
+import { getDashboardStats } from '@/api/dashboard'
 
-const stats = ref<DashboardStats>({
-  userCount: 0,
-  roleCount: 0,
-  menuCount: 0,
-  deptCount: 0,
-  postCount: 0,
-  configCount: 0,
-  logCount: 0,
-})
+// 不额外持有一份 stats 副本：模板用的是 animatedValues（动画结束才等于真实值），
+// 早前那个 ref 只写不读 —— 既是死代码，也容易让人误以为界面读的是它。
 
 const animatedValues = ref<number[]>([0, 0, 0, 0])
 
@@ -126,7 +119,6 @@ function animateCount(target: number, index: number) {
 onMounted(async () => {
   try {
     const res = await getDashboardStats()
-    stats.value = res.data
     const values = [res.data.userCount, res.data.roleCount, res.data.menuCount, res.data.deptCount]
     values.forEach((v, i) => animateCount(v, i))
   } catch (err) {

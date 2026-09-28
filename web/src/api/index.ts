@@ -1,6 +1,7 @@
 import axios, { type AxiosInstance, type AxiosResponse, type AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 import { clearLoginFlag, CSRFHeaderName, getCsrfToken } from '@/utils/auth'
+import { describeNetworkError } from './networkError'
 import router from '@/router'
 
 /**
@@ -132,7 +133,7 @@ service.interceptors.response.use(
     if (error.response?.status === 401) {
       return refreshAndReplay(error.config as RetryableConfig | undefined, error)
     }
-    ElMessage.error(error.message || '网络错误')
+    ElMessage.error(describeNetworkError(error))
     return Promise.reject(error)
   },
 )

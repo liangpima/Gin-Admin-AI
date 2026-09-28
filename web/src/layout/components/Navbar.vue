@@ -70,8 +70,17 @@ function toggleSidebar() {
 }
 
 async function handleLogout() {
-  await userStore.logout()
-  router.push('/login')
+  // 跳转放在 finally：logout() 目前内部已经吞掉了服务端登出失败
+  // （见 user store 的注释），但它仍可能在 clearSession（removeRoute 等）
+  // 上抛错 —— 那条路径上若不兜底，用户点了「退出」会**停在原页面且毫无提示**，
+  // 看起来就像按钮坏了。会话该清就清，跳转必须发生。
+  try {
+    await userStore.logout()
+  } catch (err) {
+    console.warn('[navbar] 登出过程中出现未预期的错误，仍按已登出处理', err)
+  } finally {
+    router.push('/login')
+  }
 }
 </script>
 
