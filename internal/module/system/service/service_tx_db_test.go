@@ -45,16 +45,21 @@ func failNthWriteTo(t *testing.T, db *gorm.DB, table string, n int) {
 	cbName := fmt.Sprintf("test:fail_nth_write_%d", failWriteSeq)
 
 	seen := 0
-	db.Callback().Create().Before("gorm:create").Register(cbName, func(tx *gorm.DB) {
+	_ = db.Callback().Create().Before("gorm:create").Register(cbName, func(tx *gorm.DB) {
 		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != table {
 			return
 		}
 		seen++
 		if n <= 0 || seen == n {
-			tx.AddError(fmt.Errorf("注入的写入失败: %s（第 %d 次）", table, seen))
+			// AddError 的返回值刻意忽略：注入失败后事务注定回滚，
+			// 这里没有可恢复的动作；lint 的 errcheck 由本注释说明
+			_ = tx.AddError(fmt.Errorf("注入的写入失败: %s（第 %d 次）", table, seen))
 		}
 	})
-	t.Cleanup(func() { db.Callback().Create().Remove(cbName) })
+	t.Cleanup(func() {
+		// Remove 只在回调已注册时返回 nil；清理路径无动作可做
+		_ = db.Callback().Create().Remove(cbName)
+	})
 }
 
 // seedRoleAndPost 造出一对可用的角色/岗位。

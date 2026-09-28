@@ -34,10 +34,12 @@ func countQueries(t *testing.T, fn func()) int {
 	cbName := fmt.Sprintf("test:count_query_%d", countQuerySeq)
 
 	var n int
-	db.Callback().Query().Before("gorm:query").Register(cbName, func(tx *gorm.DB) {
+	// Register / Remove 的返回值刻意忽略：闭包体不报错，注册必然成功；
+	// Remove 在清理路径上无动作可做（errcheck 由本注释说明）
+	_ = db.Callback().Query().Before("gorm:query").Register(cbName, func(tx *gorm.DB) {
 		n++
 	})
-	t.Cleanup(func() { db.Callback().Query().Remove(cbName) })
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(cbName) })
 
 	fn()
 	return n

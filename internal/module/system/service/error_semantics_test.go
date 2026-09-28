@@ -27,8 +27,8 @@ import (
 // 只断言其中一条的话，把 NotFoundOrErr 换成无条件 NewNotFoundError
 // （或反过来直接 return err）都能蒙混过关。
 
-// dbFailure 模拟数据库故障：既不是 ErrRecordNotFound，也不属于任何业务错误。
-var dbFailure = errors.New("dial tcp: connection refused")
+// errDBFailure 模拟数据库故障：既不是 ErrRecordNotFound，也不属于任何业务错误。
+var errDBFailure = errors.New("dial tcp: connection refused")
 
 // assertSystemError 断言 err 不是业务错误（即会走 500 分支），
 // 且原始错误没有被吞掉 —— 否则排查时连日志里都看不到原因。
@@ -56,7 +56,7 @@ func TestUpdateRolesErrorSemantics(t *testing.T) {
 
 	t.Run("数据库故障不得被说成用户不存在", func(t *testing.T) {
 		repo := &mockUserRepo{findByIDFn: func(tenantID, id uint) (*model.SysUser, error) {
-			return nil, dbFailure
+			return nil, errDBFailure
 		}}
 		svc := newTestUserService(repo)
 
@@ -76,7 +76,7 @@ func TestUpdateDeptErrorSemantics(t *testing.T) {
 
 	t.Run("数据库故障不得被说成用户不存在", func(t *testing.T) {
 		repo := &mockUserRepo{findByIDFn: func(tenantID, id uint) (*model.SysUser, error) {
-			return nil, dbFailure
+			return nil, errDBFailure
 		}}
 		svc := newTestUserService(repo)
 
@@ -95,7 +95,7 @@ func TestDeptDeleteErrorSemantics(t *testing.T) {
 	})
 
 	t.Run("数据库故障仍走 500", func(t *testing.T) {
-		repo := &mockDeptRepo{deleteFn: func(id uint) error { return dbFailure }}
+		repo := &mockDeptRepo{deleteFn: func(id uint) error { return errDBFailure }}
 		svc := &deptService{deptRepo: repo}
 
 		assertSystemError(t, svc.Delete(1, 9))
@@ -124,7 +124,7 @@ func TestConfigDeleteErrorSemantics(t *testing.T) {
 
 	t.Run("数据库故障仍走 500", func(t *testing.T) {
 		repo := newMockConfigRepo()
-		repo.deleteFn = func(id uint) error { return dbFailure }
+		repo.deleteFn = func(id uint) error { return errDBFailure }
 		svc := &configService{configRepo: repo}
 
 		assertSystemError(t, svc.Delete(9))
