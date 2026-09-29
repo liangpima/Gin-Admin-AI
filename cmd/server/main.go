@@ -15,6 +15,7 @@ import (
 	"go-admin/internal/cache"
 	"go-admin/internal/database"
 	"go-admin/internal/logger"
+	"go-admin/internal/metrics"
 	"go-admin/internal/middleware"
 	"go-admin/internal/module/system/service"
 	"go-admin/pkg/task"
@@ -88,6 +89,11 @@ func main() {
 		fatal("初始化数据库失败: %v", err)
 	}
 
+	// 把连接池统计交给指标包（db_pool_* gauge，15s 刷新一次）
+	if sqlDB, err := database.DB.DB(); err == nil {
+		metrics.SetDBPool(sqlDB)
+	}
+
 	// Redis 是**必需**依赖，不可降级：它承载 refresh token 存储、token 黑名单、
 	// 登录失败限频、验证码与角色缓存。登录流程本身就会写 refresh token，
 	// Redis 不可用时登录直接失败；若这里只告警而继续启动，
@@ -157,6 +163,20 @@ func main() {
 		logger.Log.Infof("已注册日志清理任务：每天 03:00 清理 %d 天前的操作/登录日志", retentionDays)
 	}
 	task.Start()
+
+	// 指标端点挂在**独立端口**：/metrics 无鉴权（Prometheus 抓取端点的常态），
+	// 与业务端口隔离是防它进公网的最后一道线 —— 配置层 Validate 已禁止两者相同。
+	if config.Cfg.Server.MetricsPort > 0 {
+		metricsAddr := fmt.Sprintf(":%d", config.Cfg.Server.MetricsPort)
+		go func() {
+			logger.Log.Infof("指标端点启动在 %s/metrics（仅限内网/抓取器可达）", metricsAddr)
+			mux := http.NewServeMux()
+			mux.Handle("/metrics", metrics.Handler())
+			if err := http.ListenAndServe(metricsAddr, mux); err != nil && err != http.ErrServerClosed {
+				logger.Log.Errorf("指标端点异常退出: %v", err)
+			}
+		}()
+	}
 
 	addr := config.Cfg.Server.ListenAddr()
 	srv := &http.Server{

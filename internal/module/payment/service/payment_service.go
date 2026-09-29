@@ -10,6 +10,7 @@ import (
 
 	"go-admin/internal/common"
 	"go-admin/internal/logger"
+	"go-admin/internal/metrics"
 	"go-admin/internal/module/payment/model"
 	paymentRepo "go-admin/internal/module/payment/repository"
 	systemModel "go-admin/internal/module/system/model"
@@ -220,12 +221,14 @@ func (s *PaymentService) CloseOrder(tenantID uint, orderNo string) error {
 
 func (s *PaymentService) HandleNotify(channel string, result *PayNotifyResult) error {
 	if result == nil || result.OrderNo == "" {
+		metrics.IncPaymentNotify(metrics.NotifyRejected)
 		return fmt.Errorf("invalid notify result")
 	}
 
 	// 回调场景：不带 tenant_id 过滤（无法从外部请求获取租户信息）
 	order, err := s.orderRepo.FindByOrderNoForNotify(result.OrderNo)
 	if err != nil {
+		metrics.IncPaymentNotify(metrics.NotifyRejected)
 		return fmt.Errorf("order not found: %s", result.OrderNo)
 	}
 
@@ -238,11 +241,13 @@ func (s *PaymentService) HandleNotify(channel string, result *PayNotifyResult) e
 	if channel != "" && order.Channel != channel {
 		logger.Log.Errorf("[payment] 回调渠道与订单渠道不一致, 订单=%s 订单渠道=%s 回调渠道=%s",
 			result.OrderNo, order.Channel, channel)
+		metrics.IncPaymentNotify(metrics.NotifyRejected)
 		return fmt.Errorf("回调渠道与订单渠道不一致")
 	}
 
 	if order.Status == model.StatusPaid {
 		logger.Log.Infof("[payment] 订单 %s 已是已支付，跳过重复回调", result.OrderNo)
+		metrics.IncPaymentNotify(metrics.NotifyDuplicate)
 		return nil
 	}
 
@@ -257,6 +262,7 @@ func (s *PaymentService) HandleNotify(channel string, result *PayNotifyResult) e
 			// 金额不符属异常（可能是伪造回调或渠道串单），必须留在 Error 级便于告警
 			logger.Log.Errorf("[payment] 回调金额不匹配, 订单 %s 期望 %d 实际 %d",
 				result.OrderNo, order.Amount, result.Amount)
+			metrics.IncPaymentNotify(metrics.NotifyRejected)
 			return fmt.Errorf("支付金额不匹配")
 		}
 
@@ -270,6 +276,7 @@ func (s *PaymentService) HandleNotify(channel string, result *PayNotifyResult) e
 		// 避免因实例级锁不共享（每次请求新建 Service）导致的重复发货。
 		affected, err := s.orderRepo.MarkPaidIfPending(result.OrderNo, result.TradeNo, paidAt, result.RawData)
 		if err != nil {
+			metrics.IncPaymentNotify(metrics.NotifyRejected)
 			return err
 		}
 		if !affected {
@@ -290,19 +297,23 @@ func (s *PaymentService) HandleNotify(channel string, result *PayNotifyResult) e
 			latest, readErr := s.orderRepo.FindByOrderNoForNotify(result.OrderNo)
 			if readErr != nil {
 				// 回读失败时不能当成功 —— 我们无法确认这笔钱有没有落单
+				metrics.IncPaymentNotify(metrics.NotifyRejected)
 				return fmt.Errorf("回读订单失败（无法确认回调是否已入账）: %w", readErr)
 			}
 			if latest.Status == model.StatusPaid {
 				logger.Log.Infof("[payment] 订单 %s 已被并发回调处理，跳过", result.OrderNo)
+				metrics.IncPaymentNotify(metrics.NotifyDuplicate)
 				return nil
 			}
 			logger.Log.Errorf("[payment] 收到支付成功回调但订单不在待支付态, 订单=%s 当前状态=%d "+
 				"回调金额=%d 交易号=%s（渠道已收款，需人工核对：补单或原路退款）",
 				result.OrderNo, latest.Status, result.Amount, result.TradeNo)
+			metrics.IncPaymentNotify(metrics.NotifyRejected)
 			return fmt.Errorf("订单 %s 当前状态为 %d，无法标记为已支付", result.OrderNo, latest.Status)
 		}
 
 		logger.Log.Infof("[payment] 订单 %s 支付成功, trade_no: %s", result.OrderNo, result.TradeNo)
+		metrics.IncPaymentNotify(metrics.NotifySuccess)
 	}
 
 	return nil

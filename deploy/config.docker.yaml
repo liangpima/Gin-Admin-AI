@@ -19,6 +19,11 @@ server:
   mode: release
   read_timeout: 60
   write_timeout: 60
+  # Prometheus 指标端口的**独立**监听端口。0 = 关闭（默认）。
+  # /metrics 无鉴权且标签带路由维度，开启后必须保证该端口只对内网/抓取器可达，
+  # 绝不能透进公网（compose 里不 ports 映射、由抓取器走内网访问即可）。
+  metrics_port: 0
+
   # 请求体大小上限（MB），必须大于 upload.max_size（启动时 Validate 会校验）。
   # nginx 侧的 client_max_body_size 只在经过 nginx 时生效，而 nginx 的
   # proxy_pass 与后端端口并非同一层防护，这里再兜一层。

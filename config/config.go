@@ -222,6 +222,13 @@ type ServerConfig struct {
 	// 攻击者保持连接、每次只发几个字节的头，ReadTimeout 会被不断刷新，
 	// 连接可被无限占用。缺省（<=0）时由 Validate 填默认值。
 	ReadHeaderTimeout int `mapstructure:"read_header_timeout"`
+	// MetricsPort Prometheus 指标端点的**独立**监听端口。
+	//
+	// 必须独立于业务端口：/metrics 无鉴权，且标签带路由维度，
+	// 组合起来等同暴露内部拓扑与调用量分布。0 = 关闭（默认），
+	// 开启后部署侧必须保证该端口只对内网/抓取器可达
+	//（compose 内网、安全组或独立网卡），绝不能透进公网。
+	MetricsPort int `mapstructure:"metrics_port"`
 	// TrustedProxies 反向代理的 IP 或 CIDR 列表，决定 X-Forwarded-For 是否可信。
 	//
 	// 必须显式配置，且**默认空**：gin 默认信任所有代理头，于是 c.ClientIP()
@@ -383,6 +390,17 @@ func Validate() error {
 	if Cfg.Server.Port < 1 || Cfg.Server.Port > 65535 {
 		problems = append(problems, fmt.Sprintf(
 			"server.port 非法（%d），应在 1-65535 之间", Cfg.Server.Port))
+	}
+	// metrics_port 0 表示关闭（合法）；开启时必须是独立合法端口，
+	// 且**不得与业务端口相同** —— 相同端口会让无鉴权的 /metrics 进公网。
+	if Cfg.Server.MetricsPort < 0 || Cfg.Server.MetricsPort > 65535 {
+		problems = append(problems, fmt.Sprintf(
+			"server.metrics_port 非法（%d），应在 0-65535 之间（0=关闭）", Cfg.Server.MetricsPort))
+	}
+	if Cfg.Server.MetricsPort != 0 && Cfg.Server.MetricsPort == Cfg.Server.Port {
+		problems = append(problems, fmt.Sprintf(
+			"server.metrics_port（%d）不得与 server.port 相同：/metrics 无鉴权，"+
+				"必须挂独立端口且只对内网可达", Cfg.Server.MetricsPort))
 	}
 	if Cfg.Server.ReadTimeout <= 0 {
 		problems = append(problems,

@@ -10,6 +10,7 @@ import (
 	"go-admin/internal/cache"
 	"go-admin/internal/database"
 	"go-admin/internal/logger"
+	"go-admin/internal/metrics"
 	"go-admin/internal/middleware"
 	captchaController "go-admin/internal/module/captcha/controller"
 	memberController "go-admin/internal/module/member/controller"
@@ -151,6 +152,10 @@ func Setup(mode string) *gin.Engine {
 	// 而本中间件只需在所有业务中间件之前，所以顺序是这两者的唯一解。
 	// 上限取自 server.max_body_size，Validate 已强制它大于 upload.max_size。
 	r.Use(middleware.BodyLimitFromConfig())
+	// 指标中间件必须覆盖**全部**请求（含 413 / panic 兜成的 500），
+	// 因此紧跟 BodyLimit、先于 Recovery —— Recovery 把 panic 改写成 500，
+	// 那次响应也必须被计数。
+	r.Use(metrics.Middleware())
 	r.Use(middleware.Recovery())
 	r.Use(middleware.Logger())
 	r.Use(middleware.Cors())

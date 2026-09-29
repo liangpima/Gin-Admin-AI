@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"go-admin/internal/common"
 	"go-admin/internal/module/payment/model"
 )
@@ -1123,5 +1125,85 @@ func TestRefundRejectsUnsupportedChannel(t *testing.T) {
 	}
 	if got := repo.orders["ORDER_CH"].Status; got != model.StatusPaid {
 		t.Errorf("不支持渠道时状态不应被改动，实际 %d", got)
+	}
+}
+
+// TestPaymentNotifyMetricsWiring 支付回调的**指标接线**验证。
+//
+// HandleNotify 里有 11 个出口都接了 IncPaymentNotify —— 中间任何一个漏接，
+// 对应的失败路径就会退回「只有日志没有指标」（M7 的教训）。
+// 这里各走一条成功与拒绝路径，断言计数真的动了。
+func TestPaymentNotifyMetricsWiring(t *testing.T) {
+	familySum := func(t *testing.T, family, label string) float64 {
+		t.Helper()
+		families, err := prometheus.DefaultGatherer.Gather()
+		if err != nil {
+			t.Fatalf("gather 失败: %v", err)
+		}
+		var sum float64
+		for _, f := range families {
+			if f.GetName() != family {
+				continue
+			}
+			for _, m := range f.GetMetric() {
+				isTarget := false
+				for _, l := range m.GetLabel() {
+					if l.GetName() == "result" && l.GetValue() == label {
+						isTarget = true
+					}
+				}
+				if isTarget {
+					sum += m.GetCounter().GetValue()
+				}
+			}
+		}
+		return sum
+	}
+
+	repo := newMockRepo()
+	svc := newTestService(repo)
+	tenant := uint(1)
+
+	// ── 成功路径：金额一致 → success ──
+	if _, err := svc.CreateOrder(tenant, "METRIC-OK-1", "指标测试", "", 100, "wechat", "", "", ""); err != nil {
+		t.Fatalf("准备订单失败: %v", err)
+	}
+	paidAt := time.Now()
+	before := familySum(t, "goadmin_payment_notify_total", "success")
+	if err := svc.HandleNotify("wechat", &PayNotifyResult{
+		OrderNo: "METRIC-OK-1", Status: "success", Amount: 100, TradeNo: "T1", PaidAt: &paidAt,
+	}); err != nil {
+		t.Fatalf("成功回调不应报错: %v", err)
+	}
+	if after := familySum(t, "goadmin_payment_notify_total", "success"); after-before != 1 {
+		t.Errorf("成功回调应使 success 计数 +1，实际增量 %v", after-before)
+	}
+
+	// ── 拒绝路径：金额不符 → rejected ──
+	// 用**独立订单**：金额校验在「已是已支付」早退之后，
+	// 对已支付订单重发不符金额会被归为 duplicate 而不是 rejected
+	// —— 这本身是正确语义（重复通知先于金额校验），用例必须顺着它来。
+	if _, err := svc.CreateOrder(tenant, "METRIC-REJ-1", "金额不符", "", 100, "wechat", "", "", ""); err != nil {
+		t.Fatalf("准备订单失败: %v", err)
+	}
+	beforeR := familySum(t, "goadmin_payment_notify_total", "rejected")
+	if err := svc.HandleNotify("wechat", &PayNotifyResult{
+		OrderNo: "METRIC-REJ-1", Status: "success", Amount: 999, PaidAt: &paidAt,
+	}); err == nil {
+		t.Fatal("金额不符应报错")
+	}
+	if afterR := familySum(t, "goadmin_payment_notify_total", "rejected"); afterR-beforeR != 1 {
+		t.Errorf("金额不符应使 rejected 计数 +1，实际增量 %v", afterR-beforeR)
+	}
+
+	// ── 重复路径：重复通知 → duplicate ──
+	beforeD := familySum(t, "goadmin_payment_notify_total", "duplicate")
+	if err := svc.HandleNotify("wechat", &PayNotifyResult{
+		OrderNo: "METRIC-OK-1", Status: "success", Amount: 100, TradeNo: "T1", PaidAt: &paidAt,
+	}); err != nil {
+		t.Fatalf("重复回调应幂等 ACK: %v", err)
+	}
+	if afterD := familySum(t, "goadmin_payment_notify_total", "duplicate"); afterD-beforeD != 1 {
+		t.Errorf("重复回调应使 duplicate 计数 +1，实际增量 %v", afterD-beforeD)
 	}
 }

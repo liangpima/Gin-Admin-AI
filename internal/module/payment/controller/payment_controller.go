@@ -9,6 +9,7 @@ import (
 
 	"go-admin/internal/common"
 	"go-admin/internal/logger"
+	"go-admin/internal/metrics"
 	"go-admin/internal/module/payment/service"
 
 	"github.com/gin-gonic/gin"
@@ -220,6 +221,8 @@ func (ctl *PaymentController) WechatNotify(c *gin.Context) {
 		// 回传 err.Error() 等于把证书/商户配置等内部细节交出去。
 		// 渠道侧只需要知道「失败、请重试」，细节留在日志里。
 		logger.Log.Errorf("[pay-notify] wechat parse failed: %v", err)
+		// 解析失败计入 rejected：匿名伪造回调的规模只有指标能看见
+		metrics.IncPaymentNotify(metrics.NotifyRejected)
 		c.JSON(200, gin.H{"code": "FAIL", "message": "处理失败"})
 		return
 	}
@@ -260,6 +263,7 @@ func (ctl *PaymentController) AlipayNotify(c *gin.Context) {
 	result, err := gw.ParseNotify(body)
 	if err != nil {
 		logger.Log.Infof("[pay-notify] alipay parse failed: %v", err)
+		metrics.IncPaymentNotify(metrics.NotifyRejected)
 		c.String(200, "fail")
 		return
 	}

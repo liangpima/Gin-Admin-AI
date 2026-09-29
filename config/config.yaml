@@ -7,6 +7,11 @@ server:
   mode: debug
   read_timeout: 60
   write_timeout: 60
+  # Prometheus 指标端口的**独立**监听端口。0 = 关闭（默认）。
+  # /metrics 无鉴权且标签带路由维度，开启后必须保证该端口只对内网/抓取器可达，
+  # 绝不能透进公网（compose 里不 ports 映射、由抓取器走内网访问即可）。
+  metrics_port: 0
+
   # 请求体大小上限（MB）。必须**大于** upload.max_size，否则合法上传会被
   # 这一层直接拒绝（启动时 Validate 会校验并报错）。
   # 不限制时，已登录用户（以及未鉴权的支付回调）可用一个超大 body 吃光内存或临时盘。

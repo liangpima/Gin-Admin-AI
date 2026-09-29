@@ -20,6 +20,7 @@ import (
 	pkgAuth "go-admin/pkg/auth"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // 本文件是**端到端链路测试**（P1-4）：请求从真实 HTTP 进来，走完
@@ -219,6 +220,32 @@ func TestPaymentChainCreateOrderHappyPath(t *testing.T) {
 	// 字段且**不影响订单落库** —— 「下单」与「发起支付」解耦的正确表现。
 	if _, ok := data["payError"]; !ok {
 		t.Log("此环境无 WeChat 商户配置但响应无 payError —— 若网关配置意外可用请检查测试隔离")
+	}
+
+	// 指标中间件的**接线**断言：真实路由上的请求必须产生指标序列。
+	// 中间件自身的行为（计数/标签纪律）由 internal/metrics 单测覆盖，
+	// 这里验证的是「它真的挂在了 router.Setup 里」—— 漏挂是零症状缺陷。
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather 指标失败: %v", err)
+	}
+	found := false
+	for _, f := range families {
+		if f.GetName() != "goadmin_http_requests_total" {
+			continue
+		}
+		for _, m := range f.GetMetric() {
+			labels := map[string]string{}
+			for _, l := range m.GetLabel() {
+				labels[l.GetName()] = l.GetValue()
+			}
+			if labels["path"] == "/api/v1/system/pay/order" && labels["status"] == "200" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("指标中间件未接线：真实路由的 200 请求没有产生 http_requests_total 序列")
 	}
 }
 
