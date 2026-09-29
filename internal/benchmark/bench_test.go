@@ -49,6 +49,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -108,7 +109,7 @@ func setupBench() {
 		benchErr = fmt.Errorf("连接失败: %w", err)
 		return
 	}
-	defer bootstrap.Close()
+	defer func() { _ = bootstrap.Close() }()
 	if err := bootstrap.Ping(); err != nil {
 		benchErr = fmt.Errorf("连接失败: %w", err)
 		return
@@ -244,7 +245,7 @@ func explainPlan(t *testing.T, db *sql.DB, query string, args ...interface{}) (t
 	if err != nil {
 		t.Fatalf("EXPLAIN 失败: %v", err)
 	}
-	defer rs.Close()
+	defer func() { _ = rs.Close() }()
 
 	cols, err := rs.Columns()
 	if err != nil {
@@ -270,8 +271,8 @@ func explainPlan(t *testing.T, db *sql.DB, query string, args ...interface{}) (t
 		}
 		typ, key = get("type"), get("key")
 		extra = get("Extra")
-		n := get("rows")
-		fmt.Sscanf(n, "%d", &rows)
+		// rows 解析失败时保持 0 —— 它只用于日志展示，判定不依赖它
+		rows, _ = strconv.ParseInt(strings.TrimSpace(get("rows")), 10, 64)
 	}
 	return typ, key, rows, extra
 }
