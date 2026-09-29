@@ -235,16 +235,33 @@ func Setup(mode string) *gin.Engine {
 	captchaCtrl := captchaController.NewCaptchaController()
 
 	// 公开接口：无需登录
+	//
+	// 公开端点全部挂限流：登录防爆破（fail-closed，与登录失败限频同一开关
+	// security.login_fail_closed），验证码防刷，refresh 防高频换发。
+	// 维度是来源 IP（Auth 之前拿不到用户身份），依赖上方 SetTrustedProxies
+	// 已正确收紧，否则伪造 X-Forwarded-For 可换 IP 绕过。
+	loginRL := middleware.RateLimit(middleware.RateLimitOptions{
+		Name:       "login",
+		Limit:      10,
+		Window:     time.Minute,
+		FailClosed: config.Cfg.Security.IsLoginFailClosed(),
+	})
+	refreshRL := middleware.RateLimit(middleware.RateLimitOptions{
+		Name: "refresh", Limit: 30, Window: time.Minute,
+	})
 	auth := api.Group("/auth")
 	{
-		auth.POST("/login", authController.Login)
-		auth.POST("/refresh", authController.RefreshToken)
+		auth.POST("/login", loginRL, authController.Login)
+		auth.POST("/refresh", refreshRL, authController.RefreshToken)
 	}
 
 	api.GET("/site/info", configController.SiteInfo)
 
-	api.GET("/captcha/generate", captchaCtrl.Generate)
-	api.POST("/captcha/verify", captchaCtrl.Verify)
+	captchaRL := middleware.RateLimit(middleware.RateLimitOptions{
+		Name: "captcha", Limit: 30, Window: time.Minute,
+	})
+	api.GET("/captcha/generate", captchaRL, captchaCtrl.Generate)
+	api.POST("/captcha/verify", captchaRL, captchaCtrl.Verify)
 
 	authorized := api.Group("")
 	authorized.Use(middleware.Auth())
@@ -347,7 +364,10 @@ func Setup(mode string) *gin.Engine {
 			protected(system, http.MethodGet, "/file/:id", permFileList, fileController.FindByID)
 			protected(system, http.MethodDelete, "/file/:id", permFileDelete, fileController.Delete)
 
-			protected(system, http.MethodPost, "/pay/order", permPayOrderCreate, payController.CreateOrder)
+			// 下单是"创建类"接口的幂等样板：客户端带 Idempotency-Key 头，
+			// 重试（双击/网络超时重发）会重放首次响应而不是再建一笔订单。
+			// 不带头则完全透传，前端可渐进接入（见 middleware.Idempotency 注释）。
+			protected(system, http.MethodPost, "/pay/order", permPayOrderCreate, middleware.Idempotency(payController.CreateOrder))
 			protected(system, http.MethodGet, "/pay/order", permPayOrderList, payController.GetOrder)
 			protected(system, http.MethodPost, "/pay/order/close", permPayOrderClose, payController.CloseOrder)
 			protected(system, http.MethodPost, "/pay/order/refund", permPayOrderRefund, payController.RefundOrder)
@@ -386,8 +406,13 @@ func Setup(mode string) *gin.Engine {
 	}
 
 	// 支付回调：由支付平台发起，自行验签，不做登录鉴权
-	r.POST("/api/v1/pay/notify/wechat", payController.WechatNotify)
-	r.POST("/api/v1/pay/notify/alipay", payController.AlipayNotify)
+	// 回调端点公开可达，按 IP 限流兜住伪造流量打满连接池的突刺；
+	// fail-open——回调真身来自微信/支付宝，误拒的代价（丢单）大于限流失效。
+	notifyRL := middleware.RateLimit(middleware.RateLimitOptions{
+		Name: "pay-notify", Limit: 120, Window: time.Minute,
+	})
+	r.POST("/api/v1/pay/notify/wechat", notifyRL, payController.WechatNotify)
+	r.POST("/api/v1/pay/notify/alipay", notifyRL, payController.AlipayNotify)
 
 	// Swagger 文档仅在开发环境暴露
 	if mode != "release" {

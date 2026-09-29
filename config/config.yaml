@@ -86,9 +86,17 @@ cors:
     # 前端每次非 GET 请求都会带它（CSRF double-submit，见 internal/middleware/csrf.go）。
     # 自定义头会触发 CORS 预检，漏了它跨域部署下所有写操作都会被预检挡下。
     - "X-CSRF-Token"
+    # 幂等键（下单等创建类接口，见 internal/middleware/idempotency.go）。
+    # 同为自定义头会触发预检，漏了它跨域部署下带幂等键的请求全部被挡。
+    - "Idempotency-Key"
   expose_headers:
     - "Content-Length"
     - "Content-Disposition"
+    # 限流 429 附带的重试等待秒数（见 internal/middleware/ratelimit.go），
+    # 前端读它做退避重试；不在 ExposeHeaders 里跨域 JS 读到的是空串。
+    - "Retry-After"
+    # 幂等重放标记（同键重试返回首次响应时附加）。
+    - "Idempotent-Replay"
   allow_credentials: true
 
 security:

@@ -18,16 +18,20 @@ func Cors() gin.HandlerFunc {
 	}
 	if len(cfg.AllowHeaders) == 0 {
 		// X-CSRF-Token 必须在列表里：它由前端在每次非 GET 请求上携带，
-		// 而自定义头会触发 CORS 预检 —— 漏了它，跨域部署下预检失败，
+		// 而**自定义头本身**就会触发 CORS 预检 —— 漏了它，跨域部署下预检失败，
 		// 现象是「所有写操作都发不出去」，而同源部署（dev 走 Vite proxy、
 		// prod 走 nginx）根本不发预检，因此测不出来。
+		// Idempotency-Key 同理（幂等中间件的下单接口已启用）。
 		cfg.AllowHeaders = []string{
 			"Origin", "Content-Type", "Accept", "Authorization",
-			"X-Tenant-Id", "X-CSRF-Token",
+			"X-Tenant-Id", "X-CSRF-Token", "Idempotency-Key",
 		}
 	}
 	if len(cfg.ExposeHeaders) == 0 {
-		cfg.ExposeHeaders = []string{"Content-Length", "Content-Disposition"}
+		// Retry-After（限流 429 附带，前端读它做退避重试）与
+		// Idempotent-Replay（幂等重放标记）必须显式暴露：
+		// 不在 ExposeHeaders 里的响应头，跨域 JS 读到的永远是空串。
+		cfg.ExposeHeaders = []string{"Content-Length", "Content-Disposition", "Retry-After", "Idempotent-Replay"}
 	}
 
 	// 未配置来源白名单时的降级策略。
