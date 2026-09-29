@@ -69,13 +69,19 @@ go-admin/
 │   ├── common/                     # 统一响应/错误码/模型/分页
 │   ├── database/mysql.go           # MySQL 连接
 │   ├── logger/zap.go               # Zap 日志
-│   ├── middleware/                  # 7个中间件
-│   │   ├── auth.go                 # JWT 认证
+│   ├── middleware/                  # 13 个中间件
+│   │   ├── drain_body.go           # 响应前补读请求体（防连接重置）
+│   │   ├── body_limit.go           # 请求体大小上限
+│   │   ├── auth.go                 # JWT 认证（header/cookie 双读可配）
+│   │   ├── csrf.go                 # CSRF 防护（double-submit）
 │   │   ├── casbin.go               # RBAC 鉴权
+│   │   ├── ratelimit.go            # 接口限流（Redis 固定窗口）
+│   │   ├── idempotency.go          # 幂等键（Idempotency-Key 重放）
 │   │   ├── cors.go                 # 跨域处理
 │   │   ├── operation_log.go        # 操作日志
 │   │   ├── recovery.go             # 异常恢复
 │   │   ├── logger.go               # 请求日志
+│   │   ├── static.go               # /uploads 安全响应头
 │   │   └── tenant.go               # 多租户
 │   └── module/
 │       ├── system/                 # 系统管理（用户/角色/菜单/部门/岗位/配置/字典/日志/文件/协议）
@@ -182,8 +188,11 @@ Repository (数据层)
 ### 中间件顺序
 
 ```
-全局: Recovery → Logger → Cors → Tenant
-鉴权: Auth → CasbinAuth → OperationLog（仅受保护路由组）
+全局: DrainBody → BodyLimit → Metrics → Recovery → Logger → Cors → Tenant
+公开端点（按路由挂载）: RateLimit（登录 / refresh / 验证码 / 支付回调）
+受保护路由组: Auth → CSRF → CasbinAuth → OperationLog
+创建类接口（按路由挂载）: Idempotency（如 POST /system/pay/order）
+静态服务: /uploads → UploadSecurity（CSP 沙箱响应头）
 ```
 
 ### 前端架构
@@ -212,6 +221,12 @@ API 层: Axios 拦截器 + JWT Token 自动注入
 | 支付回调验签 | 微信平台证书 RSA + 支付宝签名验证 |
 | 支付金额校验 | 回调时比对订单金额，防止篡改 |
 | 开放重定向防护 | returnURL 协议和主机名校验 |
+| 请求体上限 | Content-Length 预检 + MaxBytesReader 双防线，超限 413 且不读 body |
+| CSRF 防护 | double-submit token，按凭证来源决定是否强制校验 |
+| 接口限流 | Redis 固定窗口，IP/用户双维度（登录 10次/分 fail-closed、验证码 30次/分、支付回调 120次/分），429 附 Retry-After |
+| 幂等键 | Idempotency-Key 头：同键重试重放首次响应、并发返回 409、5xx 不缓存可重试，防重复下单 |
+| 可信代理 | trusted_proxies 默认空，防伪造 X-Forwarded-For 绕过 IP 限频 |
+| 指标端口 | /metrics 独立端口（默认关闭），暴露 HTTP 时延 / 连接池 / 支付回调指标 |
 
 ## 功能模块
 

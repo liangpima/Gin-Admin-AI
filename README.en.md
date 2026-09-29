@@ -69,13 +69,19 @@ go-admin/
 │   ├── common/                     # Response / Errors / Models / Pagination
 │   ├── database/mysql.go           # MySQL connection
 │   ├── logger/zap.go               # Zap logging
-│   ├── middleware/                  # 7 middlewares
-│   │   ├── auth.go                 # JWT authentication
+│   ├── middleware/                  # 13 middlewares
+│   │   ├── drain_body.go           # Re-read request body before closing (prevents connection reset)
+│   │   ├── body_limit.go           # Request body size limit
+│   │   ├── auth.go                 # JWT authentication (header/cookie dual-read, configurable)
+│   │   ├── csrf.go                 # CSRF protection (double-submit)
 │   │   ├── casbin.go               # RBAC authorization
+│   │   ├── ratelimit.go            # Rate limiting (Redis fixed window)
+│   │   ├── idempotency.go          # Idempotency-Key replay protection
 │   │   ├── cors.go                 # CORS handling
 │   │   ├── operation_log.go        # Operation logging
 │   │   ├── recovery.go             # Panic recovery
 │   │   ├── logger.go               # Request logging
+│   │   ├── static.go               # /uploads security headers
 │   │   └── tenant.go               # Multi-tenant
 │   └── module/
 │       ├── system/                 # System management
@@ -181,8 +187,11 @@ Repository (Data Layer)
 ### Middleware Order
 
 ```
-Global: Recovery → Logger → Cors → Tenant
-Auth:   Auth → CasbinAuth → OperationLog (protected routes only)
+Global:      DrainBody → BodyLimit → Metrics → Recovery → Logger → Cors → Tenant
+Public endpoints (per-route): RateLimit (login / refresh / captcha / payment callbacks)
+Protected group: Auth → CSRF → CasbinAuth → OperationLog
+Create-type endpoints (per-route): Idempotency (e.g. POST /system/pay/order)
+Static serving: /uploads → UploadSecurity (CSP sandbox headers)
 ```
 
 ### Frontend Architecture
@@ -211,6 +220,12 @@ View Layer: Component-based development + Responsive layout
 | Payment Callback Verification | WeChat platform cert RSA + Alipay signature |
 | Payment Amount Verification | Callback amount validation against order |
 | Open Redirect Protection | returnURL protocol and hostname validation |
+| Request Body Limit | Content-Length precheck + MaxBytesReader double defense; oversized requests get 413 without reading the body |
+| CSRF Protection | Double-submit token, enforced based on credential source |
+| Rate Limiting | Redis fixed window, IP/user dual dimension (login 10/min fail-closed, captcha 30/min, payment callbacks 120/min); 429 with Retry-After |
+| Idempotency Key | Idempotency-Key header: same-key retries replay the first response, concurrent requests get 409, 5xx not cached and retryable — prevents duplicate orders |
+| Trusted Proxies | trusted_proxies empty by default, prevents forged X-Forwarded-For bypassing IP rate limiting |
+| Metrics Port | /metrics on a dedicated port (disabled by default), exposing HTTP latency / connection pool / payment callback metrics |
 
 ## Features
 
@@ -227,6 +242,8 @@ View Layer: Component-based development + Responsive layout
 | Data Dictionary | Dictionary types + data | `/api/v1/system/dict/*` |
 | Log Management | Operation + login logs | `/api/v1/system/log/*` |
 | File Management | Upload, preview, delete | `/api/v1/system/file/*` |
+| Agreement Management | User agreement / privacy policy | `/api/v1/system/agreement/*` |
+| Dashboard | Statistics overview | `/api/v1/dashboard/stats` |
 
 ### Payment
 
@@ -346,6 +363,90 @@ npm run dev
 - Username: `admin`
 - Password: `admin123`
 
+> ⚠️ **Change this password immediately after the first login.** These credentials are seeded by `sql/init.sql` and are known to anyone who has seen this project.
+
+## Deployment (Production)
+
+### Containerized Deployment (Recommended)
+
+Works on Linux servers without the Windows helper scripts:
+
+```bash
+cp .env.example .env            # Fill in MYSQL_PASSWORD / MYSQL_ROOT_PASSWORD / REDIS_PASSWORD / JWT_SECRET
+vi .env                         # These variables have NO default values; compose aborts if any is missing
+docker compose up -d --build
+docker compose ps               # Wait until mysql / app become healthy
+# Visit http://<server-ip>:8080 (port controlled by WEB_PORT in .env)
+```
+
+### Database Upgrades
+
+⚠️ **Do not run scripts under `sql/migrations/` manually one by one** — a missed one fails silently
+until some endpoint blows up with `Unknown column` (e.g. a table missing `tenant_id`).
+Use the built-in migration runner:
+
+```bash
+make migrate-status   # Show pending migrations (read-only, no SQL executed)
+make migrate          # Apply all unapplied migrations
+```
+
+For container deployments use the runner inside the image:
+
+```bash
+docker compose exec app /app/migrate -status
+docker compose exec app /app/migrate
+```
+
+The runner records applied versions in the `schema_migrations` table; re-running is safe.
+**Note it does not roll back on failure** — MySQL DDL commits implicitly, transactions cannot wrap it;
+therefore migration scripts must be idempotent, which is an existing convention of this project
+(check `information_schema` first, then act).
+
+See **[deploy/README.md](deploy/README.md)** for the full guide: service topology and exposed ports,
+database initialization and **upgrade migrations**, mandatory config checks, backup, health checks,
+troubleshooting, and a systemd-based setup when not using containers.
+
+> `deploy/validate.py` is an offline validation script (no Docker needed) that checks compose
+> reference integrity, whether `.dockerignore` accidentally excludes build-required directories,
+> and key nginx behaviors. Run it after changing deployment files:
+>
+> ```bash
+> pip install pyyaml          # the only dependency
+> python deploy/validate.py
+> ```
+
+### Without Containers
+
+```bash
+# Cross-compile (Go supports cross-platform builds; no Go needed on the target machine)
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o go-admin ./cmd/server
+
+# Frontend build (hand it to your existing nginx)
+cd web && npm ci && npm run build      # output in web/dist
+```
+
+⚠️ Path-like configs (`log.filename` / `upload.save_path` / `casbin.model_path`) are
+**relative to the working directory** and the app must be started from the project root.
+When deploying with systemd / supervisor, set `WorkingDirectory` explicitly — otherwise
+casbin fails to load and the service **refuses to start** (intentional: never serve
+traffic without authorization).
+
+Note: the Go backend **does not host the frontend pages**; it only serves `/api/v1`, `/uploads`, `/swagger`, `/health`.
+The frontend must be hosted by nginx which reverse-proxies `/api` and `/uploads`; see `deploy/nginx/default.conf`.
+`/uploads` must be proxied to the backend instead of mapped directly to the disk directory —
+the backend attaches `middleware.UploadSecurity()` there to add CSP sandbox headers;
+a direct disk mapping would turn whitelisted `.svg` files into same-origin stored-XSS vectors.
+
+### Health Checks
+
+| Endpoint | Purpose |
+|----------|---------|
+| `/health` | liveness — only checks the process is alive, **does not probe dependencies** (dependency flapping should not trigger container restarts) |
+| `/health/ready` | readiness — probes MySQL and Redis, returns **503** if either is down |
+
+Neither requires authentication and both return only `ok` / `down` without error details
+(avoiding leakage of internal topology).
+
 ## Configuration
 
 ### Environment Variables
@@ -366,9 +467,17 @@ cors:
     - "http://localhost:3000"
     - "http://localhost:5173"
   allow_methods: ["GET","POST","PUT","DELETE","OPTIONS","PATCH"]
-  allow_headers: ["Origin","Content-Type","Accept","Authorization","X-Tenant-Id"]
+  allow_headers: ["Origin","Content-Type","Accept","Authorization","X-Tenant-Id","X-CSRF-Token","Idempotency-Key"]
+  expose_headers: ["Content-Length","Content-Disposition","Retry-After","Idempotent-Replay"]
   allow_credentials: true
 ```
+
+> Custom request headers (`X-CSRF-Token`, `Idempotency-Key`) trigger CORS preflight —
+> a cross-origin deployment fails all writes if they are missing. Response headers
+> (`Retry-After`, `Idempotent-Replay`) are invisible to cross-origin JavaScript
+> unless listed in `expose_headers`. Same-origin deployments (Vite dev proxy /
+> nginx `/api` reverse proxy) never preflight, which is why misconfiguration
+> only surfaces when the frontend is moved to another domain.
 
 ### Payment Config (sys_config table)
 
