@@ -10,7 +10,14 @@ const (
 	// 与 CodeFileTooLarge(3001) 区分：那个是「单个文件超出 upload.max_size」，
 	// 这个是「整个请求体超出传输层上限」，来源不同、用户可采取的动作也不同。
 	CodePayloadTooLarge = 413
-	CodeInternalError   = 500
+	// CodeTooManyRequests 触发限流（ratelimit 中间件）。
+	// HTTP 状态码同为 429，并附带 Retry-After 头，调用方按秒数退避重试。
+	CodeTooManyRequests = 429
+	// CodeIdempotencyConflict 同一幂等键的请求仍在处理中（idempotency 中间件）。
+	// 不是「重复」，重复会重放首次响应；这里是首次还没处理完，
+	// 客户端应稍后用**同一个幂等键**重试以获取结果。
+	CodeIdempotencyConflict = 409
+	CodeInternalError       = 500
 
 	CodeUserNotFound      = 1001
 	CodeUserDisabled      = 1002
@@ -37,6 +44,8 @@ var ErrorCodeMessages = map[int]string{
 	CodeForbidden:          "没有权限",
 	CodeNotFound:           "资源不存在",
 	CodePayloadTooLarge:    "请求体过大",
+	CodeTooManyRequests:    "请求过于频繁，请稍后再试",
+	CodeIdempotencyConflict: "相同请求正在处理中，请稍后重试",
 	CodeInternalError:      "服务器内部错误",
 	CodeUserNotFound:       "用户不存在",
 	CodeUserDisabled:       "用户已被禁用",

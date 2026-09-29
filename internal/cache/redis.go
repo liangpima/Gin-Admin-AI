@@ -133,6 +133,17 @@ func Expire(ctx context.Context, key string, expiration time.Duration) error {
 	return c.Expire(ctx, key, expiration).Err()
 }
 
+// TTL 返回键的剩余存活时间，遵循 redis 原生语义：
+// 键不存在返回 -2，键存在但无 TTL 返回 -1。
+// 供限流中间件计算 Retry-After 使用。
+func TTL(ctx context.Context, key string) (time.Duration, error) {
+	c, err := client()
+	if err != nil {
+		return 0, err
+	}
+	return c.TTL(ctx, key).Result()
+}
+
 // IncrWindow 在固定时间窗口内自增计数，返回自增后的值（首次调用返回 1）。
 //
 // 窗口从**首次调用**起算，长度固定为 ttl，不做滑动续期。
