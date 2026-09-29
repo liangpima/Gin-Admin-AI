@@ -83,4 +83,5 @@ docs/code-review-*.md
 #      错误来源。进度以 `git log` 为准，代码里的注释才是权威说明。
 docs/review-fix-plan.md
 docs/plan-p3-optional.md
+docs/bench-100k.md
 docs/plan-framework-hardening.md

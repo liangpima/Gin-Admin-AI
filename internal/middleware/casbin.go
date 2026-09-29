@@ -63,6 +63,24 @@ func InitCasbin(modelPath string) error {
 	return SyncPoliciesFromRoleMenus()
 }
 
+// CurrentEnforcer 取当前生效的 enforcer（导出只读访问器）。
+// 供性能基准等「需要真实策略执行」的场景使用；业务代码不要绕过
+// CasbinAuth 直接调用它 —— 鉴权必须走中间件的统一路径。
+func CurrentEnforcer() *casbin.Enforcer {
+	return currentEnforcer()
+}
+
+// EnforceCurrent 在当前 enforcer 上执行一次四元组判定。
+// 与 CurrentEnforcer 一起构成「外部可用的只读权限判定」，
+// 供性能基准使用。
+func EnforceCurrent(sub, dom, obj, act string) (bool, error) {
+	e := currentEnforcer()
+	if e == nil {
+		return false, fmt.Errorf("enforcer 未初始化")
+	}
+	return e.Enforce(sub, dom, obj, act)
+}
+
 // currentEnforcer 取当前生效的 enforcer
 func currentEnforcer() *casbin.Enforcer {
 	return enforcerPtr.Load()

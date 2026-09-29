@@ -370,7 +370,10 @@ CREATE TABLE IF NOT EXISTS `pay_order` (
   UNIQUE KEY `uk_order_no` (`order_no`),
   KEY `idx_trade_no` (`trade_no`),
   KEY `idx_tenant_id` (`tenant_id`),
-  KEY `idx_status` (`status`),
+  -- 列表页主路径（租户+状态+软删过滤+COUNT 覆盖），由 P2-4 性能审计引入，
+  -- 实测十万级下整链路 44ms → 3.1ms；单列 idx_status 已被它取代（见迁移
+  -- 2026-09-29-pay-order-member-list-index.sql）
+  KEY `idx_tenant_status` (`tenant_id`, `status`, `deleted_at`),
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付订单表';
 
@@ -408,6 +411,8 @@ CREATE TABLE IF NOT EXISTS `pay_member` (
   UNIQUE KEY `uk_tenant_phone` (`tenant_id`, `phone`),
   UNIQUE KEY `uk_member_no` (`member_no`),
   KEY `idx_tenant_id` (`tenant_id`),
+  -- 列表页主路径（同 pay_order.idx_tenant_status，P2-4 引入，31ms → 7.9ms）
+  KEY `idx_tenant_status` (`tenant_id`, `status`, `deleted_at`),
   KEY `idx_level_id` (`level_id`),
   KEY `idx_wechat_openid` (`wechat_openid`),
   KEY `idx_deleted_at` (`deleted_at`)
