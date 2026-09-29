@@ -51,5 +51,11 @@
     "vite": "^6.0.5",
     "vitest": "^3.2.7",
     "vue-tsc": "^2.2.0"
-  }
+  },
+  "browserslist": [
+    "chrome >= 96",
+    "firefox >= 95",
+    "safari >= 15",
+    "edge >= 96"
+  ]
 }

@@ -77,6 +77,15 @@ fi
 
 echo "[backup] OK: $OUT（$SIZE 字节）"
 
+# ── 备份成功时间戳上报（可选：设 PUSHGATEWAY_URL 后生效）──
+# 供 Prometheus 的 GoAdminBackupMissing 告警（deploy/prometheus/goadmin-alerts.yml）
+# 判断「最近一次成功备份」—— 未配置则告警退化为 cron 邮件兜底
+if [ -n "${PUSHGATEWAY_URL:-}" ]; then
+  printf 'goadmin_backup_last_success_timestamp_seconds %s\n' "$(date +%s)" |
+    curl -s --max-time 10 --data-binary @- "$PUSHGATEWAY_URL/metrics/job/backup/instance/$(hostname)" \
+    && echo "[backup] 已上报备份时间戳到 Pushgateway"
+fi
+
 # ── 保留期清理 ──
 if [ "$RETENTION_DAYS" -gt 0 ]; then
   find "$BACKUP_DIR" -name "${DB_NAME}-*.sql.gz" -mtime +"$RETENTION_DAYS" -print -delete |

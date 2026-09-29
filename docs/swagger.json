@@ -967,6 +967,72 @@
                 }
             }
         },
+        "/member/{id}/erase": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会员"
+                ],
+                "summary": "匿名化注销会员（个人信息合规：删除权）",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "会员 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
+        "/member/{id}/export": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "会员"
+                ],
+                "summary": "导出会员个人信息",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "会员 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.Response"
+                        }
+                    }
+                }
+            }
+        },
         "/pay/notify/alipay": {
             "post": {
                 "description": "由支付宝平台发起，**自行验签、不做登录鉴权**；请求体是渠道原始报文。\n响应为纯文本 `success` 或 `fail`，不是统一 Response 结构。",

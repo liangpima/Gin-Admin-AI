@@ -80,6 +80,8 @@ const (
 	permMemberAdd    = "member:add"
 	permMemberEdit   = "member:edit"
 	permMemberDelete = "member:delete"
+	permMemberExport = "member:export"
+	permMemberErase  = "member:erase"
 
 	permMemberLevelList   = "member:level:list"
 	permMemberLevelAdd    = "member:level:add"
@@ -362,6 +364,9 @@ func Setup(mode string) *gin.Engine {
 				protected(member, http.MethodPut, "/status", permMemberEdit, memberCtrl.UpdateStatus)
 				protected(member, http.MethodPut, "/tags", permMemberEdit, memberCtrl.UpdateTags)
 				protected(member, http.MethodPut, "/visit", permMemberEdit, memberCtrl.UpdateLastVisit)
+				// P2-5 个人信息合规：导出（查询权/可携带权）与匿名化注销（删除权）
+				protected(member, http.MethodGet, "/:id/export", permMemberExport, memberCtrl.ExportMemberData)
+				protected(member, http.MethodPost, "/:id/erase", permMemberErase, memberCtrl.EraseMemberData)
 				protected(member, http.MethodGet, "/level/all", permMemberLevelList, memberCtrl.FindAllLevels)
 				protected(member, http.MethodGet, "/tag/all", permMemberTagList, memberCtrl.FindAllTags)
 

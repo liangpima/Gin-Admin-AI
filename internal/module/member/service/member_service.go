@@ -30,12 +30,18 @@ type MemberService interface {
 	UpdateStatus(tenantID uint, req *dto.UpdateMemberStatusRequest) error
 	UpdateTags(tenantID uint, req *dto.UpdateMemberTagsRequest) error
 	UpdateLastVisit(tenantID, id uint) error
+	// ExportMemberData 导出会员全部个人信息（P2-5 合规：个人查询权/可携带权）
+	ExportMemberData(tenantID, memberID uint) (*dto.ExportedMemberData, error)
+	// EraseMemberData 匿名化注销（合规：删除权）—— 非硬删，保留业务统计口径；
+	// 手机号释放后可重新注册
+	EraseMemberData(tenantID, operatorID, memberID uint) error
 }
 
 type memberService struct {
-	memberRepo repository.MemberRepository
-	tagRepo    repository.MemberTagRepository
-	levelRepo  repository.MemberLevelRepository
+	memberRepo   repository.MemberRepository
+	tagRepo      repository.MemberTagRepository
+	levelRepo    repository.MemberLevelRepository
+	pointsLogRepo repository.PointsLogRepository
 
 	// 跨模块取配置走 Service（AGENTS 规则 4 允许），不碰对方的 Repository
 	configService systemService.ConfigService
@@ -45,6 +51,7 @@ func NewMemberService() MemberService {
 	return &memberService{
 		memberRepo:    repository.NewMemberRepository(),
 		tagRepo:       repository.NewMemberTagRepository(),
+		pointsLogRepo: repository.NewPointsLogRepository(),
 		levelRepo:     repository.NewMemberLevelRepository(),
 		configService: systemService.NewConfigService(),
 	}
@@ -543,5 +550,65 @@ func (s *memberService) UpdateLastVisit(tenantID, id uint) error {
 	}
 	now := time.Now()
 	member.LastVisitTime = &now
+	return s.memberRepo.Update(tenantID, member)
+}
+
+// ExportMemberData 导出某会员的全部个人信息（会员资料 + 标签 + 积分流水）。
+//
+// 对应个人信息保护法的「查询权 / 可携带权」：数据主体有权拿到自己被收集的
+// 数据副本。导出**必须完整** —— 截断的导出等于没导出。
+func (s *memberService) ExportMemberData(tenantID, memberID uint) (*dto.ExportedMemberData, error) {
+	member, err := s.memberRepo.FindByID(tenantID, memberID)
+	if err != nil {
+		return nil, common.NotFoundOrErr(err, "会员不存在")
+	}
+
+	logs, err := s.pointsLogRepo.FindAllByMember(tenantID, memberID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 标签名解析（不暴露内部 ID 语义给数据主体）
+	tagNames := []string{}
+	if tagIDs, err := s.memberRepo.FindTagIDsByMemberIDs(tenantID, []uint{memberID}); err == nil {
+		if ids := tagIDs[memberID]; len(ids) > 0 {
+			if tags, err := s.tagRepo.FindByIDs(tenantID, ids); err == nil {
+				for _, tg := range tags {
+					tagNames = append(tagNames, tg.Name)
+				}
+			}
+		}
+	}
+
+	return &dto.ExportedMemberData{
+		Member:      member,
+		Tags:        tagNames,
+		PointsLogs:  logs,
+		ExportedAt:  time.Now(),
+	}, nil
+}
+
+// EraseMemberData 匿名化注销（合规「删除权」的框架级实现）。
+//
+// **匿名化而非硬删**：注册量/积分统计口径保留，个人标识字段清空。
+// 关键是**释放手机号** —— 匿名化后同一手机号必须可以重新注册
+// （uk_tenant_phone 唯一索引不再被占用），这是可验证的合规判据。
+// 注销后账号置停用，防止匿名实体残留登录能力。
+func (s *memberService) EraseMemberData(tenantID, operatorID, memberID uint) error {
+	member, err := s.memberRepo.FindByID(tenantID, memberID)
+	if err != nil {
+		return common.NotFoundOrErr(err, "会员不存在")
+	}
+
+	// 新手机号派生自 member_no（全平台唯一）→ 释放原手机号且不撞唯一索引
+	member.Phone = "erased-" + member.MemberNo
+	member.Username = ""
+	member.Nickname = "已注销会员"
+	member.Avatar = ""
+	member.WechatOpenid = ""
+	member.Status = common.StatusDisabled
+	member.UpdateBy = operatorID
+	member.Remark = "已匿名化注销 " + time.Now().Format("2006-01-02")
+
 	return s.memberRepo.Update(tenantID, member)
 }

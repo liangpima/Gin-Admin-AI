@@ -1,0 +1,61 @@
+# Prometheus 告警规则 —— 框架最低告警集（P0-2 收尾）
+
+# 配套指标定义见 `internal/metrics`。接线方式：
+# Prometheus 抓取 `server.metrics_port` 的 /metrics → 加载本规则文件 →
+# Alertmanager 路由到**企业微信群机器人**（用户口径 2026-09-29）。
+# Alertmanager 侧配置 wechat receiver（api_secret/corp_id/to_party），
+# 本框架不内置通知发送 —— 通知通道属于部署侧基础设施。
+
+groups:
+  - name: goadmin 资金安全
+    rules:
+      # 支付回调被拒（订单已关闭但钱已收 / 金额不符 / 渠道串单 / 解析失败）。
+      # 零星 1~2 次可能是伪造探测；**持续增长**就是资金问题，人工对账是唯一兜底。
+      - alert: GoAdminPaymentNotifyRejected
+        expr: increase(goadmin_payment_notify_total{result="rejected"}[10m]) > 3
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "支付回调被拒持续出现"
+          description: "10 分钟内 rejected 计数增长 {{ $value }} 次。可能：用户付了钱订单已关闭（需补单/退款）、伪造回调探测、渠道配置漂移。"
+
+  - name: goadmin 服务健康
+    rules:
+      # 5xx 错误率：服务端错误意味着数据没写进去，且前端只拿到通用文案
+      - alert: GoAdminServerErrorRate
+        expr: |
+          sum(rate(goadmin_http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(goadmin_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "5xx 错误率超过 5%（持续 5 分钟）"
+
+      # 连接池等待：wait_count 持续增长 = 池太小或查询太慢
+      # （P2-4 审计的教训：count 回表这类问题在等待队列里最先显形）
+      - alert: GoAdminDBPoolWaiting
+        expr: increase(goadmin_db_pool_wait_count_total[10m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "数据库连接池出现持续等待"
+          description: "10 分钟内等待连接 100+ 次。排查慢查询（EXPLAIN 审计见 internal/benchmark）或调大 max_open_conns。"
+
+      # 备份失败/缺失：backup.sh 成功后向 Pushgateway（PUSHGATEWAY_URL）
+      # 推送 goadmin_backup_last_success_timestamp_seconds；无推送（absent）
+      # 或时间戳过期（>25h）都说明备份断了。没部署 Pushgateway 时，
+      # 最低集退化为 cron 邮件兜底（backup.sh 退出码非 0 会写日志）。
+      - alert: GoAdminBackupMissing
+        expr: |
+          absent(goadmin_backup_last_success_timestamp_seconds)
+            or (time() - goadmin_backup_last_success_timestamp_seconds > 90000)
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "超过 25 小时没有成功的数据库备份"
+          description: "每日备份（02:30）应产出 runtime/backups/*.sql.gz。缺失 = 数据无退路。"
+EOF_MARKER_NOT_USED:

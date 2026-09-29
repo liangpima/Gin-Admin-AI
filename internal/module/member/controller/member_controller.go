@@ -240,3 +240,47 @@ func (ctl *MemberController) UpdateLastVisit(c *gin.Context) {
 	}
 	common.Success(c, nil)
 }
+
+// @Summary 导出会员个人信息
+// @Tags 会员
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "会员 ID"
+// @Success 200 {object} common.Response
+// @Router /member/{id}/export [get]
+func (ctl *MemberController) ExportMemberData(c *gin.Context) {
+	id, err := common.GetUintParam(c, "id")
+	if err != nil {
+		common.Error(c, common.CodeBadRequest, "参数错误")
+		return
+	}
+	tenantID := common.GetTenantID(c)
+	data, err := ctl.memberService.ExportMemberData(tenantID, id)
+	if err != nil {
+		common.FailWith(c, err)
+		return
+	}
+	common.Success(c, data)
+}
+
+// @Summary 匿名化注销会员（个人信息合规：删除权）
+// @Tags 会员
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "会员 ID"
+// @Success 200 {object} common.Response
+// @Router /member/{id}/erase [post]
+func (ctl *MemberController) EraseMemberData(c *gin.Context) {
+	id, err := common.GetUintParam(c, "id")
+	if err != nil {
+		common.Error(c, common.CodeBadRequest, "参数错误")
+		return
+	}
+	tenantID := common.GetTenantID(c)
+	operatorID := common.GetCurrentUserID(c)
+	if err := ctl.memberService.EraseMemberData(tenantID, operatorID, id); err != nil {
+		common.FailWith(c, err)
+		return
+	}
+	common.Success(c, nil)
+}

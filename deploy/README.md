@@ -346,3 +346,23 @@ crontab: 30 2 * * * /path/to/go-admin/scripts/backup.sh >> /var/log/go-admin-bac
 
 **没有恢复演练的备份不算备份**：`scripts/restore.md` 是演练步骤，
 每次改备份参数后必须重跑一遍并把耗时记录在文件末尾。
+
+## 最低告警集（P0-2 收尾，口径 2026-09-29：企业微信群机器人）
+
+指标采集（internal/metrics）+ Prometheus 抓取 `server.metrics_port` 后，
+加载 `deploy/prometheus/goadmin-alerts.yml` 即获得 4 条告警：
+
+| 告警 | 条件 | 级别 |
+|---|---|---|
+| GoAdminPaymentNotifyRejected | 回调被拒 10 分钟 >3 次 | critical |
+| GoAdminServerErrorRate | 5xx 占比 >5% 持续 5 分钟 | critical |
+| GoAdminDBPoolWaiting | 连接池等待 10 分钟 >100 次 | warning |
+| GoAdminBackupMissing | 备份缺失/超 25 小时 | critical |
+
+**通知到企业微信**：Prometheus → Alertmanager（route 到 wechat receiver，
+配置 corp_id / api_secret / to_party）→ 群机器人。通知通道是部署侧
+基础设施，框架不内置发送 —— 换钉钉/邮件只改 Alertmanager receiver。
+
+backup.sh 支持可选 `PUSHGATEWAY_URL` 环境变量：成功后推送
+`goadmin_backup_last_success_timestamp_seconds`，供 GoAdminBackupMissing
+判定；未配置时该告警退化为 cron 邮件兜底。

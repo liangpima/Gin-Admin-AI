@@ -1,6 +1,11 @@
 package dto
 
-import "go-admin/internal/common"
+import (
+	"time"
+
+	"go-admin/internal/common"
+	"go-admin/internal/module/member/model"
+)
 
 type CreateMemberRequest struct {
 	Username string `json:"username" binding:"max=64"`
@@ -67,25 +72,25 @@ type CreateMemberLevelRequest struct {
 	Status    int8    `json:"status" binding:"oneof=0 1"`
 }
 
-type UpdateMemberLevelRequest struct//
+type UpdateMemberLevelRequest struct //
 // 与 UpdateMemberRequest / UpdateRoleRequest 同一套约定：**部分更新**。
 // 数值字段与「可清空」字段用指针，以区分「未提供」与「显式设为 0 / 空串」——
 // 用值类型的话，oneof=0 1 这类校验会对缺省零值生效，把部分更新请求挡在门外
 // （角色与会员就各踩过一次，一个导致权限分配恒 400，一个把会员改成停用）。
 {
-	ID        uint     `json:"id" binding:"required"`
-	Name      string   `json:"name" binding:"omitempty,max=64"`
-	MinPoints *int64   `json:"minPoints"`
+	ID        uint   `json:"id" binding:"required"`
+	Name      string `json:"name" binding:"omitempty,max=64"`
+	MinPoints *int64 `json:"minPoints"`
 	// 折扣率仍用浮点：它在库里就是浮点列，改整数需要迁移，
 	// 且不参与金额计算（只作为展示与换算系数），风险低于改动面。
-	Discount  *float64 `json:"discount" binding:"omitempty,min=1,max=10"`
-	Icon      *string  `json:"icon" binding:"omitempty,max=256"`
-	Sort      *int     `json:"sort"`
-	Status    *int8    `json:"status" binding:"omitempty,oneof=0 1"`
+	Discount *float64 `json:"discount" binding:"omitempty,min=1,max=10"`
+	Icon     *string  `json:"icon" binding:"omitempty,max=256"`
+	Sort     *int     `json:"sort"`
+	Status   *int8    `json:"status" binding:"omitempty,oneof=0 1"`
 }
 
 type MemberLevelListRequest struct {
-	Name     string `json:"name" form:"name"`
+	Name string `json:"name" form:"name"`
 	// 分页参数统一内嵌：绑定与归一化走 common.BindPage
 	common.PageQuery
 }
@@ -97,7 +102,7 @@ type CreateMemberTagRequest struct {
 	Status int8   `json:"status" binding:"oneof=0 1"`
 }
 
-type UpdateMemberTagRequest struct//
+type UpdateMemberTagRequest struct //
 // 与 UpdateMemberRequest / UpdateRoleRequest 同一套约定：**部分更新**。
 // 数值字段与「可清空」字段用指针，以区分「未提供」与「显式设为 0 / 空串」——
 // 用值类型的话，oneof=0 1 这类校验会对缺省零值生效，把部分更新请求挡在门外
@@ -111,7 +116,7 @@ type UpdateMemberTagRequest struct//
 }
 
 type MemberTagListRequest struct {
-	Name     string `json:"name" form:"name"`
+	Name string `json:"name" form:"name"`
 	// 分页参数统一内嵌：绑定与归一化走 common.BindPage
 	common.PageQuery
 }
@@ -121,4 +126,13 @@ type PointsLogListRequest struct {
 	Type     int8 `json:"type" form:"type"`
 	// 分页参数统一内嵌：绑定与归一化走 common.BindPage
 	common.PageQuery
+}
+
+// ExportedMemberData 个人信息导出（P2-5 合规）。
+// 字段即该会员被收集的全部个人数据：资料、标签、积分流水。
+type ExportedMemberData struct {
+	Member     *model.Member     `json:"member"`
+	Tags       []string          `json:"tags"`
+	PointsLogs []model.PointsLog `json:"pointsLogs"`
+	ExportedAt time.Time         `json:"exportedAt"`
 }

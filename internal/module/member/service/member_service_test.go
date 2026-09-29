@@ -62,6 +62,7 @@ func newTestMemberService(t *testing.T) *memberService {
 		memberRepo:    repository.NewMemberRepository(),
 		tagRepo:       repository.NewMemberTagRepository(),
 		levelRepo:     repository.NewMemberLevelRepository(),
+		pointsLogRepo: repository.NewPointsLogRepository(),
 		configService: systemService.NewConfigService(),
 	}
 }

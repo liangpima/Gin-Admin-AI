@@ -281,7 +281,7 @@ func TestMemberRepositoryUpdate(t *testing.T) {
 	m.Nickname = "改名了"
 	m.Points = 500
 	m.Gender = 2
-	if err := repo.Update(m); err != nil {
+	if err := repo.Update(memberTenantA, m); err != nil {
 		t.Fatalf("更新失败: %v", err)
 	}
 
@@ -308,13 +308,13 @@ func TestMemberRepositoryFindByWechatOpenid(t *testing.T) {
 
 	mine := seedMemberForTest(t, memberTenantA, "13800000077", "000007", "甲租户")
 	mine.WechatOpenid = "openid-of-tenant-a"
-	if err := repo.Update(mine); err != nil {
+	if err := repo.Update(memberTenantA, mine); err != nil {
 		t.Fatalf("写入 openid 失败: %v", err)
 	}
 
 	theirs := seedMemberForTest(t, memberTenantB, "13800000088", "000008", "乙租户")
 	theirs.WechatOpenid = "openid-of-tenant-b"
-	if err := repo.Update(theirs); err != nil {
+	if err := repo.Update(memberTenantB, theirs); err != nil {
 		t.Fatalf("写入 openid 失败: %v", err)
 	}
 
@@ -354,19 +354,19 @@ func TestMemberRepositoryFindListFilters(t *testing.T) {
 
 	normal := seedMemberForTest(t, memberTenantA, "13900000001", "100001", "张三")
 	normal.LevelID, normal.Status = 1, 1
-	if err := repo.Update(normal); err != nil {
+	if err := repo.Update(memberTenantA, normal); err != nil {
 		t.Fatalf("准备数据失败: %v", err)
 	}
 
 	disabled := seedMemberForTest(t, memberTenantA, "13900000002", "100002", "李四")
 	disabled.LevelID, disabled.Status = 2, 0
-	if err := repo.Update(disabled); err != nil {
+	if err := repo.Update(memberTenantA, disabled); err != nil {
 		t.Fatalf("准备数据失败: %v", err)
 	}
 
 	other := seedMemberForTest(t, memberTenantB, "13900000003", "100003", "王五")
 	other.LevelID, other.Status = 1, 1
-	if err := repo.Update(other); err != nil {
+	if err := repo.Update(memberTenantB, other); err != nil {
 		t.Fatalf("准备数据失败: %v", err)
 	}
 

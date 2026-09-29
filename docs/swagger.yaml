@@ -1053,6 +1053,46 @@ paths:
       summary: 会员详情
       tags:
       - 会员
+  /member/{id}/erase:
+    post:
+      parameters:
+      - description: 会员 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 匿名化注销会员（个人信息合规：删除权）
+      tags:
+      - 会员
+  /member/{id}/export:
+    get:
+      parameters:
+      - description: 会员 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.Response'
+      security:
+      - BearerAuth: []
+      summary: 导出会员个人信息
+      tags:
+      - 会员
   /member/level:
     post:
       consumes:
