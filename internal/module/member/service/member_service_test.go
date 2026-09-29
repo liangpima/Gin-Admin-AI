@@ -722,7 +722,7 @@ func (s *stubMemberRepo) Create(*model.Member) error {
 	return s.createErr
 }
 
-func (s *stubMemberRepo) Update(*model.Member) error {
+func (s *stubMemberRepo) Update(_ uint, _ *model.Member) error {
 	s.updated++
 	return s.updateErr
 }

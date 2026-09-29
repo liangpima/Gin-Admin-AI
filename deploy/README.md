@@ -304,3 +304,45 @@ iframe 嵌套（点击劫持）。
 因此安全响应头集中放在 `deploy/nginx/snippets/security-headers.conf`，
 **任何自带 `add_header` 的 location 都必须 `include` 它** —— 校验脚本会强制这一点，
 且 `web/Dockerfile` 必须把该片段复制进镜像（否则 nginx 启动即失败）。
+
+## 迁移回滚与大表 DDL 规范（P2-2）
+
+### 回滚脚本约定
+
+- 每个迁移**应**配套 `<同版本名>.down.sql`，内容是逆向操作；
+  确实不可回滚的（如删列丢数据）在文件头标注「不可回滚，恢复需从备份」。
+- `cmd/migrate` 的 loader **显式跳过** `*.down.sql`（有单测钉住）——
+  回滚是人工决策，绝不随升级自动执行。手工执行：
+  `mysql -u<user> -p <db> < sql/migrations/<版本>.down.sql`
+- 样例见 `2026-09-29-pay-order-member-list-index.down.sql`
+  （含幂等写法与「回滚代价提示」——回滚前先确认症状确由该迁移引起）。
+
+### 大表 DDL 硬规则（MySQL 5.7，表超 ~10 万行就按此执行）
+
+1. **加索引**：默认 `ALTER TABLE ... ADD INDEX ...`，InnoDB 5.7 走
+   `ALGORITHM=INPLACE`（不锁写）。**先在基准库实测**（见
+   internal/benchmark），确认优化器真的会用它。
+2. **禁用**在大表上直接 `MODIFY COLUMN` 改列类型 —— 那是
+   `ALGORITHM=COPY`，锁全表 + 全量重写。等价改法：
+   加新列 → 回填 → 切换读写 → 下个版本删旧列。
+3. **先加列、再回填、最后改约束**：NOT NULL/唯一约束永远放在
+   数据补齐**之后**；回填用分批 `UPDATE ... LIMIT`（每批 1~5 千行，
+   批间 sleep），一条 UPDATE 回填百万行 = 长事务 = 主从延迟爆炸。
+4. **DDL 无法事务回滚**（隐式提交）：每个脚本必须幂等
+   （information_schema 判断 + PREPARE/EXECUTE，见现存迁移），
+   失败后**修正脚本重跑**，而不是"手动补一半"。
+5. **上线窗口**：任何大表 DDL 都安排在低峰，且执行前确认当天的
+   备份已成功（见下节）。
+
+## 备份与恢复（P2-3）
+
+```bash
+# 每日备份（cron 建议：02:30，避开 03:00 的日志清理任务）
+crontab: 30 2 * * * /path/to/go-admin/scripts/backup.sh >> /var/log/go-admin-backup.log 2>&1
+# 可配置环境变量：BACKUP_DIR（默认 runtime/backups）、RETENTION_DAYS（默认 7）、
+# MYSQL 容器/本机自适配；脚本自带「产物非空校验」，失败时退出码非 0
+# （正好可以接进监控/告警——见下文最低告警集）。
+```
+
+**没有恢复演练的备份不算备份**：`scripts/restore.md` 是演练步骤，
+每次改备份参数后必须重跑一遍并把耗时记录在文件末尾。

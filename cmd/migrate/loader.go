@@ -37,6 +37,12 @@ func loadMigrations(dir string) ([]migration, error) {
 			// 非 .sql 一律忽略：目录里可能放 README、.bak 备份等
 			continue
 		}
+		if strings.HasSuffix(e.Name(), ".down.sql") {
+			// 回滚脚本（P2-2 约定）由人工在需要时手工执行，
+			// 绝不能被当成向前迁移自动应用 —— 否则每次升级都会
+			// 把刚加的索引/列撤回去。跳过必须在这里显式做。
+			continue
+		}
 
 		version := strings.TrimSuffix(e.Name(), ".sql")
 		if err := validateVersion(version); err != nil {

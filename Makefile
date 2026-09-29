@@ -1,4 +1,4 @@
-.PHONY: build run clean lint test coverage check check-backend check-frontend check-deploy check-migrations check-secrets check-race check-vuln swagger migrate migrate-status deps help
+.PHONY: build run clean lint test coverage check check-backend check-frontend check-deploy check-migrations check-secrets check-race check-vuln swagger migrate migrate-status deps help swagger-baseline
 
 APP_NAME := go-admin
 BUILD_DIR := ./dist
@@ -145,6 +145,12 @@ migrate-status:
 
 swagger:
 	swag init -g cmd/server/main.go -o docs
+
+# 固化 swagger 基线（仅供**有意的**破坏性变更使用，见 scripts/check_breaking_changes.py）。
+# 流程：破坏性变更提交带 [BREAKING] → 合并后跑本目标 → 基线随变更同提交入库。
+swagger-baseline:
+	cp docs/swagger.json docs/swagger-baseline.json
+	@echo "swagger 基线已更新（docs/swagger-baseline.json），请与破坏性变更同一提交入库"
 
 deps:
 	go mod tidy

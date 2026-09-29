@@ -10,7 +10,7 @@ import (
 
 type MemberRepository interface {
 	Create(member *model.Member) error
-	Update(member *model.Member) error
+	Update(tenantID uint, member *model.Member) error
 	Delete(tenantID, id uint) error
 	FindByID(tenantID, id uint) (*model.Member, error)
 	FindByPhone(tenantID uint, phone string) (*model.Member, error)
@@ -36,7 +36,21 @@ func (r *memberRepository) Create(member *model.Member) error {
 	return database.DB.Create(member).Error
 }
 
-func (r *memberRepository) Update(member *model.Member) error {
+// Update 更新会员。
+//
+// 与 user/post 的 Update 同款收口（M15/M16 模式，本方法由 P2-1 机械校验
+// 抓出漏网）：先按租户确认记录归属，再保存 —— 直接 Save 会绕过租户维度，
+// 一旦调用方传入他租户的实体就会越权写入。
+func (r *memberRepository) Update(tenantID uint, member *model.Member) error {
+	var count int64
+	if err := common.TenantScope(database.DB.Model(&model.Member{}), tenantID).
+		Where("id = ?", member.ID).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return gorm.ErrRecordNotFound
+	}
 	return database.DB.Save(member).Error
 }
 

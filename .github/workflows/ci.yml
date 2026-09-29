@@ -131,6 +131,14 @@ jobs:
       # 用 `bash scripts/...` 而不是 `./scripts/...`：可执行位在 Windows
       # 检出后不一定保留，显式调 bash 两边都稳。
       # ────────────────────────────────────────────────────────
+      # 破坏性变更检测（P2-6）：删除接口/响应字段、改类型、必填新增，
+      # 必须在提交信息里带 [BREAKING] 才放行。故意破坏后跑
+      # `make swagger-baseline` 固化新基线。
+      - name: API 破坏性变更检测
+        run: |
+          git log -1 --format=%B > _commit_msg.txt
+          python3 scripts/check_breaking_changes.py docs/swagger-baseline.json docs/swagger.json _commit_msg.txt
+
       - name: 单元测试与覆盖率门槛
         run: bash scripts/check-coverage.sh -count=1
 

@@ -305,7 +305,7 @@ func (s *memberService) Update(req *dto.UpdateMemberRequest, operatorID, tenantI
 		}
 	}
 
-	if err := s.memberRepo.Update(member); err != nil {
+	if err := s.memberRepo.Update(tenantID, member); err != nil {
 		// 预检查与写入之间有并发窗口，唯一索引是最终裁判 —— 见 phoneConflictOrErr
 		return phoneConflictOrErr(err)
 	}
@@ -543,5 +543,5 @@ func (s *memberService) UpdateLastVisit(tenantID, id uint) error {
 	}
 	now := time.Now()
 	member.LastVisitTime = &now
-	return s.memberRepo.Update(member)
+	return s.memberRepo.Update(tenantID, member)
 }

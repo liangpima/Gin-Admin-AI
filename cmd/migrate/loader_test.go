@@ -294,3 +294,23 @@ func TestSplitStatementsOnRealMigrations(t *testing.T) {
 		})
 	}
 }
+
+// TestLoadMigrationsSkipsDownScripts 回滚脚本（*.down.sql，P2-2 约定）
+// 绝不能被当成向前迁移 —— 否则每次升级都会把刚加的索引/列撤回去。
+// 这条用例钉住 loader 的排除逻辑： down 文件被忽略，向前文件照常加载。
+func TestLoadMigrationsSkipsDownScripts(t *testing.T) {
+	dir := t.TempDir()
+	writeMigration(t, dir, "2026-01-01-add-thing.sql", "ALTER TABLE t ADD COLUMN c int;")
+	writeMigration(t, dir, "2026-01-01-add-thing.down.sql", "ALTER TABLE t DROP COLUMN c;")
+
+	got, err := loadMigrations(dir)
+	if err != nil {
+		t.Fatalf("loadMigrations 失败: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("应只加载 1 个向前迁移，实际 %d 个: %+v", len(got), got)
+	}
+	if strings.HasSuffix(got[0].version, ".down") {
+		t.Errorf("向前迁移不应是 down 文件: %s", got[0].version)
+	}
+}
