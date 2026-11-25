@@ -5,15 +5,19 @@
       **本次真正要渲染的**那条路由记录，两者在重定向/嵌套场景下可能不同。
       这里同时用它做 `:key` 与缓存名，避免出现「key 用 A、缓存名用 B」的错位。
     -->
+    <!--
+      `wrapForCacheName` 不是多余的：keep-alive 的 include 按**组件 name**
+      匹配，而 cachedViews 存的是**路由 name**，本项目所有视图文件都叫
+      index.vue（组件名恒为 "index"）—— 不包这一层，include 永远匹配不上，
+      缓存静默失效。详见 utils/keepAlive.ts 的注释。
+
+      这段注释必须放在 keep-alive **外面**：Vue 编译器要求 keep-alive
+      恰好一个子节点，而 dev 模式下 HTML 注释也会被编译成子节点（
+      X_KEEP_ALIVE_INVALID_CHILDREN）。
+    -->
     <router-view v-slot="{ Component, route: current }">
       <transition name="fade-transform" mode="out-in">
         <keep-alive :include="cachedViews">
-          <!--
-            `wrapForCacheName` 不是多余的：keep-alive 的 include 按**组件 name**
-            匹配，而 cachedViews 存的是**路由 name**，本项目所有视图文件都叫
-            index.vue（组件名恒为 "index"）—— 不包这一层，include 永远匹配不上，
-            缓存静默失效。详见 utils/keepAlive.ts 的注释。
-          -->
           <component :is="wrapForCacheName(Component, current.name)" :key="current.path" />
         </keep-alive>
       </transition>
